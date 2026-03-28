@@ -187,6 +187,36 @@ export const SessionRoutes = lazy(() =>
         return c.json(todos)
       },
     )
+    .delete(
+      "/:sessionID/todo",
+      describeRoute({
+        summary: "Clear session todos",
+        description: "Clear all todos associated with a specific session.",
+        operationId: "session.clearTodo",
+        responses: {
+          200: {
+            description: "Todos cleared",
+            content: {
+              "application/json": {
+                schema: resolver(z.boolean()),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      async (c) => {
+        const sessionID = c.req.valid("param").sessionID
+        Todo.update({ sessionID, todos: [] })
+        return c.json(true)
+      },
+    )
     .post(
       "/",
       describeRoute({
