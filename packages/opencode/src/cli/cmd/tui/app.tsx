@@ -546,6 +546,93 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
     },
     {
+      title: "Compact and clear conversation",
+      value: "session.compact_clear",
+      category: "Session",
+      slash: {
+        name: "clear-compact",
+      },
+      onSelect: async () => {
+        if (route.data.type !== "session") return
+
+        try {
+          const response = await sdk.client.session.messages({ sessionID: route.data.sessionID })
+          const messages = response.data || []
+
+          if (messages.length === 0) {
+            toast.show({
+              variant: "info",
+              message: "No messages to compact",
+            })
+            return
+          }
+
+          toast.show({
+            variant: "info",
+            message: "Creating summary...",
+            duration: 8000,
+          })
+
+          // Get current model for summarization
+          const currentModel = local.model.current()
+          if (!currentModel) {
+            toast.show({
+              variant: "error",
+              message: "No model selected. Please select a model first.",
+            })
+            return
+          }
+
+          // Create compaction summary
+          await sdk.client.session.summarize({
+            sessionID: route.data.sessionID,
+            providerID: currentModel.providerID,
+            modelID: currentModel.modelID,
+            auto: false,
+          })
+
+          // Get updated messages to find the summary (summarize waits for completion)
+          const updatedResponse = await sdk.client.session.messages({ sessionID: route.data.sessionID })
+          const updatedMessages = updatedResponse.data || []
+          const summaryMessage = updatedMessages.findLast((m: any) =>
+            m.info.role === "assistant" && m.info.summary === true
+          )
+
+          if (!summaryMessage) {
+            toast.show({
+              variant: "error",
+              message: "Failed to create summary. Use /clear instead.",
+            })
+            return
+          }
+
+          // Delete all messages except the summary
+          let deletedCount = 0
+          for (const msg of messages) {
+            if (msg.info.id === summaryMessage.info.id) continue
+            await sdk.client.session.deleteMessage({
+              sessionID: route.data.sessionID,
+              messageID: msg.info.id,
+            })
+            deletedCount++
+          }
+
+          // Refresh the message list
+          await sync.session.sync(route.data.sessionID)
+
+          toast.show({
+            variant: "info",
+            message: `Compacted: created summary and cleared ${deletedCount} message(s)`,
+          })
+        } catch (error) {
+          toast.show({
+            variant: "error",
+            message: `Failed to compact: ${error instanceof Error ? error.message : String(error)}`,
+          })
+        }
+      },
+    },
+    {
       title: "Switch model",
       value: "model.list",
       keybind: "model_list",
