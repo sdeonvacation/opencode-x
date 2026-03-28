@@ -530,6 +530,9 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
             })
           }
 
+          // Clear TODOs
+          await sdk.client.session.clearTodo({ sessionID: route.data.sessionID })
+
           // Refresh the message list
           await sync.session.sync(route.data.sessionID)
 
@@ -594,8 +597,8 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
           // Get updated messages to find the summary (summarize waits for completion)
           const updatedResponse = await sdk.client.session.messages({ sessionID: route.data.sessionID })
           const updatedMessages = updatedResponse.data || []
-          const summaryMessage = updatedMessages.findLast((m: any) =>
-            m.info.role === "assistant" && m.info.summary === true
+          const summaryMessage = updatedMessages.findLast(
+            (m: any) => m.info.role === "assistant" && m.info.summary === true,
           )
 
           if (!summaryMessage) {
@@ -616,6 +619,9 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
             })
             deletedCount++
           }
+
+          // Clear TODOs
+          await sdk.client.session.clearTodo({ sessionID: route.data.sessionID })
 
           // Refresh the message list
           await sync.session.sync(route.data.sessionID)
