@@ -416,6 +416,50 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
     },
     {
+      title: "Clear conversation",
+      value: "session.clear",
+      category: "Session",
+      slash: {
+        name: "clear",
+      },
+      onSelect: async () => {
+        if (route.data.type !== "session") return
+
+        try {
+          const response = await sdk.client.session.messages({ sessionID: route.data.sessionID })
+          const messages = response.data || []
+
+          if (messages.length === 0) {
+            toast.show({
+              variant: "info",
+              message: "No messages to clear",
+            })
+            return
+          }
+
+          for (const msg of messages) {
+            await sdk.client.session.deleteMessage({
+              sessionID: route.data.sessionID,
+              messageID: msg.info.id,
+            })
+          }
+
+          // Refresh the message list
+          await sync.session.sync(route.data.sessionID)
+
+          toast.show({
+            variant: "info",
+            message: `Cleared ${messages.length} message(s)`,
+          })
+        } catch (error) {
+          toast.show({
+            variant: "error",
+            message: `Failed to clear conversation: ${error instanceof Error ? error.message : String(error)}`,
+          })
+        }
+      },
+    },
+    {
       title: "Switch model",
       value: "model.list",
       keybind: "model_list",
