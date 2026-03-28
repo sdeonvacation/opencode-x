@@ -484,8 +484,8 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           if (last.role === "user") return "working"
           return last.time.completed ? "idle" : "working"
         },
-        async sync(sessionID: string) {
-          if (fullSyncedSessions.has(sessionID)) return
+        async sync(sessionID: string, opts?: { force?: boolean }) {
+          if (fullSyncedSessions.has(sessionID) && !opts?.force) return
           const workspace = project.workspace.current()
           const [session, messages, todo, diff] = await Promise.all([
             sdk.client.session.get({ sessionID, workspace }, { throwOnError: true }),

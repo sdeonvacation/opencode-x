@@ -3336,6 +3336,40 @@ export type SessionChildrenResponses = {
 
 export type SessionChildrenResponse = SessionChildrenResponses[keyof SessionChildrenResponses]
 
+export type SessionClearTodoData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/todo"
+}
+
+export type SessionClearTodoErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionClearTodoError = SessionClearTodoErrors[keyof SessionClearTodoErrors]
+
+export type SessionClearTodoResponses = {
+  /**
+   * Todos cleared
+   */
+  200: boolean
+}
+
+export type SessionClearTodoResponse = SessionClearTodoResponses[keyof SessionClearTodoResponses]
+
 export type SessionTodoData = {
   body?: never
   path: {

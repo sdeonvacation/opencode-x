@@ -682,4 +682,88 @@ describe("acp.agent event subscription", () => {
       },
     })
   })
+
+  test("compact usage update uses summary output tokens", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const { agent, sessionUpdates, stop, sdk } = createFakeAgent()
+        const cwd = "/tmp/opencode-acp-test"
+        const sessionId = await agent.newSession({ cwd, mcpServers: [] } as any).then((x) => x.sessionId)
+
+        sdk.session.summarize = async () => ({ data: true })
+        sdk.session.messages = async () => ({
+          data: [
+            {
+              info: {
+                id: "msg_user",
+                role: "user",
+                sessionID: sessionId,
+              },
+              parts: [
+                { id: "part_compact", type: "compaction", auto: false, messageID: "msg_user", sessionID: sessionId },
+              ],
+            },
+            {
+              info: {
+                id: "msg_summary",
+                role: "assistant",
+                sessionID: sessionId,
+                parentID: "msg_user",
+                providerID: "opencode",
+                modelID: "big-pickle",
+                summary: true,
+                finish: "stop",
+                error: undefined,
+                cost: 0,
+                tokens: {
+                  input: 180000,
+                  output: 1200,
+                  reasoning: 0,
+                  cache: { read: 0, write: 0 },
+                },
+              },
+              parts: [
+                { id: "part_text", type: "text", text: "summary", messageID: "msg_summary", sessionID: sessionId },
+              ],
+            },
+          ],
+        })
+        sdk.config.providers = async () => ({
+          data: {
+            providers: [
+              {
+                id: "opencode",
+                name: "opencode",
+                models: {
+                  "big-pickle": {
+                    id: "big-pickle",
+                    name: "big-pickle",
+                    limit: { context: 200000 },
+                  },
+                },
+              },
+            ],
+          },
+        })
+
+        await agent.prompt({
+          sessionId,
+          prompt: [{ type: "text", text: "/compact" }],
+        } as any)
+
+        const usage = sessionUpdates.findLast(
+          (u) => u.sessionId === sessionId && u.update.sessionUpdate === "usage_update",
+        )
+
+        expect(usage?.update.sessionUpdate).toBe("usage_update")
+        if (usage?.update.sessionUpdate === "usage_update") {
+          expect(usage.update.used).toBe(1200)
+          expect(usage.update.size).toBe(200000)
+        }
+        stop()
+      },
+    })
+  })
 })
