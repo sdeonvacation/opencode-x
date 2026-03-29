@@ -56,6 +56,9 @@ function createEventSource(client: RpcClient): EventSource {
         client.call("unsubscribe", { id })
       }
     },
+    changeDirectory: async (directory) => {
+      await client.call("changeDirectory", { directory })
+    },
   }
 }
 
