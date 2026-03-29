@@ -523,6 +523,14 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
             return
           }
 
+          // Calculate and preserve the cost before clearing
+          const currentCost = messages.reduce(
+            (sum, msg) => sum + (msg.info.role === "assistant" ? msg.info.cost : 0),
+            0,
+          )
+          const existingClearedCost = kv.get(`cleared_cost_${route.data.sessionID}`, 0)
+          kv.set(`cleared_cost_${route.data.sessionID}`, existingClearedCost + currentCost)
+
           for (const msg of messages) {
             await sdk.client.session.deleteMessage({
               sessionID: route.data.sessionID,
@@ -611,14 +619,22 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
 
           // Delete all messages except the summary
           let deletedCount = 0
+          let deletedCost = 0
           for (const msg of messages) {
             if (msg.info.id === summaryMessage.info.id) continue
+            if (msg.info.role === "assistant") {
+              deletedCost += msg.info.cost
+            }
             await sdk.client.session.deleteMessage({
               sessionID: route.data.sessionID,
               messageID: msg.info.id,
             })
             deletedCount++
           }
+
+          // Preserve the cost of deleted messages
+          const existingClearedCost = kv.get(`cleared_cost_${route.data.sessionID}`, 0)
+          kv.set(`cleared_cost_${route.data.sessionID}`, existingClearedCost + deletedCost)
 
           // Clear TODOs
           await sdk.client.session.clearTodo({ sessionID: route.data.sessionID })
