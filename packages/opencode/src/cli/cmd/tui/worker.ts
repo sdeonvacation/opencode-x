@@ -157,6 +157,17 @@ export const rpc = {
   async setWorkspace(input: { workspaceID?: string }) {
     startEventStream({ directory: process.cwd(), workspaceID: input.workspaceID })
   },
+  async changeDirectory(input: { directory: string }) {
+    // Dispose current instance first
+    if (eventStream.abort) eventStream.abort.abort()
+    await Instance.disposeAll()
+
+    // Change process working directory
+    process.chdir(input.directory)
+
+    // Start fresh event stream with new directory
+    startEventStream({ directory: input.directory })
+  },
   async shutdown() {
     Log.Default.info("worker shutting down")
     if (eventStream.abort) eventStream.abort.abort()

@@ -47,6 +47,9 @@ function createEventSource(client: RpcClient): EventSource {
     setWorkspace: (workspaceID) => {
       void client.call("setWorkspace", { workspaceID })
     },
+    changeDirectory: async (directory) => {
+      await client.call("changeDirectory", { directory })
+    },
   }
 }
 

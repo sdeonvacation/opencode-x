@@ -6,6 +6,7 @@ import { batch, onCleanup, onMount } from "solid-js"
 export type EventSource = {
   on: (handler: (event: Event) => void) => () => void
   setWorkspace?: (workspaceID?: string) => void
+  changeDirectory?: (directory: string) => Promise<void>
 }
 
 export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
@@ -19,13 +20,14 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
   }) => {
     const abort = new AbortController()
     let workspaceID: string | undefined
+    let currentDirectory = props.directory
     let sse: AbortController | undefined
 
     function createSDK() {
       return createOpencodeClient({
         baseUrl: props.url,
         signal: abort.signal,
-        directory: props.directory,
+        directory: currentDirectory,
         fetch: props.fetch,
         headers: props.headers,
         experimental_workspaceID: workspaceID,
@@ -112,7 +114,9 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       get workspaceID() {
         return workspaceID
       },
-      directory: props.directory,
+      get directory() {
+        return currentDirectory
+      },
       event: emitter,
       fetch: props.fetch ?? fetch,
       setWorkspace(next?: string) {
@@ -121,6 +125,14 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         sdk = createSDK()
         props.events?.setWorkspace?.(next)
         if (!props.events) startSSE()
+      },
+      async changeDirectory(directory: string) {
+        // Update the directory and recreate SDK client so API calls use new directory header
+        currentDirectory = directory
+        await props.events?.changeDirectory?.(directory)
+        sdk = createSDK()
+        // The event stream restart will emit server.instance.disposed
+        // which triggers sync.bootstrap() automatically
       },
       url: props.url,
     }
