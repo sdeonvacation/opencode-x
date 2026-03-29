@@ -5,7 +5,9 @@ import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { batch, onCleanup, onMount } from "solid-js"
 
 export type EventSource = {
-  subscribe: (handler: (event: GlobalEvent) => void) => Promise<() => void>
+  subscribe: (directory: string | undefined, handler: (event: Event) => void) => Promise<() => void>
+  setWorkspace?: (workspaceID?: string) => void
+  changeDirectory?: (directory: string) => Promise<void>
 }
 
 export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
@@ -18,13 +20,15 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     events?: EventSource
   }) => {
     const abort = new AbortController()
+    let workspaceID: string | undefined
+    let currentDirectory = props.directory
     let sse: AbortController | undefined
 
     function createSDK() {
       return createOpencodeClient({
         baseUrl: props.url,
         signal: abort.signal,
-        directory: props.directory,
+        directory: currentDirectory,
         fetch: props.fetch,
         headers: props.headers,
       })
@@ -46,7 +50,6 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       queue = []
       timer = undefined
       last = Date.now()
-      // Batch all event emissions so all store updates result in a single render
       batch(() => {
         for (const event of events) {
           emitter.emit("event", event)
@@ -56,11 +59,18 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
 
     const handleEvent = (event: GlobalEvent) => {
       queue.push(event)
-      const elapsed = Date.now() - last
 
+      if (event.type === "message.part.delta") {
+        if (timer) {
+          clearTimeout(timer)
+          timer = undefined
+        }
+        flush()
+        return
+      }
+
+      const elapsed = Date.now() - last
       if (timer) return
-      // If we just flushed recently (within 16ms), batch this with future events
-      // Otherwise, process immediately to avoid latency
       if (elapsed < 16) {
         timer = setTimeout(flush, 16)
         return
@@ -107,9 +117,26 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       get client() {
         return sdk
       },
-      directory: props.directory,
+      get workspaceID() {
+        return workspaceID
+      },
+      get directory() {
+        return currentDirectory
+      },
       event: emitter,
       fetch: props.fetch ?? fetch,
+      setWorkspace(next?: string) {
+        if (workspaceID === next) return
+        workspaceID = next
+        sdk = createSDK()
+        props.events?.setWorkspace?.(next)
+        if (!props.events) startSSE()
+      },
+      async changeDirectory(directory: string) {
+        currentDirectory = directory
+        await props.events?.changeDirectory?.(directory)
+        sdk = createSDK()
+      },
       url: props.url,
     }
   },

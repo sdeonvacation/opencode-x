@@ -83,6 +83,23 @@ export const rpc = {
   async reload() {
     await Config.invalidate(true)
   },
+  async subscribe(input: { directory: string | undefined }) {
+    return startEventStream(input.directory || process.cwd())
+  },
+  async unsubscribe(input: { id: string }) {
+    stopEventStream(input.id)
+  },
+  async changeDirectory(input: { directory: string }) {
+    // Dispose current instance first
+    if (eventStream.abort) eventStream.abort.abort()
+    await Instance.disposeAll()
+
+    // Change process working directory
+    process.chdir(input.directory)
+
+    // Start fresh event stream with new directory
+    startEventStream({ directory: input.directory })
+  },
   async shutdown() {
     Log.Default.info("worker shutting down")
 

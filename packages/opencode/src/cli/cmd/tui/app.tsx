@@ -46,6 +46,7 @@ import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
+import { DialogPrompt } from "./ui/dialog-prompt"
 import { ToastProvider, useToast } from "./ui/toast"
 import { ExitProvider, useExit } from "./context/exit"
 import { Session as SessionApi } from "@/session"
@@ -59,6 +60,7 @@ import { TuiConfigProvider, useTuiConfig } from "./context/tui-config"
 import { TuiConfig } from "@/config/tui"
 import { createTuiApi, TuiPluginRuntime, type RouteMap } from "./plugin"
 import { FormatError, FormatUnknownError } from "@/cli/error"
+import { Filesystem } from "@/util/filesystem"
 
 async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
   // can't set raw mode if not a TTY
@@ -845,6 +847,48 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       onSelect: () => {
         open("https://opencode.ai/docs").catch(() => {})
         dialog.clear()
+      },
+      category: "System",
+    },
+    {
+      title: "Change directory",
+      value: "app.goto",
+      slash: {
+        name: "goto",
+        aliases: ["cd"],
+      },
+      onSelect: async () => {
+        const path = await DialogPrompt.show(dialog, "Change directory", {
+          placeholder: "Enter path...",
+          value: sync.data.path.directory || process.cwd(),
+        })
+        dialog.clear()
+        if (!path) return
+
+        const resolved = path.startsWith("~") ? path.replace("~", process.env.HOME || "") : path
+
+        const valid = await Filesystem.isDir(resolved)
+
+        if (!valid) {
+          toast.show({
+            variant: "error",
+            message: `Invalid directory: ${path}`,
+          })
+          return
+        }
+
+        try {
+          await sdk.changeDirectory(resolved)
+          toast.show({
+            variant: "info",
+            message: `Changed to ${path}`,
+          })
+        } catch (e) {
+          toast.show({
+            variant: "error",
+            message: `Failed: ${e instanceof Error ? e.message : e}`,
+          })
+        }
       },
       category: "System",
     },

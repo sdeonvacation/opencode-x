@@ -48,6 +48,9 @@ function createEventSource(client: RpcClient): EventSource {
         handler(e)
       })
     },
+    changeDirectory: async (directory) => {
+      await client.call("changeDirectory", { directory })
+    },
   }
 }
 
