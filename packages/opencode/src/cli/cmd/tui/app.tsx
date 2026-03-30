@@ -124,6 +124,7 @@ async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
+import { DialogBtw } from "./component/dialog-btw"
 
 function rendererConfig(_config: TuiConfig.Info): CliRendererConfig {
   return {
@@ -831,6 +832,75 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         dialog.replace(() => <DialogHelp />)
       },
       category: "System",
+    },
+    {
+      title: "By the way",
+      value: "btw.ask",
+      slash: {
+        name: "btw",
+      },
+      onSelect: async () => {
+        const q = await DialogPrompt.show(dialog, "btw", {
+          placeholder: "Ask a quick question...",
+        })
+        if (!q?.trim()) {
+          dialog.clear()
+          return
+        }
+
+        const model = local.model.current()
+        if (!model) {
+          toast.show({
+            variant: "warning",
+            message: "Connect a provider to send prompts",
+            duration: 3000,
+          })
+          if (sync.data.provider.length === 0) {
+            dialog.replace(() => <DialogProviderList />)
+            return
+          }
+          dialog.clear()
+          return
+        }
+
+        const res = await sdk.client.session.create()
+        const sessionID = res.data?.id
+        if (!sessionID) {
+          toast.show({
+            variant: "error",
+            message: "Failed to create session",
+          })
+          dialog.clear()
+          return
+        }
+
+        const api = sdk.client.session as typeof sdk.client.session & {
+          complete: (input: {
+            sessionID: string
+            parts: { type: "text"; text: string }[]
+            small?: boolean
+            model?: { providerID: string; modelID: string }
+          }) => Promise<unknown>
+        }
+
+        api
+          .complete({
+            sessionID,
+            parts: [{ type: "text", text: q }],
+            small: true,
+            model,
+          })
+          .catch(() => {})
+
+        dialog.replace(
+          () => <DialogBtw sessionID={sessionID} question={q} />,
+          () => {
+            sdk.client.session.abort({ sessionID }).catch(() => {})
+            sdk.client.session.delete({ sessionID }).catch(() => {})
+          },
+        )
+      },
+      category: "Agent",
     },
     {
       title: "Open docs",

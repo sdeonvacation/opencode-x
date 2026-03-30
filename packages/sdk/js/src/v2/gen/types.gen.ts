@@ -3743,6 +3743,50 @@ export type PartUpdateResponses = {
 
 export type PartUpdateResponse = PartUpdateResponses[keyof PartUpdateResponses]
 
+export type SessionCompleteData = {
+  body?: {
+    model?: {
+      providerID: string
+      modelID: string
+    }
+    small?: boolean
+    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/complete"
+}
+
+export type SessionCompleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionCompleteError = SessionCompleteErrors[keyof SessionCompleteErrors]
+
+export type SessionCompleteResponses = {
+  /**
+   * Created message
+   */
+  200: {
+    info: AssistantMessage
+    parts: Array<Part>
+  }
+}
+
+export type SessionCompleteResponse = SessionCompleteResponses[keyof SessionCompleteResponses]
+
 export type SessionPromptAsyncData = {
   body?: {
     messageID?: string

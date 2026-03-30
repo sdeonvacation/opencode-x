@@ -159,6 +159,19 @@ export namespace SessionPrompt {
   })
   export type PromptInput = z.infer<typeof PromptInput>
 
+  export const CompleteInput = z.object({
+    sessionID: SessionID.zod,
+    model: z
+      .object({
+        providerID: ProviderID.zod,
+        modelID: ModelID.zod,
+      })
+      .optional(),
+    small: z.boolean().optional(),
+    parts: PromptInput.shape.parts,
+  })
+  export type CompleteInput = z.infer<typeof CompleteInput>
+
   export const prompt = fn(PromptInput, async (input) => {
     const session = await Session.get(input.sessionID)
     await SessionRevert.cleanup(session)
@@ -186,6 +199,226 @@ export namespace SessionPrompt {
     }
 
     return loop({ sessionID: input.sessionID })
+  })
+
+  export const complete = fn(CompleteInput, async (input) => {
+    assertNotBusy(input.sessionID)
+    const abort = start(input.sessionID)
+    if (!abort) throw new Session.BusyError(input.sessionID)
+    await using _ = defer(() => cancel(input.sessionID))
+
+    const session = await Session.get(input.sessionID)
+    await SessionRevert.cleanup(session)
+
+    const model = await iife(async () => {
+      if (input.model) {
+        return Provider.getModel(input.model.providerID, input.model.modelID)
+      }
+      const base = await lastModel(input.sessionID)
+      if (input.small ?? true) {
+        return (await Provider.getSmallModel(base.providerID)) ?? Provider.getModel(base.providerID, base.modelID)
+      }
+      return Provider.getModel(base.providerID, base.modelID)
+    })
+
+    const user = await createUserMessage({
+      sessionID: input.sessionID,
+      model: {
+        providerID: model.providerID,
+        modelID: model.id,
+      },
+      parts: input.parts,
+    })
+    await Session.touch(input.sessionID)
+
+    const agent = await Agent.get(user.info.agent)
+    if (!agent) throw new Error(`Agent not found: ${user.info.agent}`)
+
+    const assistant = (await Session.updateMessage({
+      id: MessageID.ascending(),
+      parentID: user.info.id,
+      role: "assistant",
+      mode: agent.name,
+      agent: agent.name,
+      variant: user.info.variant,
+      path: {
+        cwd: Instance.directory,
+        root: Instance.worktree,
+      },
+      cost: 0,
+      tokens: {
+        input: 0,
+        output: 0,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      },
+      modelID: model.id,
+      providerID: model.providerID,
+      time: {
+        created: Date.now(),
+      },
+      sessionID: input.sessionID,
+    })) as MessageV2.Assistant
+
+    await SessionStatus.set(input.sessionID, { type: "busy" })
+    let text: MessageV2.TextPart | undefined
+    const reason: Record<string, MessageV2.ReasoningPart> = {}
+
+    try {
+      const result = await LLM.stream({
+        user: user.info as MessageV2.User,
+        agent,
+        permission: session.permission,
+        abort,
+        sessionID: input.sessionID,
+        system: [],
+        messages: await MessageV2.toModelMessages(
+          await MessageV2.filterCompacted(MessageV2.stream(input.sessionID)),
+          model,
+        ),
+        tools: {},
+        model,
+        retries: 2,
+        small: input.small ?? true,
+      })
+
+      for await (const event of result.fullStream) {
+        if (event.type === "error") {
+          throw event.error
+        }
+
+        if (event.type === "reasoning-start") {
+          if (reason[event.id]) continue
+          reason[event.id] = {
+            id: PartID.ascending(),
+            messageID: assistant.id,
+            sessionID: assistant.sessionID,
+            type: "reasoning",
+            text: "",
+            time: { start: Date.now() },
+            metadata: event.providerMetadata,
+          }
+          await Session.updatePart(reason[event.id])
+          continue
+        }
+
+        if (event.type === "reasoning-delta") {
+          const part = reason[event.id]
+          if (!part) continue
+          part.text += event.text
+          if (event.providerMetadata) part.metadata = event.providerMetadata
+          await Session.updatePartDelta({
+            sessionID: part.sessionID,
+            messageID: part.messageID,
+            partID: part.id,
+            field: "text",
+            delta: event.text,
+          })
+          continue
+        }
+
+        if (event.type === "reasoning-end") {
+          const part = reason[event.id]
+          if (!part) continue
+          part.text = part.text.trimEnd()
+          part.time = { ...part.time, end: Date.now() }
+          if (event.providerMetadata) part.metadata = event.providerMetadata
+          await Session.updatePart(part)
+          delete reason[event.id]
+          continue
+        }
+
+        if (event.type === "text-start") {
+          text = {
+            id: PartID.ascending(),
+            messageID: assistant.id,
+            sessionID: assistant.sessionID,
+            type: "text",
+            text: "",
+            time: { start: Date.now() },
+            metadata: event.providerMetadata,
+          }
+          await Session.updatePart(text)
+          continue
+        }
+
+        if (event.type === "text-delta") {
+          if (!text) continue
+          text.text += event.text
+          if (event.providerMetadata) text.metadata = event.providerMetadata
+          await Session.updatePartDelta({
+            sessionID: text.sessionID,
+            messageID: text.messageID,
+            partID: text.id,
+            field: "text",
+            delta: event.text,
+          })
+          continue
+        }
+
+        if (event.type === "text-end") {
+          if (!text) continue
+          text.text = text.text.trimEnd()
+          text.time = { start: text.time?.start ?? Date.now(), end: Date.now() }
+          if (event.providerMetadata) text.metadata = event.providerMetadata
+          await Session.updatePart(text)
+          text = undefined
+          continue
+        }
+
+        if (event.type === "finish-step") {
+          const usage = Session.getUsage({
+            model,
+            usage: event.usage,
+            metadata: event.providerMetadata,
+          })
+          assistant.finish = event.finishReason
+          assistant.cost += usage.cost
+          assistant.tokens = usage.tokens
+          await Session.updatePart({
+            id: PartID.ascending(),
+            reason: event.finishReason,
+            messageID: assistant.id,
+            sessionID: assistant.sessionID,
+            type: "step-finish",
+            tokens: usage.tokens,
+            cost: usage.cost,
+          })
+          await Session.updateMessage(assistant)
+          continue
+        }
+      }
+    } catch (e) {
+      assistant.error = MessageV2.fromError(e, {
+        providerID: model.providerID,
+        aborted: abort.aborted,
+      })
+      Bus.publish(Session.Event.Error, {
+        sessionID: input.sessionID,
+        error: assistant.error,
+      })
+    }
+
+    if (text) {
+      text.time = { start: text.time?.start ?? Date.now(), end: Date.now() }
+      await Session.updatePart(text)
+    }
+    for (const part of Object.values(reason)) {
+      await Session.updatePart({
+        ...part,
+        time: { start: part.time.start ?? Date.now(), end: Date.now() },
+      })
+    }
+
+    if (!assistant.time.completed) {
+      assistant.time.completed = Date.now()
+    }
+    await Session.updateMessage(assistant)
+
+    return {
+      info: assistant,
+      parts: await MessageV2.parts(assistant.id),
+    }
   })
 
   export async function resolvePromptParts(template: string): Promise<PromptInput["parts"]> {
