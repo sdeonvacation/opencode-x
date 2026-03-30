@@ -61,6 +61,7 @@ import { TuiConfigProvider, useTuiConfig } from "./context/tui-config"
 import { TuiConfig } from "@/config/tui"
 import { createTuiApi, TuiPluginRuntime, type RouteMap } from "./plugin"
 import { FormatError, FormatUnknownError } from "@/cli/error"
+import { Filesystem } from "@/util/filesystem"
 
 async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
   // can't set raw mode if not a TTY
@@ -882,9 +883,17 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         dialog.clear()
         if (!path) return
 
-        const resolved = path.startsWith("~")
-          ? path.replace("~", process.env.HOME || "")
-          : path
+        const resolved = path.startsWith("~") ? path.replace("~", process.env.HOME || "") : path
+
+        const valid = await Filesystem.isDir(resolved)
+
+        if (!valid) {
+          toast.show({
+            variant: "error",
+            message: `Invalid directory: ${path}`,
+          })
+          return
+        }
 
         try {
           await sdk.changeDirectory(resolved)
