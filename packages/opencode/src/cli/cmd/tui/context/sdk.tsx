@@ -60,6 +60,8 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     const handleEvent = (event: GlobalEvent) => {
       queue.push(event)
 
+      // Delta events flush immediately for smooth streaming.
+      // batch() in flush() still prevents render thrashing.
       if (event.type === "message.part.delta") {
         if (timer) {
           clearTimeout(timer)

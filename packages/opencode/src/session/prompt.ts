@@ -68,6 +68,7 @@ export namespace SessionPrompt {
   export interface Interface {
     readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
     readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
+    readonly complete: (input: CompleteInput) => Effect.Effect<MessageV2.WithParts>
     readonly loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>
     readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
     readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
@@ -1288,6 +1289,219 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         },
       )
 
+      const complete: (input: CompleteInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn(
+        "SessionPrompt.complete",
+      )(function* (input: CompleteInput) {
+        const s = yield* InstanceState.get(state)
+        const runner = getRunner(s.runners, input.sessionID)
+        return yield* runner.ensureRunning(
+          Effect.promise(async (abort) => {
+            const session = await Session.get(input.sessionID)
+            await SessionRevert.cleanup(session)
+
+            const base = input.model ?? (await lastModel(input.sessionID).pipe(Effect.runPromise))
+            const model = await (async () => {
+              if (input.model) return Provider.getModel(input.model.providerID, input.model.modelID)
+              if (input.small === false) return Provider.getModel(base.providerID, base.modelID)
+              return (await Provider.getSmallModel(base.providerID)) ?? Provider.getModel(base.providerID, base.modelID)
+            })()
+
+            const user = await createUserMessage({
+              sessionID: input.sessionID,
+              model: {
+                providerID: model.providerID,
+                modelID: model.id,
+              },
+              parts: input.parts,
+            }).pipe(Effect.runPromise)
+            await Session.touch(input.sessionID)
+
+            const agent = await Agent.get(user.info.agent)
+            if (!agent) throw new Error(`Agent not found: ${user.info.agent}`)
+
+            const assistant = (await Session.updateMessage({
+              id: MessageID.ascending(),
+              parentID: user.info.id,
+              role: "assistant",
+              mode: agent.name,
+              agent: agent.name,
+              variant: user.info.variant,
+              path: {
+                cwd: Instance.directory,
+                root: Instance.worktree,
+              },
+              cost: 0,
+              tokens: {
+                input: 0,
+                output: 0,
+                reasoning: 0,
+                cache: { read: 0, write: 0 },
+              },
+              modelID: model.id,
+              providerID: model.providerID,
+              time: {
+                created: Date.now(),
+              },
+              sessionID: input.sessionID,
+            })) as MessageV2.Assistant
+
+            let text: MessageV2.TextPart | undefined
+            const reason: Record<string, MessageV2.ReasoningPart> = {}
+
+            try {
+              const result = await LLM.stream({
+                user: user.info as MessageV2.User,
+                agent,
+                permission: session.permission,
+                abort,
+                sessionID: input.sessionID,
+                system: [],
+                messages: await MessageV2.toModelMessages(
+                  MessageV2.filterCompacted(MessageV2.stream(input.sessionID)),
+                  model,
+                ),
+                tools: {},
+                model,
+                retries: 2,
+                small: input.small ?? true,
+              })
+
+              for await (const event of result.fullStream) {
+                if (event.type === "error") throw event.error
+
+                if (event.type === "reasoning-start") {
+                  if (reason[event.id]) continue
+                  reason[event.id] = await Session.updatePart({
+                    id: PartID.ascending(),
+                    messageID: assistant.id,
+                    sessionID: assistant.sessionID,
+                    type: "reasoning",
+                    text: "",
+                    time: { start: Date.now() },
+                    metadata: event.providerMetadata,
+                  })
+                  continue
+                }
+
+                if (event.type === "reasoning-delta") {
+                  const part = reason[event.id]
+                  if (!part) continue
+                  part.text += event.text
+                  if (event.providerMetadata) part.metadata = event.providerMetadata
+                  await Session.updatePartDelta({
+                    sessionID: part.sessionID,
+                    messageID: part.messageID,
+                    partID: part.id,
+                    field: "text",
+                    delta: event.text,
+                  })
+                  continue
+                }
+
+                if (event.type === "reasoning-end") {
+                  const part = reason[event.id]
+                  if (!part) continue
+                  part.text = part.text.trimEnd()
+                  part.time = { ...part.time, end: Date.now() }
+                  if (event.providerMetadata) part.metadata = event.providerMetadata
+                  await Session.updatePart(part)
+                  delete reason[event.id]
+                  continue
+                }
+
+                if (event.type === "text-start") {
+                  text = await Session.updatePart({
+                    id: PartID.ascending(),
+                    messageID: assistant.id,
+                    sessionID: assistant.sessionID,
+                    type: "text",
+                    text: "",
+                    time: { start: Date.now() },
+                    metadata: event.providerMetadata,
+                  })
+                  continue
+                }
+
+                if (event.type === "text-delta") {
+                  if (!text) continue
+                  text.text += event.text
+                  if (event.providerMetadata) text.metadata = event.providerMetadata
+                  await Session.updatePartDelta({
+                    sessionID: text.sessionID,
+                    messageID: text.messageID,
+                    partID: text.id,
+                    field: "text",
+                    delta: event.text,
+                  })
+                  continue
+                }
+
+                if (event.type === "text-end") {
+                  if (!text) continue
+                  text.text = text.text.trimEnd()
+                  text.time = { start: text.time?.start ?? Date.now(), end: Date.now() }
+                  if (event.providerMetadata) text.metadata = event.providerMetadata
+                  await Session.updatePart(text)
+                  text = undefined
+                  continue
+                }
+
+                if (event.type === "finish-step") {
+                  const usage = Session.getUsage({
+                    model,
+                    usage: event.usage,
+                    metadata: event.providerMetadata,
+                  })
+                  assistant.finish = event.finishReason
+                  assistant.cost += usage.cost
+                  assistant.tokens = usage.tokens
+                  await Session.updatePart({
+                    id: PartID.ascending(),
+                    reason: event.finishReason,
+                    messageID: assistant.id,
+                    sessionID: assistant.sessionID,
+                    type: "step-finish",
+                    tokens: usage.tokens,
+                    cost: usage.cost,
+                  })
+                  await Session.updateMessage(assistant)
+                }
+              }
+            } catch (err) {
+              assistant.error = MessageV2.fromError(err, {
+                providerID: model.providerID,
+                aborted: abort.aborted,
+              })
+              await Bus.publish(Session.Event.Error, {
+                sessionID: input.sessionID,
+                error: assistant.error,
+              })
+            }
+
+            if (text) {
+              text.time = { start: text.time?.start ?? Date.now(), end: Date.now() }
+              await Session.updatePart(text)
+            }
+            await Promise.all(
+              Object.values(reason).map((part) =>
+                Session.updatePart({
+                  ...part,
+                  time: { start: part.time.start ?? Date.now(), end: Date.now() },
+                }),
+              ),
+            )
+
+            if (!assistant.time.completed) assistant.time.completed = Date.now()
+            await Session.updateMessage(assistant)
+
+            return {
+              info: assistant,
+              parts: MessageV2.parts(assistant.id),
+            }
+          }),
+        )
+      })
+
       const lastAssistant = (sessionID: SessionID) =>
         Effect.promise(async () => {
           let latest: MessageV2.WithParts | undefined
@@ -1658,6 +1872,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return Service.of({
         cancel,
         prompt,
+        complete,
         loop,
         shell,
         command,
@@ -1759,8 +1974,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
   })
   export type PromptInput = z.infer<typeof PromptInput>
 
+  export const CompleteInput = z.object({
+    sessionID: SessionID.zod,
+    model: z
+      .object({
+        providerID: ProviderID.zod,
+        modelID: ModelID.zod,
+      })
+      .optional(),
+    small: z.boolean().optional(),
+    parts: PromptInput.shape.parts,
+  })
+  export type CompleteInput = z.infer<typeof CompleteInput>
+
   export async function prompt(input: PromptInput) {
     return runPromise((svc) => svc.prompt(PromptInput.parse(input)))
+  }
+
+  export async function complete(input: CompleteInput) {
+    return runPromise((svc) => svc.complete(CompleteInput.parse(input)))
   }
 
   export async function resolvePromptParts(template: string) {

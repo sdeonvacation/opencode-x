@@ -119,6 +119,8 @@ import type {
   SessionClearTodoResponses,
   SessionCommandErrors,
   SessionCommandResponses,
+  SessionCompleteErrors,
+  SessionCompleteResponses,
   SessionCreateErrors,
   SessionCreateResponses,
   SessionDeleteErrors,
@@ -2275,6 +2277,52 @@ export class Session2 extends HeyApiClient {
       url: "/session/{sessionID}/message/{messageID}",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Complete message
+   *
+   * Create and complete a message directly without agent loop overhead.
+   */
+  public complete<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      model?: {
+        providerID: string
+        modelID: string
+      }
+      small?: boolean
+      parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "model" },
+            { in: "body", key: "small" },
+            { in: "body", key: "parts" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionCompleteResponses, SessionCompleteErrors, ThrowOnError>({
+      url: "/session/{sessionID}/complete",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

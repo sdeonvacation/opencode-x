@@ -868,6 +868,43 @@ export const SessionRoutes = lazy(() =>
       },
     )
     .post(
+      "/:sessionID/complete",
+      describeRoute({
+        summary: "Complete message",
+        description: "Create and complete a message directly without agent loop overhead.",
+        operationId: "session.complete",
+        responses: {
+          200: {
+            description: "Created message",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    info: MessageV2.Assistant,
+                    parts: MessageV2.Part.array(),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      validator("json", SessionPrompt.CompleteInput.omit({ sessionID: true })),
+      async (c) => {
+        const sessionID = c.req.valid("param").sessionID
+        const body = c.req.valid("json")
+        const msg = await SessionPrompt.complete({ ...body, sessionID })
+        return c.json(msg)
+      },
+    )
+    .post(
       "/:sessionID/prompt_async",
       describeRoute({
         summary: "Send async message",
