@@ -203,7 +203,11 @@ export namespace SessionProcessor {
               time: { start: match.part.state.time.start, end: Date.now() },
             },
           })
-          if (error instanceof Permission.RejectedError || error instanceof Question.RejectedError) {
+          if (
+            error instanceof Permission.RejectedError ||
+            error instanceof Permission.DeniedError ||
+            error instanceof Question.RejectedError
+          ) {
             ctx.blocked = ctx.shouldBreak
           }
           yield* settleToolCall(toolCallID)
