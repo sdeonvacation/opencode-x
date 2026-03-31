@@ -59,11 +59,20 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
 
     const handleEvent = (event: Event) => {
       queue.push(event)
-      const elapsed = Date.now() - last
 
+      // Delta events flush immediately for smooth streaming.
+      // batch() in flush() still prevents render thrashing.
+      if (event.type === "message.part.delta") {
+        if (timer) {
+          clearTimeout(timer)
+          timer = undefined
+        }
+        flush()
+        return
+      }
+
+      const elapsed = Date.now() - last
       if (timer) return
-      // If we just flushed recently (within 16ms), batch this with future events
-      // Otherwise, process immediately to avoid latency
       if (elapsed < 16) {
         timer = setTimeout(flush, 16)
         return

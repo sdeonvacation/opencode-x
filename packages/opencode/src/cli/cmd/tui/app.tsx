@@ -888,7 +888,10 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
           return
         }
 
-        const res = await sdk.client.session.create()
+        const contextSessionID = route.data.type === "session" ? route.data.sessionID : undefined
+        const res = contextSessionID
+          ? await sdk.client.session.fork({ sessionID: contextSessionID })
+          : await sdk.client.session.create()
         const sessionID = res.data?.id
         if (!sessionID) {
           toast.show({
@@ -908,13 +911,15 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
           }) => Promise<unknown>
         }
 
-        const contextSessionID = route.data.type === "session" ? route.data.sessionID : undefined
-
         api
           .complete({
             sessionID,
-            contextSessionID,
-            parts: [{ type: "text", text: q }],
+            parts: [
+              {
+                type: "text",
+                text: `Answer the following question concisely, in plain text, without using any markdown formatting.\n\n${q}`,
+              },
+            ],
             small: true,
           })
           .catch(() => {})
