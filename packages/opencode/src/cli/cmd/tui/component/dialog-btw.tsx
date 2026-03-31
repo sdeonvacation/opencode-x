@@ -2,7 +2,7 @@ import { TextAttributes } from "@opentui/core"
 import { useDialog } from "@tui/ui/dialog"
 import { useTheme } from "@tui/context/theme"
 import { useSync } from "@tui/context/sync"
-import { createMemo, Match, Show, Switch, onMount } from "solid-js"
+import { createMemo, For, Show, onMount } from "solid-js"
 import { Spinner } from "./spinner"
 
 export function DialogBtw(props: { sessionID: string; question: string }) {
@@ -14,26 +14,24 @@ export function DialogBtw(props: { sessionID: string; question: string }) {
     dialog.setSize("large")
   })
 
-  const msg = createMemo(() => {
+  const id = createMemo(() => {
     const list = sync.data.message[props.sessionID] ?? []
-    return list.findLast((x) => x.role === "assistant")
+    const found = list.findLast((x) => x.role === "assistant")
+    if (found) return found.id
+    for (const key in sync.data.part) {
+      const parts = sync.data.part[key]
+      if (parts?.length && parts[0].sessionID === props.sessionID) return key
+    }
+    return undefined
   })
 
-  const text = createMemo(() => {
-    const info = msg()
-    if (!info) return ""
-    const parts = sync.data.part[info.id] ?? []
-    return parts
-      .filter((x) => x.type === "text")
-      .map((x) => x.text)
-      .join("\n\n")
-  })
-
-  const loading = createMemo(() => {
-    if (!msg()) return true
-    if (text().trim()) return false
-    return true
-  })
+  // Access the store array directly — no memo indirection — so each
+  // element stays a store proxy with fine-grained .text tracking.
+  const parts = () => {
+    const mid = id()
+    if (!mid) return []
+    return sync.data.part[mid] ?? []
+  }
 
   return (
     <box paddingLeft={2} paddingRight={2} gap={1} paddingBottom={1}>
@@ -59,31 +57,30 @@ export function DialogBtw(props: { sessionID: string; question: string }) {
         <text fg={theme.textMuted}>Answer</text>
       </box>
       <scrollbox paddingRight={1} scrollbarOptions={{ visible: false }} maxHeight={24}>
-        <Switch>
-          <Match when={loading()}>
-            <Spinner color={theme.textMuted}>Thinking...</Spinner>
-          </Match>
-          <Match when={!loading()}>
-            <Show
-              when={text().trim()}
-              fallback={
-                <text fg={theme.textMuted} wrapMode="word">
-                  No response.
-                </text>
-              }
-            >
-              <code
-                filetype="markdown"
-                drawUnstyledText={false}
-                streaming={true}
-                syntaxStyle={syntax()}
-                content={text().trim()}
-                fg={theme.text}
-              />
-            </Show>
-          </Match>
-        </Switch>
+        <Show when={parts().length > 0} fallback={<Spinner color={theme.textMuted}>Thinking...</Spinner>}>
+          <For each={parts()}>
+            {(part) => (
+              <Show when={part.type === "text"}>
+                <BtwText part={part as any} />
+              </Show>
+            )}
+          </For>
+        </Show>
       </scrollbox>
     </box>
+  )
+}
+
+// Separate component so `part` is a store proxy prop — exactly like
+// the session view's TextPart. Property-level `.text` tracking works
+// because the prop is never unwrapped through a memo.
+function BtwText(props: { part: { text: string } }) {
+  const { theme } = useTheme()
+  return (
+    <Show when={props.part.text.trim()}>
+      <text fg={theme.text} wrapMode={"word"}>
+        {props.part.text.trim()}
+      </text>
+    </Show>
   )
 }
