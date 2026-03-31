@@ -289,13 +289,20 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         }
         case "message.part.updated": {
           const parts = store.part[event.properties.part.messageID]
+          const incoming = event.properties.part
           if (!parts) {
             setStore("part", event.properties.part.messageID, [event.properties.part])
             break
           }
           const result = Binary.search(parts, event.properties.part.id, (p) => p.id)
           if (result.found) {
-            setStore("part", event.properties.part.messageID, result.index, reconcile(event.properties.part))
+            const existing = parts[result.index]
+            // Don't overwrite accumulated delta text with a shorter snapshot (e.g. text-start has text:"")
+            if (existing.type === "text" && incoming.type === "text" && existing.text.length > incoming.text.length) {
+              setStore("part", incoming.messageID, result.index, reconcile({ ...incoming, text: existing.text }))
+            } else {
+              setStore("part", incoming.messageID, result.index, reconcile(incoming))
+            }
             break
           }
           setStore(
@@ -310,9 +317,24 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
         case "message.part.delta": {
           const parts = store.part[event.properties.messageID]
-          if (!parts) break
+          if (!parts) {
+            // Seed placeholder: message.part.updated (SyncEvent) arrives later than deltas (BusEvent)
+            // due to the async runPromise() call in ProjectBus.publish — so seed from first delta
+            setStore("part", event.properties.messageID, [
+              {
+                id: event.properties.partID,
+                sessionID: event.properties.sessionID,
+                messageID: event.properties.messageID,
+                type: "text",
+                text: event.properties.field === "text" ? event.properties.delta : "",
+              } as Part,
+            ])
+            break
+          }
           const result = Binary.search(parts, event.properties.partID, (p) => p.id)
-          if (!result.found) break
+          if (!result.found) {
+            break
+          }
           setStore(
             "part",
             event.properties.messageID,
