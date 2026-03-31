@@ -39,7 +39,6 @@ import type { ReadTool } from "@/tool/read"
 import type { WriteTool } from "@/tool/write"
 import { BashTool } from "@/tool/bash"
 import type { GlobTool } from "@/tool/glob"
-import { TodoWriteTool } from "@/tool/todo"
 import type { GrepTool } from "@/tool/grep"
 import type { ListTool } from "@/tool/ls"
 import type { EditTool } from "@/tool/edit"
@@ -55,7 +54,6 @@ import type { DialogContext } from "@tui/ui/dialog"
 import { useKeybind } from "@tui/context/keybind"
 import { parsePatch } from "diff"
 import { useDialog } from "../../ui/dialog"
-import { TodoItem } from "../../component/todo-item"
 import { DialogMessage } from "./dialog-message"
 import type { PromptInfo } from "../../component/prompt/history"
 import { DialogConfirm } from "@tui/ui/dialog-confirm"
@@ -1512,6 +1510,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
 
   // Hide tool if showDetails is false and tool completed successfully
   const shouldHide = createMemo(() => {
+    if (props.part.tool === "todowrite") return true
     if (ctx.showDetails()) return false
     if (props.part.state.status !== "completed") return false
     return true
@@ -1579,9 +1578,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "apply_patch"}>
           <ApplyPatch {...toolprops} />
         </Match>
-        <Match when={props.part.tool === "todowrite"}>
-          <TodoWrite {...toolprops} />
-        </Match>
+        <Match when={props.part.tool === "todowrite"}>{null}</Match>
         <Match when={props.part.tool === "question"}>
           <Question {...toolprops} />
         </Match>
@@ -1981,6 +1978,7 @@ function WebSearch(props: ToolProps<any>) {
 function Task(props: ToolProps<typeof TaskTool>) {
   const { navigate } = useRoute()
   const sync = useSync()
+  const ctx = use()
 
   onMount(() => {
     if (props.metadata.sessionId && !sync.data.message[props.metadata.sessionId]?.length)
@@ -2033,9 +2031,8 @@ function Task(props: ToolProps<typeof TaskTool>) {
       pending="Delegating..."
       part={props.part}
       onClick={() => {
-        if (props.metadata.sessionId) {
-          navigate({ type: "session", sessionID: props.metadata.sessionId })
-        }
+        const id = props.metadata.sessionId ?? sync.data.session.find((x) => x.parentID === ctx.sessionID)?.id
+        if (id) navigate({ type: "session", sessionID: id })
       }}
     >
       {content()}
@@ -2164,27 +2161,6 @@ function ApplyPatch(props: ToolProps<typeof ApplyPatchTool>) {
       <Match when={true}>
         <InlineTool icon="%" pending="Preparing patch..." complete={false} part={props.part}>
           Patch
-        </InlineTool>
-      </Match>
-    </Switch>
-  )
-}
-
-function TodoWrite(props: ToolProps<typeof TodoWriteTool>) {
-  return (
-    <Switch>
-      <Match when={props.metadata.todos?.length}>
-        <BlockTool title="# Todos" part={props.part}>
-          <box>
-            <For each={props.input.todos ?? []}>
-              {(todo) => <TodoItem status={todo.status} content={todo.content} />}
-            </For>
-          </box>
-        </BlockTool>
-      </Match>
-      <Match when={true}>
-        <InlineTool icon="⚙" pending="Updating todos..." complete={false} part={props.part}>
-          Updating todos...
         </InlineTool>
       </Match>
     </Switch>
