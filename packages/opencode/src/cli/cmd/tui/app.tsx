@@ -904,18 +904,20 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         const api = sdk.client.session as typeof sdk.client.session & {
           complete: (input: {
             sessionID: string
+            contextSessionID?: string
             parts: { type: "text"; text: string }[]
             small?: boolean
-            model?: { providerID: string; modelID: string }
           }) => Promise<unknown>
         }
+
+        const contextSessionID = route.data.type === "session" ? route.data.sessionID : undefined
 
         api
           .complete({
             sessionID,
+            contextSessionID,
             parts: [{ type: "text", text: q }],
             small: true,
-            model,
           })
           .catch(() => {})
 
