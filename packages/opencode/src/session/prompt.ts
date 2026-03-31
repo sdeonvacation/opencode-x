@@ -48,6 +48,7 @@ import { Truncate } from "@/tool/truncate"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
+import { SessionRetry } from "./retry"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 
@@ -614,9 +615,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
 
         let error: Error | undefined
-        const result = yield* Effect.promise((signal) =>
-          taskTool
-            .execute(taskArgs, {
+        const result = yield* Effect.tryPromise({
+          try: (signal) =>
+            taskTool.execute(taskArgs, {
               agent: task.agent,
               messageID: assistantMessage.id,
               sessionID,
@@ -644,13 +645,26 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   }),
                 )
               },
-            })
-            .catch((e) => {
-              error = e instanceof Error ? e : new Error(String(e))
-              log.error("subtask execution failed", { error, agent: task.agent, description: task.description })
-              return undefined
             }),
-        ).pipe(
+          catch: (e) => e,
+        }).pipe(
+          Effect.retry(
+            SessionRetry.policy({
+              parse: (e) => MessageV2.fromError(e, { providerID: taskModel.providerID }),
+              set: (info) =>
+                status.set(sessionID, {
+                  type: "retry",
+                  attempt: info.attempt,
+                  message: info.message,
+                  next: info.next,
+                }),
+            }),
+          ),
+          Effect.catch((e) => {
+            error = e instanceof Error ? e : new Error(String(e))
+            log.error("subtask execution failed", { error, agent: task.agent, description: task.description })
+            return Effect.succeed(undefined as Awaited<ReturnType<typeof taskTool.execute>> | undefined)
+          }),
           Effect.onInterrupt(() =>
             Effect.gen(function* () {
               assistantMessage.finish = "tool-calls"
