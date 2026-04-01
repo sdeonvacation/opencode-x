@@ -90,6 +90,36 @@ describe("tool.write", () => {
         },
       })
     })
+
+    test("emits progress metadata while running", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "progress.txt")
+      const seen: string[] = []
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const write = await WriteTool.init()
+          await write.execute(
+            {
+              filePath: filepath,
+              content: "progress",
+            },
+            {
+              ...ctx,
+              metadata(input) {
+                if (input.title) seen.push(input.title)
+              },
+            },
+          )
+
+          expect(seen).toContain("Preparing write...")
+          expect(seen).toContain("Writing file...")
+          expect(seen).toContain("Formatting file...")
+          expect(seen).toContain("Collecting diagnostics...")
+        },
+      })
+    })
   })
 
   describe("existing file overwrite", () => {
