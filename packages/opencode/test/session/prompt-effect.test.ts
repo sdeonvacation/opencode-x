@@ -1113,6 +1113,36 @@ it.live(
 )
 
 unix(
+  "shell spawn error does not leave session busy",
+  () =>
+    withSh(() =>
+      provideTmpdirInstance(
+        (dir) =>
+          Effect.gen(function* () {
+            const { prompt, chat } = yield* boot()
+            const spy = spyOn(Shell, "preferred").mockReturnValue("/__missing_shell__")
+
+            try {
+              const exit = yield* prompt
+                .shell({ sessionID: chat.id, agent: "build", command: "echo hi" })
+                .pipe(Effect.exit)
+              expect(Exit.isFailure(exit)).toBe(true)
+            } finally {
+              spy.mockRestore()
+            }
+
+            const status = yield* SessionStatus.Service
+            expect((yield* status.get(chat.id)).type).toBe("idle")
+            const busy = yield* prompt.assertNotBusy(chat.id).pipe(Effect.exit)
+            expect(Exit.isSuccess(busy)).toBe(true)
+          }),
+        { git: true, config: cfg },
+      ),
+    ),
+  30_000,
+)
+
+unix(
   "cancel interrupts shell and resolves cleanly",
   () =>
     withSh(() =>
