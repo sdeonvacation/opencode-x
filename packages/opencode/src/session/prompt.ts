@@ -926,13 +926,21 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const exit = yield* Effect.promise(() => {
           signal.addEventListener("abort", abortHandler, { once: true })
           if (signal.aborted) abortHandler()
-          return new Promise<void>((resolve) => {
+          return new Promise<void>((resolve, reject) => {
             const close = () => {
               exited = true
               proc.off("close", close)
+              proc.off("error", fail)
               resolve()
             }
+            const fail = (err: Error) => {
+              exited = true
+              proc.off("close", close)
+              proc.off("error", fail)
+              reject(err)
+            }
             proc.once("close", close)
+            proc.once("error", fail)
           })
         }).pipe(
           Effect.onInterrupt(() => Effect.sync(abortHandler)),
