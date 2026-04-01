@@ -25,6 +25,20 @@ export const WriteTool = Tool.define("write", {
   }),
   async execute(params, ctx) {
     const filepath = path.isAbsolute(params.filePath) ? params.filePath : path.join(Instance.directory, params.filePath)
+    const bytes = Buffer.byteLength(params.content)
+    const update = (title: string, phase: string, extra?: Record<string, unknown>) => {
+      ctx.metadata({
+        title,
+        metadata: {
+          phase,
+          filepath,
+          bytes,
+          ...extra,
+        },
+      })
+    }
+
+    update("Preparing write...", "prepare")
     await assertExternalDirectory(ctx, filepath)
 
     const exists = await Filesystem.exists(filepath)
@@ -42,7 +56,23 @@ export const WriteTool = Tool.define("write", {
       },
     })
 
-    await Filesystem.write(filepath, params.content)
+    update("Writing file...", "write")
+    const start = Date.now()
+    let tick = 0
+    const timer = setInterval(() => {
+      tick += 1
+      update("Writing file...", "write", {
+        elapsed_ms: Date.now() - start,
+        heartbeat: tick,
+      })
+    }, 1000)
+    try {
+      await Filesystem.write(filepath, params.content)
+    } finally {
+      clearInterval(timer)
+    }
+
+    update("Formatting file...", "format")
     await Format.file(filepath)
     Bus.publish(File.Event.Edited, { file: filepath })
     await Bus.publish(FileWatcher.Event.Updated, {
@@ -52,6 +82,7 @@ export const WriteTool = Tool.define("write", {
     await FileTime.read(ctx.sessionID, filepath)
 
     let output = "Wrote file successfully."
+    update("Collecting diagnostics...", "diagnostics")
     await LSP.touchFile(filepath, true)
     const diagnostics = await LSP.diagnostics()
     const normalizedFilepath = Filesystem.normalizePath(filepath)

@@ -1839,6 +1839,14 @@ function Bash(props: ToolProps<typeof BashTool>) {
 }
 
 function Write(props: ToolProps<typeof WriteTool>) {
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const pending = createMemo(() => {
+    if (props.part.state.status !== "running") return "Preparing write..."
+    const title = props.part.state.title
+    if (!title) return "Preparing write..."
+    return title
+  })
+
   const { theme, syntax } = useTheme()
   const code = createMemo(() => {
     if (!props.input.content) return ""
@@ -1862,7 +1870,13 @@ function Write(props: ToolProps<typeof WriteTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="←" pending="Preparing write..." complete={props.input.filePath} part={props.part}>
+        <InlineTool
+          icon="←"
+          pending={pending()}
+          complete={props.input.filePath}
+          spinner={isRunning()}
+          part={props.part}
+        >
           Write {normalizePath(props.input.filePath!)}
         </InlineTool>
       </Match>
