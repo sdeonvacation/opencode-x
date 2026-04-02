@@ -1347,208 +1347,80 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const s = yield* InstanceState.get(state)
         const runner = getRunner(s.runners, input.sessionID)
         return yield* runner.ensureRunning(
-          Effect.promise(async (abort) => {
-            const session = await Session.get(input.sessionID)
-            await SessionRevert.cleanup(session)
+          Effect.gen(function* () {
+            const session = yield* sessions.get(input.sessionID)
+            yield* Effect.promise(() => SessionRevert.cleanup(session))
 
-            const base = input.model ?? (await lastModel(input.sessionID).pipe(Effect.runPromise))
-            const model = await (async () => {
-              if (input.model) return Provider.getModel(input.model.providerID, input.model.modelID)
-              if (input.small === false) return Provider.getModel(base.providerID, base.modelID)
-              return (await Provider.getSmallModel(base.providerID)) ?? Provider.getModel(base.providerID, base.modelID)
-            })()
+            const model = yield* Effect.gen(function* () {
+              if (input.model) return yield* getModel(input.model.providerID, input.model.modelID, input.sessionID)
+              const base = yield* lastModel(input.sessionID)
+              if (!(input.small ?? true)) return yield* getModel(base.providerID, base.modelID, input.sessionID)
+              const small = yield* Effect.promise(() => Provider.getSmallModel(base.providerID))
+              if (small) return small
+              return yield* getModel(base.providerID, base.modelID, input.sessionID)
+            })
 
-            const user = await createUserMessage({
+            const user = yield* createUserMessage({
               sessionID: input.sessionID,
-              model: {
-                providerID: model.providerID,
-                modelID: model.id,
-              },
+              model: { providerID: model.providerID, modelID: model.id },
               parts: input.parts,
-            }).pipe(Effect.runPromise)
-            await Session.touch(input.sessionID)
+            })
+            yield* sessions.touch(input.sessionID)
 
-            const agent = await Agent.get(user.info.agent)
-            if (!agent) throw new Error(`Agent not found: ${user.info.agent}`)
+            const agent = yield* agents.get(user.info.agent)
+            if (!agent) {
+              const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
+              const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
+              const error = new NamedError.Unknown({ message: `Agent not found: "${user.info.agent}".${hint}` })
+              yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+              throw error
+            }
 
-            const assistant = (await Session.updateMessage({
+            const msg: MessageV2.Assistant = {
               id: MessageID.ascending(),
               parentID: user.info.id,
               role: "assistant",
               mode: agent.name,
               agent: agent.name,
               variant: user.info.variant,
-              path: {
-                cwd: Instance.directory,
-                root: Instance.worktree,
-              },
+              path: { cwd: Instance.directory, root: Instance.worktree },
               cost: 0,
-              tokens: {
-                input: 0,
-                output: 0,
-                reasoning: 0,
-                cache: { read: 0, write: 0 },
-              },
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
               modelID: model.id,
               providerID: model.providerID,
-              time: {
-                created: Date.now(),
-              },
+              time: { created: Date.now() },
               sessionID: input.sessionID,
-            })) as MessageV2.Assistant
+            }
+            yield* sessions.updateMessage(msg)
 
-            let text: MessageV2.TextPart | undefined
-            const reason: Record<string, MessageV2.ReasoningPart> = {}
+            const handle = yield* processor.create({
+              assistantMessage: msg,
+              sessionID: input.sessionID,
+              model,
+            })
 
-            try {
-              const result = await LLM.stream({
+            const messages = MessageV2.filterCompacted(MessageV2.stream(input.sessionID))
+            const modelMessages = yield* Effect.promise(() => MessageV2.toModelMessages(messages, model))
+
+            yield* Effect.onExit(
+              handle.process({
                 user: user.info as MessageV2.User,
                 agent,
                 permission: session.permission,
-                abort,
                 sessionID: input.sessionID,
                 system: [],
-                messages: await MessageV2.toModelMessages(
-                  MessageV2.filterCompacted(MessageV2.stream(input.sessionID)),
-                  model,
-                ),
+                messages: modelMessages,
                 tools: {},
                 model,
                 retries: 2,
                 small: input.small ?? true,
-              })
-
-              for await (const event of result.fullStream) {
-                if (event.type === "error") throw event.error
-
-                if (event.type === "reasoning-start") {
-                  if (reason[event.id]) continue
-                  reason[event.id] = await Session.updatePart({
-                    id: PartID.ascending(),
-                    messageID: assistant.id,
-                    sessionID: assistant.sessionID,
-                    type: "reasoning",
-                    text: "",
-                    time: { start: Date.now() },
-                    metadata: event.providerMetadata,
-                  })
-                  continue
-                }
-
-                if (event.type === "reasoning-delta") {
-                  const part = reason[event.id]
-                  if (!part) continue
-                  part.text += event.text
-                  if (event.providerMetadata) part.metadata = event.providerMetadata
-                  await Session.updatePartDelta({
-                    sessionID: part.sessionID,
-                    messageID: part.messageID,
-                    partID: part.id,
-                    field: "text",
-                    delta: event.text,
-                  })
-                  continue
-                }
-
-                if (event.type === "reasoning-end") {
-                  const part = reason[event.id]
-                  if (!part) continue
-                  part.text = part.text.trimEnd()
-                  part.time = { ...part.time, end: Date.now() }
-                  if (event.providerMetadata) part.metadata = event.providerMetadata
-                  await Session.updatePart(part)
-                  delete reason[event.id]
-                  continue
-                }
-
-                if (event.type === "text-start") {
-                  text = await Session.updatePart({
-                    id: PartID.ascending(),
-                    messageID: assistant.id,
-                    sessionID: assistant.sessionID,
-                    type: "text",
-                    text: "",
-                    time: { start: Date.now() },
-                    metadata: event.providerMetadata,
-                  })
-                  continue
-                }
-
-                if (event.type === "text-delta") {
-                  if (!text) continue
-                  text.text += event.text
-                  if (event.providerMetadata) text.metadata = event.providerMetadata
-                  await Session.updatePartDelta({
-                    sessionID: text.sessionID,
-                    messageID: text.messageID,
-                    partID: text.id,
-                    field: "text",
-                    delta: event.text,
-                  })
-                  continue
-                }
-
-                if (event.type === "text-end") {
-                  if (!text) continue
-                  text.text = text.text.trimEnd()
-                  text.time = { start: text.time?.start ?? Date.now(), end: Date.now() }
-                  if (event.providerMetadata) text.metadata = event.providerMetadata
-                  await Session.updatePart(text)
-                  text = undefined
-                  continue
-                }
-
-                if (event.type === "finish-step") {
-                  const usage = Session.getUsage({
-                    model,
-                    usage: event.usage,
-                    metadata: event.providerMetadata,
-                  })
-                  assistant.finish = event.finishReason
-                  assistant.cost += usage.cost
-                  assistant.tokens = usage.tokens
-                  await Session.updatePart({
-                    id: PartID.ascending(),
-                    reason: event.finishReason,
-                    messageID: assistant.id,
-                    sessionID: assistant.sessionID,
-                    type: "step-finish",
-                    tokens: usage.tokens,
-                    cost: usage.cost,
-                  })
-                  await Session.updateMessage(assistant)
-                }
-              }
-            } catch (err) {
-              assistant.error = MessageV2.fromError(err, {
-                providerID: model.providerID,
-                aborted: abort.aborted,
-              })
-              await Bus.publish(Session.Event.Error, {
-                sessionID: input.sessionID,
-                error: assistant.error,
-              })
-            }
-
-            if (text) {
-              text.time = { start: text.time?.start ?? Date.now(), end: Date.now() }
-              await Session.updatePart(text)
-            }
-            await Promise.all(
-              Object.values(reason).map((part) =>
-                Session.updatePart({
-                  ...part,
-                  time: { start: part.time.start ?? Date.now(), end: Date.now() },
-                }),
-              ),
+              }),
+              () => instruction.clear(handle.message.id),
             )
 
-            if (!assistant.time.completed) assistant.time.completed = Date.now()
-            await Session.updateMessage(assistant)
-
             return {
-              info: assistant,
-              parts: MessageV2.parts(assistant.id),
+              info: handle.message,
+              parts: MessageV2.parts(handle.message.id),
             }
           }),
         )
@@ -1941,7 +1813,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     }),
   )
 
-  const defaultLayer = Layer.unwrap(
+  const defaultLayer: Layer.Layer<Service> = Layer.unwrap(
     Effect.sync(() =>
       layer.pipe(
         Layer.provide(SessionStatus.layer),
