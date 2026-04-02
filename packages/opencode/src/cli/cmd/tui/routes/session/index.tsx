@@ -7,6 +7,7 @@ import {
   For,
   Match,
   on,
+  onCleanup,
   onMount,
   Show,
   Switch,
@@ -83,6 +84,7 @@ import { getScrollAcceleration } from "../../util/scroll"
 import { TuiPluginRuntime } from "../../plugin"
 import { DialogGoUpsell } from "../../component/dialog-go-upsell"
 import { SessionRetry } from "@/session/retry"
+import { within } from "../../util/selection-boundary"
 
 addDefaultParsers(parsers.parsers)
 
@@ -123,7 +125,7 @@ export function Session() {
     const parentID = session()?.parentID ?? session()?.id
     return sync.data.session
       .filter((x) => x.parentID === parentID || x.id === parentID)
-      .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .toSorted((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))
   })
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
   const permissions = createMemo(() => {
@@ -218,6 +220,8 @@ export function Session() {
     seeded = true
     r.set(route.initialPrompt)
   }
+  let main: BoxRenderable | undefined
+  let side: BoxRenderable | undefined
   const keybind = useKeybind()
   const dialog = useDialog()
   const renderer = useRenderer()
@@ -236,6 +240,43 @@ export function Session() {
     DialogGoUpsell.show(dialog).then((dontShowAgain) => {
       if (dontShowAgain) kv.set(GO_UPSELL_DONT_SHOW, true)
       kv.set(GO_UPSELL_LAST_SEEN_AT, Date.now())
+    })
+  })
+
+  onMount(() => {
+    const start = renderer.startSelection.bind(renderer)
+    const update = renderer.updateSelection.bind(renderer)
+    const clear = renderer.clearSelection.bind(renderer)
+    let pane: "main" | "side" | undefined
+
+    renderer.startSelection = (node, x, y) => {
+      if (within(node, side)) pane = "side"
+      else if (within(node, main)) pane = "main"
+      else pane = undefined
+      start(node, x, y)
+    }
+
+    renderer.updateSelection = (node, x, y, opts) => {
+      if (pane === "main" && main && !within(node, main)) {
+        update(main, x, y, opts)
+        return
+      }
+      if (pane === "side" && side && !within(node, side)) {
+        update(side, x, y, opts)
+        return
+      }
+      update(node, x, y, opts)
+    }
+
+    renderer.clearSelection = () => {
+      pane = undefined
+      clear()
+    }
+
+    onCleanup(() => {
+      renderer.startSelection = start
+      renderer.updateSelection = update
+      renderer.clearSelection = clear
     })
   })
 
@@ -1047,7 +1088,15 @@ export function Session() {
       }}
     >
       <box flexDirection="row">
-        <box flexGrow={1} paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1}>
+        <box
+          ref={(r) => (main = r)}
+          flexGrow={1}
+          flexShrink={1}
+          paddingBottom={1}
+          paddingLeft={2}
+          paddingRight={2}
+          gap={1}
+        >
           <Show when={session()}>
             <scrollbox
               ref={(r) => (scroll = r)}
@@ -1203,10 +1252,13 @@ export function Session() {
         <Show when={sidebarVisible()}>
           <Switch>
             <Match when={wide()}>
-              <Sidebar sessionID={route.sessionID} />
+              <box ref={(r) => (side = r)} width={42} flexShrink={0} height="100%">
+                <Sidebar sessionID={route.sessionID} />
+              </box>
             </Match>
             <Match when={!wide()}>
               <box
+                ref={(r) => (side = r)}
                 position="absolute"
                 top={0}
                 left={0}
