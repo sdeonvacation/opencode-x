@@ -411,6 +411,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               Effect.gen(function* () {
                 const match = input.processor.partFromToolCall(options.toolCallId)
                 if (!match || !["running", "pending"].includes(match.state.status)) return
+                const start = match.state.status === "running" ? match.state.time.start : Date.now()
                 yield* sessions.updatePart({
                   ...match,
                   state: {
@@ -418,7 +419,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     metadata: val.metadata,
                     status: "running",
                     input: args,
-                    time: { start: Date.now() },
+                    time: { start },
                   },
                 })
               }),
