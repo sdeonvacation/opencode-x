@@ -1,14 +1,15 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import os from "os"
 import path from "path"
 import { Shell } from "../../src/shell/shell"
-import { BashTool } from "../../src/tool/bash"
+import { BashTool, isCommit } from "../../src/tool/bash"
 import { Instance } from "../../src/project/instance"
 import { Filesystem } from "../../src/util/filesystem"
 import { tmpdir } from "../fixture/fixture"
 import type { Permission } from "../../src/permission"
 import { Truncate } from "../../src/tool/truncate"
 import { SessionID, MessageID } from "../../src/session/schema"
+import { SessionSummary } from "../../src/session/summary"
 
 const ctx = {
   sessionID: SessionID.make("ses_test"),
@@ -113,6 +114,10 @@ const mustTruncate = (result: {
   )
 }
 
+afterEach(() => {
+  mock.restore()
+})
+
 describe("tool.bash", () => {
   each("basic", async () => {
     await Instance.provide({
@@ -128,6 +133,94 @@ describe("tool.bash", () => {
         )
         expect(result.metadata.exit).toBe(0)
         expect(result.metadata.output).toContain("test")
+      },
+    })
+  })
+})
+
+describe("tool.bash commit", () => {
+  test("detects commit commands", () => {
+    expect(isCommit("git commit -m 'msg'", 0)).toBe(true)
+    expect(isCommit("git commit --amend", 0)).toBe(true)
+    expect(isCommit("git add . && git commit -m 'msg'", 0)).toBe(true)
+    expect(isCommit("echo 'git commit'", 0)).toBe(false)
+    expect(isCommit("git commit-graph write", 0)).toBe(false)
+    expect(isCommit("git status", 0)).toBe(false)
+    expect(isCommit("git commit -m 'msg'", 1)).toBe(false)
+    expect(isCommit("", 0)).toBe(false)
+  })
+
+  test("triggers summarize for successful commit", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const sum = spyOn(SessionSummary, "summarize").mockImplementation(() => {})
+        await bash.execute(
+          {
+            command: "git commit --allow-empty -m test",
+            description: "Create empty commit",
+          },
+          {
+            ...ctx,
+            messageID: MessageID.make("msg_test"),
+          },
+        )
+        expect(sum).toHaveBeenCalledTimes(1)
+        expect(sum).toHaveBeenCalledWith({
+          sessionID: SessionID.make("ses_test"),
+          messageID: MessageID.make("msg_test"),
+        })
+      },
+    })
+  })
+
+  test("triggers summarize for successful chained commit", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const sum = spyOn(SessionSummary, "summarize").mockImplementation(() => {})
+        await bash.execute(
+          {
+            command: "git add . && git commit --allow-empty -m test",
+            description: "Add and commit",
+          },
+          ctx,
+        )
+        expect(sum).toHaveBeenCalledTimes(1)
+      },
+    })
+  })
+
+  test("does not trigger summarize for non-commit or failed commit", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const sum = spyOn(SessionSummary, "summarize").mockImplementation(() => {})
+
+        await bash.execute(
+          {
+            command: "git status --short",
+            description: "Check status",
+          },
+          ctx,
+        )
+
+        const fail = await bash.execute(
+          {
+            command: "git commit -m test",
+            description: "Try commit with no changes",
+          },
+          ctx,
+        )
+
+        expect(fail.metadata.exit).not.toBe(0)
+        expect(sum).toHaveBeenCalledTimes(0)
       },
     })
   })
@@ -834,7 +927,7 @@ describe("tool.bash permissions", () => {
         )
         expect(requests.length).toBe(1)
         expect(requests[0].always.length).toBeGreaterThan(0)
-        expect(requests[0].always.some((item) => item.endsWith("*"))).toBe(true)
+        expect(requests[0].always.some((item: string) => item.endsWith("*"))).toBe(true)
       },
     })
   })
