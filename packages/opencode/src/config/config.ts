@@ -1034,6 +1034,24 @@ export namespace Config {
             .positive()
             .optional()
             .describe("Timeout in milliseconds for model context protocol (MCP) requests"),
+          subagent_timeout: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Timeout in milliseconds for subagent task execution (default: 900000 / 15 minutes)"),
+          permission_ask_timeout: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Timeout in milliseconds for permission prompts"),
+          question_ask_timeout: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Timeout in milliseconds for question prompts"),
         })
         .optional(),
     })

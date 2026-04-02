@@ -11,6 +11,9 @@ import { iife } from "@/util/iife"
 import { defer } from "@/util/defer"
 import { Config } from "../config/config"
 import { Permission } from "@/permission"
+import { withTimeout } from "@/util/timeout"
+
+const SUBAGENT_TIMEOUT = 900_000
 
 const parameters = z.object({
   description: z.string().describe("A short (3-5 words) description of the task"),
@@ -127,20 +130,29 @@ export const TaskTool = Tool.define("task", async (ctx) => {
       using _ = defer(() => ctx.abort.removeEventListener("abort", cancel))
       const promptParts = await SessionPrompt.resolvePromptParts(params.prompt)
 
-      const result = await SessionPrompt.prompt({
-        messageID,
-        sessionID: session.id,
-        model: {
-          modelID: model.modelID,
-          providerID: model.providerID,
-        },
-        agent: agent.name,
-        tools: {
-          ...(hasTodoWritePermission ? {} : { todowrite: false }),
-          ...(hasTaskPermission ? {} : { task: false }),
-          ...Object.fromEntries((config.experimental?.primary_tools ?? []).map((t) => [t, false])),
-        },
-        parts: promptParts,
+      const timeout = config.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT
+      const result = await withTimeout(
+        SessionPrompt.prompt({
+          messageID,
+          sessionID: session.id,
+          model: {
+            modelID: model.modelID,
+            providerID: model.providerID,
+          },
+          agent: agent.name,
+          tools: {
+            ...(hasTodoWritePermission ? {} : { todowrite: false }),
+            ...(hasTaskPermission ? {} : { task: false }),
+            ...Object.fromEntries((config.experimental?.primary_tools ?? []).map((t) => [t, false])),
+          },
+          parts: promptParts,
+        }),
+        timeout,
+      ).catch((err) => {
+        if (err instanceof Error && err.message.includes("Operation timed out")) {
+          throw new Error(`Subagent timed out after ${timeout}ms`)
+        }
+        throw err
       })
 
       const text = result.parts.findLast((x) => x.type === "text")?.text ?? ""

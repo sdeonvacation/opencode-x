@@ -72,6 +72,7 @@ export namespace SessionPrompt {
     readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
     readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
     readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
+    readonly complete: (input: CompleteInput) => Effect.Effect<MessageV2.WithParts>
     readonly loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>
     readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
     readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
@@ -564,7 +565,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const ctx = yield* InstanceState.context
         const taskTool = yield* Effect.promise(() => TaskTool.init())
         const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID) : model
-        const assistantMessage: MessageV2.Assistant = yield* sessions.updateMessage({
+        const assistantMessage: MessageV2.Assistant = (yield* sessions.updateMessage({
           id: MessageID.ascending(),
           role: "assistant",
           parentID: lastUser.id,
@@ -578,8 +579,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           modelID: taskModel.id,
           providerID: taskModel.providerID,
           time: { created: Date.now() },
-        })
-        let part: MessageV2.ToolPart = yield* sessions.updatePart({
+        })) as MessageV2.Assistant
+        let part: MessageV2.ToolPart = (yield* sessions.updatePart({
           id: PartID.ascending(),
           messageID: assistantMessage.id,
           sessionID: assistantMessage.sessionID,
@@ -596,7 +597,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             },
             time: { start: Date.now() },
           },
-        })
+        })) as MessageV2.ToolPart
         const taskArgs = {
           prompt: task.prompt,
           description: task.description,
@@ -628,11 +629,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               metadata(val: { title?: string; metadata?: Record<string, any> }) {
                 return Effect.runPromise(
                   Effect.gen(function* () {
-                    part = yield* sessions.updatePart({
+                    part = (yield* sessions.updatePart({
                       ...part,
                       type: "tool",
                       state: { ...part.state, ...val },
-                    } satisfies MessageV2.ToolPart)
+                    } satisfies MessageV2.ToolPart)) as MessageV2.ToolPart
                   }),
                 )
               },
@@ -755,7 +756,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         } satisfies MessageV2.TextPart)
       })
 
-      const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput, signal: AbortSignal) {
+      const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput, _signal: AbortSignal) {
         const ctx = yield* InstanceState.context
         const session = yield* sessions.get(input.sessionID)
         if (session.revert) {
@@ -1338,6 +1339,91 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         },
       )
 
+      const complete: (input: CompleteInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn(
+        "SessionPrompt.complete",
+      )(function* (input: CompleteInput) {
+        const s = yield* InstanceState.get(state)
+        const runner = getRunner(s.runners, input.sessionID)
+        return yield* runner.ensureRunning(
+          Effect.gen(function* () {
+            const session = yield* sessions.get(input.sessionID)
+            yield* Effect.promise(() => SessionRevert.cleanup(session))
+
+            const model = yield* Effect.gen(function* () {
+              if (input.model) return yield* getModel(input.model.providerID, input.model.modelID, input.sessionID)
+              const base = yield* lastModel(input.sessionID)
+              if (!(input.small ?? true)) return yield* getModel(base.providerID, base.modelID, input.sessionID)
+              const small = yield* Effect.promise(() => Provider.getSmallModel(base.providerID))
+              if (small) return small
+              return yield* getModel(base.providerID, base.modelID, input.sessionID)
+            })
+
+            const user = yield* createUserMessage({
+              sessionID: input.sessionID,
+              model: { providerID: model.providerID, modelID: model.id },
+              parts: input.parts,
+            })
+            yield* sessions.touch(input.sessionID)
+
+            const agent = yield* agents.get(user.info.agent)
+            if (!agent) {
+              const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
+              const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
+              const error = new NamedError.Unknown({ message: `Agent not found: "${user.info.agent}".${hint}` })
+              yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+              throw error
+            }
+
+            const msg: MessageV2.Assistant = {
+              id: MessageID.ascending(),
+              parentID: user.info.id,
+              role: "assistant",
+              mode: agent.name,
+              agent: agent.name,
+              variant: user.info.variant,
+              path: { cwd: Instance.directory, root: Instance.worktree },
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              modelID: model.id,
+              providerID: model.providerID,
+              time: { created: Date.now() },
+              sessionID: input.sessionID,
+            }
+            yield* sessions.updateMessage(msg)
+
+            const handle = yield* processor.create({
+              assistantMessage: msg,
+              sessionID: input.sessionID,
+              model,
+            })
+
+            const messages = MessageV2.filterCompacted(MessageV2.stream(input.sessionID))
+            const modelMessages = yield* Effect.promise(() => MessageV2.toModelMessages(messages, model))
+
+            yield* Effect.onExit(
+              handle.process({
+                user: user.info as MessageV2.User,
+                agent,
+                permission: session.permission,
+                sessionID: input.sessionID,
+                system: [],
+                messages: modelMessages,
+                tools: {},
+                model,
+                retries: 2,
+                small: input.small ?? true,
+              }),
+              () => instruction.clear(handle.message.id),
+            )
+
+            return {
+              info: handle.message,
+              parts: MessageV2.parts(handle.message.id),
+            }
+          }),
+        )
+      })
+
       const lastAssistant = (sessionID: SessionID) =>
         Effect.promise(async () => {
           let latest: MessageV2.WithParts | undefined
@@ -1443,6 +1529,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
             const maxSteps = agent.steps ?? Infinity
             const isLastStep = step >= maxSteps
+            if (isLastStep && lastAssistant?.parentID === lastUser.id && lastAssistant.id === lastFinished?.id) {
+              log.info("exiting loop at max agent steps", { sessionID, step, maxSteps })
+              break
+            }
             msgs = yield* insertReminders({ messages: msgs, agent, session })
 
             const msg: MessageV2.Assistant = {
@@ -1527,7 +1617,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   agent,
                   permission: session.permission,
                   sessionID,
-                  parentSessionID: session.parentID,
                   system,
                   messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
                   tools,
@@ -1716,6 +1805,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         assertNotBusy,
         cancel,
         prompt,
+        complete,
         loop,
         shell,
         command,
@@ -1724,7 +1814,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     }),
   )
 
-  const defaultLayer = Layer.unwrap(
+  export const defaultLayer: Layer.Layer<Service> = Layer.unwrap(
     Effect.sync(() =>
       layer.pipe(
         Layer.provide(SessionStatus.layer),
@@ -1821,8 +1911,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
   })
   export type PromptInput = z.infer<typeof PromptInput>
 
+  export const CompleteInput = z.object({
+    sessionID: SessionID.zod,
+    model: z
+      .object({
+        providerID: ProviderID.zod,
+        modelID: ModelID.zod,
+      })
+      .optional(),
+    small: z.boolean().optional(),
+    parts: PromptInput.shape.parts,
+  })
+  export type CompleteInput = z.infer<typeof CompleteInput>
+
   export async function prompt(input: PromptInput) {
     return runPromise((svc) => svc.prompt(PromptInput.parse(input)))
+  }
+
+  export async function complete(input: CompleteInput) {
+    return runPromise((svc) => svc.complete(CompleteInput.parse(input)))
   }
 
   export async function resolvePromptParts(template: string) {

@@ -338,7 +338,7 @@ test("questions stay isolated by directory", async () => {
           },
         ],
       }),
-  })
+  }).catch(() => {})
 
   const p2 = Instance.provide({
     directory: two.path,
@@ -353,7 +353,7 @@ test("questions stay isolated by directory", async () => {
           },
         ],
       }),
-  })
+  }).catch(() => {})
 
   const onePending = await Instance.provide({
     directory: one.path,
@@ -378,8 +378,8 @@ test("questions stay isolated by directory", async () => {
     fn: () => Question.reject(twoPending[0].id),
   })
 
-  await p1.catch(() => {})
-  await p2.catch(() => {})
+  await p1
+  await p2
 })
 
 test("pending question rejects on instance dispose", async () => {
@@ -450,4 +450,33 @@ test("pending question rejects on instance reload", async () => {
   })
 
   expect(await result).toBeInstanceOf(Question.RejectedError)
+})
+
+test("ask - times out and rejects when unanswered", async () => {
+  await using tmp = await tmpdir({
+    git: true,
+    config: {
+      experimental: {
+        question_ask_timeout: 10,
+      },
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const ask = Question.ask({
+        sessionID: SessionID.make("ses_timeout"),
+        questions: [
+          {
+            question: "Proceed?",
+            header: "Confirm",
+            options: [{ label: "Yes", description: "Continue" }],
+          },
+        ],
+      })
+
+      await expect(ask).rejects.toBeInstanceOf(Question.RejectedError)
+      expect(await Question.list()).toHaveLength(0)
+    },
+  })
 })

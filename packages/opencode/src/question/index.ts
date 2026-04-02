@@ -1,6 +1,7 @@
-import { Deferred, Effect, Layer, Schema, ServiceMap } from "effect"
+import { Deferred, Duration, Effect, Layer, Option as Opt, Schema, ServiceMap } from "effect"
 import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
+import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { SessionID, MessageID } from "@/session/schema"
@@ -10,6 +11,7 @@ import { QuestionID } from "./schema"
 
 export namespace Question {
   const log = Log.create({ service: "question" })
+  const ASK_TIMEOUT = 300_000
 
   // Schemas
 
@@ -109,7 +111,7 @@ export namespace Question {
   export const layer = Layer.effect(
     Service,
     Effect.gen(function* () {
-      const bus = yield* Bus.Service
+      const cfgSvc = yield* Config.Service
       const state = yield* InstanceState.make<State>(
         Effect.fn("Question.state")(function* () {
           const state = {
@@ -146,13 +148,22 @@ export namespace Question {
           tool: input.tool,
         }
         pending.set(id, { info, deferred })
-        yield* bus.publish(Event.Asked, info)
+        Bus.publish(Event.Asked, info)
 
+        const answer = Effect.gen(function* () {
+          const cfg = yield* cfgSvc.get()
+          const timeout = cfg.experimental?.question_ask_timeout ?? ASK_TIMEOUT
+          return yield* Deferred.await(deferred).pipe(
+            Effect.timeoutOption(Duration.millis(timeout)),
+            Effect.flatMap((opt) => {
+              if (Opt.isSome(opt)) return Effect.succeed(opt.value)
+              return Effect.fail(new RejectedError())
+            }),
+          )
+        })
         return yield* Effect.ensuring(
-          Deferred.await(deferred),
-          Effect.sync(() => {
-            pending.delete(id)
-          }),
+          answer,
+          Effect.sync(() => pending.delete(id)),
         )
       })
 
@@ -165,7 +176,7 @@ export namespace Question {
         }
         pending.delete(input.requestID)
         log.info("replied", { requestID: input.requestID, answers: input.answers })
-        yield* bus.publish(Event.Replied, {
+        Bus.publish(Event.Replied, {
           sessionID: existing.info.sessionID,
           requestID: existing.info.id,
           answers: input.answers,
@@ -182,7 +193,7 @@ export namespace Question {
         }
         pending.delete(requestID)
         log.info("rejected", { requestID })
-        yield* bus.publish(Event.Rejected, {
+        Bus.publish(Event.Rejected, {
           sessionID: existing.info.sessionID,
           requestID: existing.info.id,
         })
@@ -198,7 +209,7 @@ export namespace Question {
     }),
   )
 
-  const defaultLayer = layer.pipe(Layer.provide(Bus.layer))
+  export const defaultLayer: Layer.Layer<Service> = layer.pipe(Layer.provide(Config.defaultLayer))
 
   const { runPromise } = makeRuntime(Service, defaultLayer)
 
