@@ -699,6 +699,77 @@ it.live("session.processor effect tests mark pending tools as aborted on cleanup
   ),
 )
 
+it.live("session.processor effect tests track pending tool input deltas", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+
+        yield* llm.toolHang("write", { filePath: "a.txt", content: "hello world" })
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "tool delta")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const run = yield* handle
+          .process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies MessageV2.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "tool delta" }],
+            tools: {},
+          })
+          .pipe(Effect.forkChild)
+
+        const pending = yield* Effect.promise(async () => {
+          const end = Date.now() + 2000
+          while (Date.now() < end) {
+            const parts = await MessageV2.parts(msg.id)
+            const tool = parts.find((part): part is MessageV2.ToolPart => part.type === "tool")
+            if (
+              tool?.state.status === "pending" &&
+              tool.state.raw.length > 0 &&
+              tool.metadata?.pending &&
+              typeof tool.metadata.pending === "object"
+            ) {
+              return tool
+            }
+            await Bun.sleep(10)
+          }
+          throw new Error("timed out waiting for pending tool delta")
+        })
+
+        expect(pending.state.status).toBe("pending")
+        if (pending.state.status === "pending") {
+          expect(pending.state.raw.length).toBeGreaterThan(0)
+          expect(pending.metadata?.pending).toBeDefined()
+          expect(pending.metadata?.pending).toMatchObject({
+            chars: pending.state.raw.length,
+            bytes: Buffer.byteLength(pending.state.raw),
+          })
+        }
+
+        yield* Fiber.interrupt(run)
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
 it.live("session.processor effect tests record aborted errors and idle state", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>

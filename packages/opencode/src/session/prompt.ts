@@ -365,6 +365,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             Effect.runPromise(
               input.processor.updateToolCall(options.toolCallId, (match) => {
                 if (!["running", "pending"].includes(match.state.status)) return match
+                const start = match.state.status === "running" ? match.state.time.start : Date.now()
                 return {
                   ...match,
                   state: {
@@ -372,7 +373,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     metadata: val.metadata,
                     status: "running",
                     input: args,
-                    time: { start: Date.now() },
+                    time: { start },
                   },
                 }
               }),

@@ -66,6 +66,7 @@ export namespace SessionProcessor {
 
   interface ProcessorContext extends Input {
     toolcalls: Record<string, ToolCall>
+    toolemit: Record<string, number>
     shouldBreak: boolean
     snapshot: string | undefined
     blocked: boolean
@@ -113,6 +114,7 @@ export namespace SessionProcessor {
           sessionID: input.sessionID,
           model: input.model,
           toolcalls: {},
+          toolemit: {},
           shouldBreak: false,
           snapshot: initialSnapshot,
           blocked: false,
@@ -131,6 +133,7 @@ export namespace SessionProcessor {
         const settleToolCall = Effect.fn("SessionProcessor.settleToolCall")(function* (toolCallID: string) {
           const done = ctx.toolcalls[toolCallID]?.done
           delete ctx.toolcalls[toolCallID]
+          delete ctx.toolemit[toolCallID]
           if (done) yield* Deferred.succeed(done, undefined).pipe(Effect.ignore)
         })
 
@@ -278,11 +281,35 @@ export namespace SessionProcessor {
               }
               return
 
-            case "tool-input-delta":
+            case "tool-input-delta": {
+              const match = yield* readToolCall(value.id)
+              if (!match || match.part.state.status !== "pending") return
+              const delta = "delta" in value ? value.delta : ""
+              if (!delta) return
+              const raw = match.part.state.raw + delta
+              const chars = raw.length
+              const bytes = Buffer.byteLength(raw)
+              const now = Date.now()
+              if (now - (ctx.toolemit[value.id] ?? 0) < 100) return
+              ctx.toolemit[value.id] = now
+              yield* updateToolCall(value.id, (part) => ({
+                ...part,
+                state: { ...part.state, raw },
+                metadata: {
+                  ...(part.metadata ?? {}),
+                  pending: { chars, bytes },
+                },
+              }))
               return
+            }
 
-            case "tool-input-end":
+            case "tool-input-end": {
+              const match = yield* readToolCall(value.id)
+              if (!match || match.part.state.status !== "pending") return
+              ctx.toolemit[value.id] = Date.now()
+              yield* session.updatePart(match.part)
               return
+            }
 
             case "tool-call": {
               if (ctx.assistantMessage.summary) {
@@ -291,16 +318,12 @@ export namespace SessionProcessor {
               yield* updateToolCall(value.toolCallId, (match) => ({
                 ...match,
                 tool: value.toolName,
-                state: {
-                  ...match.state,
-                  status: "running",
-                  input: value.input,
-                  time: { start: Date.now() },
-                },
+                state: { status: "running", input: value.input, time: { start: Date.now() } },
                 metadata: match.metadata?.providerExecuted
                   ? { ...value.providerMetadata, providerExecuted: true }
                   : value.providerMetadata,
               }))
+              delete ctx.toolemit[value.toolCallId]
 
               const parts = MessageV2.parts(ctx.assistantMessage.id)
               const recentParts = parts.slice(-DOOM_LOOP_THRESHOLD)
@@ -488,6 +511,7 @@ export namespace SessionProcessor {
             })
           }
           ctx.reasoningMap = {}
+          ctx.toolemit = {}
 
           yield* Effect.forEach(
             Object.values(ctx.toolcalls),
