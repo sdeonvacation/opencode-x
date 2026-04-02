@@ -6,7 +6,7 @@ import { BashTool, isCommit } from "../../src/tool/bash"
 import { Instance } from "../../src/project/instance"
 import { Filesystem } from "../../src/util/filesystem"
 import { tmpdir } from "../fixture/fixture"
-import type { Permission } from "../../src/permission"
+import { Permission } from "../../src/permission"
 import { Truncate } from "../../src/tool/truncate"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { SessionSummary } from "../../src/session/summary"
@@ -984,6 +984,171 @@ describe("tool.bash permissions", () => {
         const bashReq = requests.find((r) => r.permission === "bash")
         expect(bashReq).toBeDefined()
         expect(bashReq!.always[0]).toBe("ls *")
+      },
+    })
+  })
+
+  test.skipIf(process.platform === "win32")(
+    "denies unauthorized cat command with explicit permission error",
+    async () => {
+      await using tmp = await tmpdir({
+        init: async (dir) => {
+          await Bun.write(path.join(dir, "note.txt"), "x")
+        },
+      })
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const bash = await BashTool.init()
+          const agent = {
+            permission: [
+              { permission: "bash", pattern: "*", action: "deny" as const },
+              { permission: "bash", pattern: "ls *", action: "allow" as const },
+            ],
+          }
+          await expect(
+            bash.execute(
+              {
+                command: `cat "${path.join(tmp.path, "note.txt")}"`,
+                description: "Read note file",
+              },
+              {
+                ...ctx,
+                agent: "explore",
+                ask: async (req) => {
+                  for (const pattern of req.patterns) {
+                    const rule = Permission.evaluate(req.permission, pattern, agent.permission)
+                    if (rule.action === "deny") throw new Permission.DeniedError({ ruleset: agent.permission })
+                  }
+                },
+              },
+            ),
+          ).rejects.toBeInstanceOf(Permission.DeniedError)
+        },
+      })
+    },
+  )
+
+  test.skipIf(process.platform === "win32")("allows heredoc command patterns", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const file = path.join(tmp.path, "hd.txt")
+        const result = await bash.execute(
+          {
+            command: `cat > "${file}" <<'EOF'\nhello\nEOF\ncat "${file}"`,
+            description: "Write heredoc file",
+          },
+          ctx,
+        )
+        expect(result.metadata.exit).toBe(0)
+        expect(result.output).toContain("hello")
+      },
+    })
+  })
+
+  test.skipIf(process.platform === "win32")("denies unauthorized heredoc command", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const agent = {
+          permission: [
+            { permission: "bash", pattern: "*", action: "deny" as const },
+            { permission: "bash", pattern: "ls *", action: "allow" as const },
+          ],
+        }
+        await expect(
+          bash.execute(
+            {
+              command: `cat > "${path.join(tmp.path, "x.txt")}" <<'EOF'\nhello\nEOF`,
+              description: "Write heredoc file",
+            },
+            {
+              ...ctx,
+              agent: "explore",
+              ask: async (req) => {
+                for (const p of req.patterns) {
+                  const rule = Permission.evaluate(req.permission, p, agent.permission)
+                  if (rule.action === "deny") throw new Permission.DeniedError({ ruleset: agent.permission })
+                }
+              },
+            },
+          ),
+        ).rejects.toBeInstanceOf(Permission.DeniedError)
+      },
+    })
+  })
+
+  test.skipIf(process.platform === "win32")("denies unsafe python heredoc command", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const agent = {
+          permission: [{ permission: "bash", pattern: "*", action: "deny" as const }],
+        }
+        await expect(
+          bash.execute(
+            {
+              command: `python3 <<'PY'\nprint('unsafe')\nPY`,
+              description: "Run unsafe python heredoc",
+            },
+            {
+              ...ctx,
+              agent: "explore",
+              ask: async (req) => {
+                for (const p of req.patterns) {
+                  const rule = Permission.evaluate(req.permission, p, agent.permission)
+                  if (rule.action === "deny") throw new Permission.DeniedError({ ruleset: agent.permission })
+                }
+              },
+            },
+          ),
+        ).rejects.toBeInstanceOf(Permission.DeniedError)
+      },
+    })
+  })
+
+  test.skipIf(process.platform === "win32")("rejects multiline commands without continuation", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        await expect(
+          bash.execute(
+            {
+              command: "echo alpha\necho beta",
+              description: "Run unsafe multiline command",
+            },
+            ctx,
+          ),
+        ).rejects.toThrow("Multiline shell commands must use explicit line continuation")
+      },
+    })
+  })
+
+  test.skipIf(process.platform === "win32")("allows bash multiline commands with backslash continuation", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const result = await bash.execute(
+          {
+            command: ["echo alpha \\", "&& echo beta"].join("\n"),
+            description: "Run continued multiline command",
+          },
+          ctx,
+        )
+        expect(result.metadata.exit).toBe(0)
+        expect(result.output).toContain("alpha")
+        expect(result.output).toContain("beta")
       },
     })
   })
