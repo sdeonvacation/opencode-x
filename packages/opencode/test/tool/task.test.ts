@@ -1,4 +1,4 @@
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { Config } from "../../src/config/config"
@@ -7,11 +7,11 @@ import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionPrompt } from "../../src/session/prompt"
-import { MessageID, PartID } from "../../src/session/schema"
+import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { TaskTool } from "../../src/tool/task"
 import { ToolRegistry } from "../../src/tool/registry"
-import { provideTmpdirInstance } from "../fixture/fixture"
+import { provideTmpdirInstance, tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 afterEach(async () => {
@@ -423,4 +423,72 @@ describe("tool.task", () => {
       },
     ),
   )
+    })
+  })
+
+  test("returns a clear timeout error when subagent exceeds timeout", async () => {
+    await using tmp = await tmpdir({
+      config: {
+        experimental: {
+          subagent_timeout: 20,
+        },
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const sessionID = SessionID.make("ses_task_test")
+        const messageID = MessageID.make("msg_task_test")
+
+        const cfg = spyOn(Config, "get").mockResolvedValue({
+          experimental: { subagent_timeout: 20 },
+        } as Awaited<ReturnType<typeof Config.get>>)
+        const create = spyOn(Session, "create").mockResolvedValue({ id: SessionID.make("ses_sub_task") } as Awaited<
+          ReturnType<typeof Session.create>
+        >)
+        const msg = spyOn(MessageV2, "get").mockReturnValue({
+          info: {
+            role: "assistant",
+            modelID: "gpt-5.2",
+            providerID: "openai",
+          },
+        } as ReturnType<typeof MessageV2.get>)
+        const parts = spyOn(SessionPrompt, "resolvePromptParts").mockResolvedValue([{ type: "text", text: "do work" }])
+        const prompt = spyOn(SessionPrompt, "prompt").mockImplementation(async () => {
+          await new Promise(() => {})
+          throw new Error("unreachable")
+        })
+
+        try {
+          const tool = await TaskTool.init()
+          const run = tool.execute(
+            {
+              description: "hang subagent",
+              prompt: "do work",
+              subagent_type: "general",
+            },
+            {
+              sessionID,
+              messageID,
+              agent: "build",
+              abort: AbortSignal.any([]),
+              messages: [],
+              metadata: () => {},
+              ask: async () => {},
+              extra: { bypassAgentCheck: true },
+            },
+          )
+
+          await expect(run).rejects.toThrow("Subagent timed out after 20ms")
+        } finally {
+          cfg.mockRestore()
+          create.mockRestore()
+          msg.mockRestore()
+          parts.mockRestore()
+          prompt.mockRestore()
+        }
+      },
+    })
+  })
 })

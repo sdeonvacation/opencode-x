@@ -1624,6 +1624,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
             const maxSteps = agent.steps ?? Infinity
             const isLastStep = step >= maxSteps
+            if (isLastStep && lastAssistant?.parentID === lastUser.id && lastAssistant.id === lastFinished?.id) {
+              log.info("exiting loop at max agent steps", { sessionID, step, maxSteps })
+              break
+            }
             msgs = yield* insertReminders({ messages: msgs, agent, session })
 
             const msg: MessageV2.Assistant = {
