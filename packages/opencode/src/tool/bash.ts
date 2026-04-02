@@ -400,7 +400,10 @@ async function run(
       )
 
       const abort = Effect.callback<void>((resume) => {
-        if (ctx.abort.aborted) return resume(Effect.void)
+        if (ctx.abort.aborted) {
+          resume(Effect.void)
+          return Effect.void
+        }
         const handler = () => resume(Effect.void)
         ctx.abort.addEventListener("abort", handler, { once: true })
         return Effect.sync(() => ctx.abort.removeEventListener("abort", handler))
