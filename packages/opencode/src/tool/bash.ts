@@ -17,6 +17,7 @@ import { Shell } from "@/shell/shell"
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncate"
 import { Plugin } from "@/plugin"
+import { SessionSummary } from "@/session/summary"
 import { Cause, Effect, Exit, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
@@ -274,6 +275,11 @@ function preview(text: string) {
   return text.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
 }
 
+export function isCommit(command: string, exit: number | null) {
+  if (exit !== 0) return false
+  return command.split(/&&|\|\||;|\|/).some((x) => /^\s*git\s+commit(?:\s|$)/i.test(x))
+}
+
 async function parse(command: string, ps: boolean) {
   const tree = await parser().then((p) => (ps ? p.ps : p.bash).parse(command))
   if (!tree) throw new Error("Failed to parse command")
@@ -481,7 +487,7 @@ export const BashTool = Tool.define("bash", async () => {
       if (!Instance.containsPath(cwd)) scan.dirs.add(cwd)
       await ask(ctx, scan)
 
-      return run(
+      const result = await run(
         {
           shell,
           name,
@@ -493,6 +499,15 @@ export const BashTool = Tool.define("bash", async () => {
         },
         ctx,
       )
+
+      if (isCommit(params.command, result.metadata.exit)) {
+        SessionSummary.summarize({
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+        })
+      }
+
+      return result
     },
   }
 })
