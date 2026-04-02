@@ -1865,10 +1865,21 @@ function Bash(props: ToolProps<typeof BashTool>) {
 function Write(props: ToolProps<typeof WriteTool>) {
   const isRunning = createMemo(() => props.part.state.status === "running")
   const pending = createMemo(() => {
+    if (props.part.state.status === "pending") {
+      const meta = props.part.metadata?.pending as { bytes?: number } | undefined
+      const bytes = meta?.bytes ?? Buffer.byteLength(props.part.state.raw)
+      if (!bytes) return "Preparing write..."
+      return `Preparing write... ${size(bytes)} received`
+    }
     if (props.part.state.status !== "running") return "Preparing write..."
     const title = props.part.state.title
     if (!title) return "Preparing write..."
     return title
+  })
+  const line = createMemo(() => {
+    if (isRunning()) return pending()
+    if (!props.input.filePath) return "Write"
+    return "Write " + normalizePath(props.input.filePath)
   })
 
   const { theme, syntax } = useTheme()
@@ -1897,15 +1908,21 @@ function Write(props: ToolProps<typeof WriteTool>) {
         <InlineTool
           icon="←"
           pending={pending()}
-          complete={props.input.filePath}
+          complete={isRunning() ? false : props.input.filePath}
           spinner={isRunning()}
           part={props.part}
         >
-          Write {normalizePath(props.input.filePath!)}
+          {line()}
         </InlineTool>
       </Match>
     </Switch>
   )
+}
+
+function size(input: number) {
+  if (input < 1024) return `${input}B`
+  if (input < 1024 * 1024) return `${(input / 1024).toFixed(0)}KB`
+  return `${(input / (1024 * 1024)).toFixed(1)}MB`
 }
 
 function Glob(props: ToolProps<typeof GlobTool>) {

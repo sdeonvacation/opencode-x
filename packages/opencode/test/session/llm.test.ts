@@ -541,6 +541,96 @@ describe("session.llm.stream", () => {
     })
   })
 
+  test("applies default provider timeout to cancel stalled streams", async () => {
+    const server = state.server
+    if (!server) throw new Error("Server not initialized")
+
+    const providerID = "alibaba"
+    const modelID = "qwen-plus"
+    const fixture = await loadFixture(providerID, modelID)
+    const model = fixture.model
+    const pending = waitStreamingRequest("/chat/completions")
+
+    const original = AbortSignal.timeout
+    let seen = 0
+    Object.defineProperty(AbortSignal, "timeout", {
+      configurable: true,
+      value(ms: number) {
+        seen = ms
+        return original(ms === 300000 ? 20 : ms)
+      },
+    })
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: [providerID],
+            provider: {
+              [providerID]: {
+                options: {
+                  apiKey: "test-key",
+                  baseURL: `${server.url.origin}/v1`,
+                },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    try {
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const resolved = await Provider.getModel(ProviderID.make(providerID), ModelID.make(model.id))
+          const sessionID = SessionID.make("session-test-default-timeout")
+          const agent = {
+            name: "test",
+            mode: "primary",
+            options: {},
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          } satisfies Agent.Info
+          const user = {
+            id: MessageID.make("user-default-timeout"),
+            sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: agent.name,
+            model: { providerID: ProviderID.make(providerID), modelID: resolved.id },
+          } satisfies MessageV2.User
+
+          const stream = await LLM.stream({
+            user,
+            sessionID,
+            model: resolved,
+            agent,
+            system: ["You are a helpful assistant."],
+            abort: new AbortController().signal,
+            messages: [{ role: "user", content: "Hello" }],
+            tools: {},
+          })
+
+          const iter = stream.fullStream[Symbol.asyncIterator]()
+          await pending.request
+          await iter.next()
+
+          await Promise.race([pending.responseCanceled, timeout(1000)])
+          expect(seen).toBe(300000)
+
+          await iter.return?.()
+        },
+      })
+    } finally {
+      Object.defineProperty(AbortSignal, "timeout", {
+        configurable: true,
+        value: original,
+      })
+    }
+  })
+
   test("keeps tools enabled by prompt permissions", async () => {
     const server = state.server
     if (!server) {
