@@ -1341,7 +1341,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const complete: (input: CompleteInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn(
         "SessionPrompt.complete",
       )(function* (input: CompleteInput) {
-        const s = yield* InstanceState.get(cache)
+        const s = yield* InstanceState.get(state)
         const runner = getRunner(s.runners, input.sessionID)
         return yield* runner.ensureRunning(
           Effect.gen(function* () {
@@ -1396,7 +1396,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               model,
             })
 
-            const messages = yield* Effect.promise(() => MessageV2.filterCompacted(MessageV2.stream(input.sessionID)))
+            const messages = MessageV2.filterCompacted(MessageV2.stream(input.sessionID))
             const modelMessages = yield* Effect.promise(() => MessageV2.toModelMessages(messages, model))
 
             yield* Effect.onExit(
@@ -1412,12 +1412,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 retries: 2,
                 small: input.small ?? true,
               }),
-              () => Effect.sync(() => InstructionPrompt.clear(handle.message.id)),
+              () => instruction.clear(handle.message.id),
             )
 
             return {
               info: handle.message,
-              parts: yield* Effect.promise(() => MessageV2.parts(handle.message.id)),
+              parts: MessageV2.parts(handle.message.id),
             }
           }),
         )
@@ -1809,7 +1809,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     }),
   )
 
-  const defaultLayer = Layer.unwrap(
+  const defaultLayer: Layer.Layer<Service> = Layer.unwrap(
     Effect.sync(() =>
       layer.pipe(
         Layer.provide(SessionStatus.layer),
