@@ -1,128 +1,120 @@
-- To regenerate the JavaScript SDK, run `./packages/sdk/js/script/build.ts`.
-- ALWAYS USE PARALLEL TOOLS WHEN APPLICABLE.
-- The default branch in this repo is `dev`.
-- Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
-- Prefer automation: execute requested actions without confirmation unless blocked by missing info or safety/irreversibility.
+# AGENTS.md
 
-## Style Guide
+Repository: `opencode` monorepo (default branch: `dev`)
 
-### General Principles
+## 1) Commands (CRITICAL)
 
-- Keep things in one function unless composable or reusable
-- Avoid `try`/`catch` where possible
-- Avoid using the `any` type
-- Prefer single word variable names where possible
-- Use Bun APIs when possible, like `Bun.file()`
-- Rely on type inference when possible; avoid explicit type annotations or interfaces unless necessary for exports or clarity
-- Prefer functional array methods (flatMap, filter, map) over for loops; use type guards on filter to maintain type inference downstream
+Use Bun (workspace uses `bun@1.3.11`).
 
-### Naming
+### Install dependencies
 
-Prefer single word names for variables and functions. Only use multiple words if necessary.
+- `bun install`
 
-### Naming Enforcement (Read This)
+### Run dev server
 
-THIS RULE IS MANDATORY FOR AGENT WRITTEN CODE.
+- Core CLI/runtime dev: `bun run dev`
+- Web app dev: `bun run dev:web`
+- Desktop dev (Tauri): `bun run dev:desktop`
 
-- Use single word names by default for new locals, params, and helper functions.
-- Multi-word names are allowed only when a single word would be unclear or ambiguous.
-- Do not introduce new camelCase compounds when a short single-word alternative is clear.
-- Before finishing edits, review touched lines and shorten newly introduced identifiers where possible.
-- Good short names to prefer: `pid`, `cfg`, `err`, `opts`, `dir`, `root`, `child`, `state`, `timeout`.
-- Examples to avoid unless truly required: `inputPID`, `existingClient`, `connectTimeout`, `workerPath`.
+### Build project
 
-```ts
-// Good
-const foo = 1
-function journal(dir: string) {}
+- Core build (main package): `bun --cwd packages/opencode run build`
 
-// Bad
-const fooBar = 1
-function prepareJournal(dir: string) {}
-```
+### Run ALL tests
 
-Reduce total variable count by inlining when a value is only used once.
+- Core package: `bun --cwd packages/opencode test`
+- Note: root tests are intentionally blocked by `bunfig.toml` (`do-not-run-tests-from-root`).
 
-```ts
-// Good
-const journal = await Bun.file(path.join(dir, "journal.json")).json()
+### Run SINGLE test file
 
-// Bad
-const journalPath = path.join(dir, "journal.json")
-const journal = await Bun.file(journalPath).json()
-```
+- Exact syntax: `bun --cwd packages/opencode test test/session/retry.test.ts`
 
-### Destructuring
+### Lint (auto-fix if available)
 
-Avoid unnecessary destructuring. Use dot notation to preserve context.
+- Current package lint script: `bun --cwd packages/opencode run lint`
+- No dedicated auto-fix lint command is defined in scripts.
 
-```ts
-// Good
-obj.a
-obj.b
+### Type check
 
-// Bad
-const { a, b } = obj
-```
+- Monorepo: `bun run typecheck`
+- Core package only: `bun --cwd packages/opencode typecheck`
 
-### Variables
+### Format code
 
-Prefer `const` over `let`. Use ternaries or early returns instead of reassignment.
+- Repo-wide: `bunx prettier --write .`
+- Core package script: `bun --cwd packages/opencode run format`
 
-```ts
-// Good
-const foo = condition ? 1 : 2
+### Project-specific utility commands
 
-// Bad
-let foo
-if (condition) foo = 1
-else foo = 2
-```
+- Regenerate JavaScript SDK: `./packages/sdk/js/script/build.ts`
+- Generate DB migration (core): `bun --cwd packages/opencode run db generate --name <slug>`
 
-### Control Flow
+## 2) Project Structure
 
-Avoid `else` statements. Prefer early returns.
+- `packages/opencode/`: main CLI/runtime package (primary backend logic)
+  - `src/session/`: prompt loop, processor, retries, snapshots
+  - `src/tool/`: tool implementations (`bash`, `task`, etc.)
+  - `src/provider/`: LLM provider integrations
+  - `src/mcp/`: MCP integrations
+  - `src/permission/`, `src/question/`: interactive approval/question flows
+  - `src/storage/`: DB adapters and drizzle schema (`*.sql.ts`)
+  - `test/`: Bun test suites (`*.test.ts`, `*.effect.test.ts`)
+- `packages/app/`: SolidJS web app
+- `packages/desktop/`, `packages/desktop-electron/`: desktop apps
+- `packages/ui/`, `packages/web/`, `packages/util/`, `packages/plugin/`: shared packages
+- `specs/`: technical notes (including Effect migration guidance)
+- `turbo.json`: task graph for monorepo commands
+- `bunfig.toml`: test root guardrail
+- Important root files: `package.json`, `tsconfig.json`, `AGENTS.md`, `README.md`
 
-```ts
-// Good
-function foo() {
-  if (condition) return 1
-  return 2
-}
+## 3) Code Style
 
-// Bad
-function foo() {
-  if (condition) return 1
-  else return 2
-}
-```
+### Import order / grouping
 
-### Schema Definitions (Drizzle)
+- Follow existing file-local ordering; typical pattern is:
+  1. external deps
+  2. `@/` alias imports
+  3. relative imports
+- Avoid noisy import reordering unless needed.
 
-Use snake_case for field names so column names don't need to be redefined as strings.
+### Naming conventions
 
-```ts
-// Good
-const table = sqliteTable("session", {
-  id: text().primaryKey(),
-  project_id: text().notNull(),
-  created_at: integer().notNull(),
-})
+- Prefer single-word names for locals/params/helpers when clear.
+- Multi-word names are allowed only when single-word names are ambiguous.
+- Prefer concise names (`cfg`, `err`, `opts`, `dir`, `state`, `timeout`).
 
-// Bad
-const table = sqliteTable("session", {
-  id: text("id").primaryKey(),
-  projectID: text("project_id").notNull(),
-  createdAt: integer("created_at").notNull(),
-})
-```
+### TypeScript usage
 
-## Testing
+- Avoid `any`.
+- Prefer inference over verbose annotations.
+- Use `type` by default; use `interface` where extension/merging is needed.
+- In Drizzle schemas, use snake_case fields (avoid remapping names explicitly).
 
-- Avoid mocks as much as possible
-- Test actual implementation, do not duplicate logic into tests
-- Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
+### Error handling patterns
 
-## Type Checking
+- Prefer early returns over nested branching.
+- Avoid unnecessary `try/catch`; use typed/domain errors.
+- In Effect code, use `Schema.TaggedErrorClass` and explicit failure branches.
 
-- Always run `bun typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
+### Testing patterns
+
+- Use Bun test runner from package dirs (not root).
+- Prefer testing real behavior over duplicated logic/mocks.
+- Effect-heavy modules use `Effect.gen`/layer-based test patterns (`*.effect.test.ts`).
+
+## 4) Tech Stack
+
+- Language/runtime: TypeScript + Bun
+- Monorepo tooling: Turborepo
+- Core architecture: Effect (`effect`), service/layer pattern
+- CLI/TUI: `@opentui/core`, `@opentui/solid`
+- Web: SolidJS + Vite
+- API/schema libs: `hono`, `hono-openapi`, `zod`
+- AI stack: Vercel AI SDK (`ai`) + multiple provider adapters
+- Database: Drizzle ORM + Drizzle Kit (schema in `packages/opencode/src/**/*.sql.ts`)
+
+## Agent-specific notes
+
+- Use parallel tool calls when tasks are independent.
+- Prefer automation; ask only when blocked or unsafe.
+- For diffs/comparisons, use `dev`/`origin/dev` (local `main` may not exist).
