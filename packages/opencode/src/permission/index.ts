@@ -10,7 +10,7 @@ import { PermissionTable } from "@/session/session.sql"
 import { Database, eq } from "@/storage/db"
 import { Log } from "@/util/log"
 import { Wildcard } from "@/util/wildcard"
-import { Deferred, Effect, Layer, Schema, ServiceMap } from "effect"
+import { Deferred, Duration, Effect, Layer, Option, Schema, ServiceMap } from "effect"
 import os from "os"
 import z from "zod"
 import { evaluate as evalRule } from "./evaluate"
@@ -18,6 +18,7 @@ import { PermissionID } from "./schema"
 
 export namespace Permission {
   const log = Log.create({ service: "permission" })
+  const ASK_TIMEOUT = 300_000
 
   export const Action = z.enum(["allow", "deny", "ask"]).meta({
     ref: "PermissionAction",
@@ -140,6 +141,7 @@ export namespace Permission {
   export const layer = Layer.effect(
     Service,
     Effect.gen(function* () {
+      const cfgSvc = yield* Config.Service
       const state = yield* InstanceState.make<State>(
         Effect.fn("Permission.state")(function* (ctx) {
           const row = Database.use((db) =>
@@ -192,11 +194,20 @@ export namespace Permission {
         const deferred = yield* Deferred.make<void, RejectedError | CorrectedError>()
         pending.set(id, { info, deferred })
         void Bus.publish(Event.Asked, info)
+        const answer = Effect.gen(function* () {
+          const cfg = yield* cfgSvc.get()
+          const timeout = cfg.experimental?.permission_ask_timeout ?? ASK_TIMEOUT
+          return yield* Deferred.await(deferred).pipe(
+            Effect.timeoutOption(Duration.millis(timeout)),
+            Effect.flatMap((opt) => {
+              if (Option.isSome(opt)) return Effect.succeed(opt.value)
+              return Effect.fail(new RejectedError())
+            }),
+          )
+        })
         return yield* Effect.ensuring(
-          Deferred.await(deferred),
-          Effect.sync(() => {
-            pending.delete(id)
-          }),
+          answer,
+          Effect.sync(() => pending.delete(id)),
         )
       })
 
@@ -306,7 +317,9 @@ export namespace Permission {
     return result
   }
 
-  export const { runPromise } = makeRuntime(Service, layer)
+  export const defaultLayer: Layer.Layer<Service> = layer.pipe(Layer.provide(Config.defaultLayer))
+
+  export const { runPromise } = makeRuntime(Service, defaultLayer)
 
   export async function ask(input: z.infer<typeof AskInput>) {
     return runPromise((s) => s.ask(input))

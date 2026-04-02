@@ -150,7 +150,7 @@ function makeHttp() {
     LLM.defaultLayer,
     AgentSvc.defaultLayer,
     Command.defaultLayer,
-    Permission.layer,
+    Permission.defaultLayer,
     Plugin.defaultLayer,
     Config.defaultLayer,
     ProviderSvc.defaultLayer,
@@ -479,6 +479,47 @@ it.live("loop continues when finish is stop but assistant has tool parts", () =>
       }
     }),
     { git: true, config: providerCfg },
+  ),
+)
+
+it.live("loop stops after max steps hard limit", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "hello" }],
+      })
+      yield* llm.tool("read", { filePath: "README.md" })
+
+      const result = yield* prompt.loop({ sessionID: session.id })
+      expect(result.info.role).toBe("assistant")
+      expect(yield* llm.calls).toBe(1)
+
+      const msgs = yield* MessageV2.filterCompactedEffect(session.id)
+      const last = msgs.findLast((m) => m.info.role === "assistant")
+      expect(last?.info.role).toBe("assistant")
+      if (!last || last.info.role !== "assistant") return
+      expect(last.info.finish).toBe("tool-calls")
+    }),
+    {
+      git: true,
+      config: (url) => ({
+        ...providerCfg(url),
+        agent: {
+          build: {
+            steps: 1,
+          },
+        },
+      }),
+    },
   ),
 )
 
