@@ -17,6 +17,7 @@ import { Shell } from "@/shell/shell"
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncate"
 import { Plugin } from "@/plugin"
+import { SessionSummary } from "@/session/summary"
 import { Cause, Effect, Exit, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
@@ -274,6 +275,32 @@ function preview(text: string) {
   return text.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
 }
 
+function unsafe(command: string, ps: boolean) {
+  if (!/\r?\n/.test(command)) return
+  if (/<<-?\s*(["'])?[A-Za-z_][A-Za-z0-9_]*\1/.test(command)) return
+  const lines = command.split(/\r?\n/).map((x) => x.trimEnd())
+  const mark = ps ? "`" : "\\"
+  for (const [i, line] of lines.entries()) {
+    if (i === lines.length - 1) break
+    if (!line || !line.endsWith(mark)) {
+      return "Multiline shell commands must use explicit line continuation. Rewrite with trailing \\ (bash) or ` (PowerShell), or use a single line."
+    }
+  }
+}
+
+function noncwd(root: Node, ps: boolean) {
+  for (const node of commands(root)) {
+    const tokens = parts(node).map((item) => item.text)
+    const cmd = ps ? tokens[0]?.toLowerCase() : tokens[0]
+    if (!cmd || !CWD.has(cmd)) return true
+  }
+  return false
+}
+
+export function isCommit(command: string, exit: number | null) {
+  if (exit !== 0) return false
+  return command.split(/&&|\|\||;|\|/).some((x) => /^\s*git\s+commit(?:\s|$)/i.test(x))
+}
 async function parse(command: string, ps: boolean) {
   const tree = await parser().then((p) => (ps ? p.ps : p.bash).parse(command))
   if (!tree) throw new Error("Failed to parse command")
@@ -476,12 +503,24 @@ export const BashTool = Tool.define("bash", async () => {
       }
       const timeout = params.timeout ?? DEFAULT_TIMEOUT
       const ps = PS.has(name)
+      const block = unsafe(params.command, ps)
+      if (block) throw new Error(block)
       const root = await parse(params.command, ps)
+      if (params.command.trim() && commands(root).length === 0) {
+        throw new Error(
+          "Unable to analyze this shell command safely for permission checks. Rewrite as a single-line command.",
+        )
+      }
       const scan = await collect(root, cwd, ps, shell)
+      if (params.command.trim() && noncwd(root, ps) && scan.patterns.size === 0) {
+        throw new Error(
+          "Unable to derive permission patterns from this shell command. Rewrite as a single-line command.",
+        )
+      }
       if (!Instance.containsPath(cwd)) scan.dirs.add(cwd)
       await ask(ctx, scan)
 
-      return run(
+      const result = await run(
         {
           shell,
           name,
@@ -493,6 +532,15 @@ export const BashTool = Tool.define("bash", async () => {
         },
         ctx,
       )
+
+      if (isCommit(params.command, result.metadata.exit)) {
+        SessionSummary.summarize({
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+        })
+      }
+
+      return result
     },
   }
 })
