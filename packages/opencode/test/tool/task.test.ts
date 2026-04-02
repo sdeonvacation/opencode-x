@@ -423,4 +423,53 @@ describe("tool.task", () => {
       },
     ),
   )
+
+  it.live("execute returns a clear timeout error when subagent exceeds timeout", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const { chat, assistant } = yield* seed()
+          const tool = yield* TaskTool
+          const def = yield* Effect.promise(() => tool.init())
+          const resolve = SessionPrompt.resolvePromptParts
+          const prompt = SessionPrompt.prompt
+
+          SessionPrompt.resolvePromptParts = async (template) => [{ type: "text", text: template }]
+          SessionPrompt.prompt = async () => await new Promise<never>(() => {})
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              SessionPrompt.resolvePromptParts = resolve
+              SessionPrompt.prompt = prompt
+            }),
+          )
+
+          const run = def.execute(
+            {
+              description: "hang subagent",
+              prompt: "do work",
+              subagent_type: "general",
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              messages: [],
+              metadata() {},
+              ask: async () => {},
+              extra: { bypassAgentCheck: true },
+            },
+          )
+
+          yield* Effect.promise(() => expect(run).rejects.toThrow("Subagent timed out after 20ms"))
+        }),
+      {
+        config: {
+          experimental: {
+            subagent_timeout: 20,
+          },
+        },
+      },
+    ),
+  )
 })

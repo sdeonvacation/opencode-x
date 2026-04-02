@@ -145,6 +145,7 @@ export namespace MCP {
       description: mcpTool.description ?? "",
       inputSchema: jsonSchema(schema),
       execute: async (args: unknown) => {
+        const value = timeout ?? DEFAULT_TIMEOUT
         return client.callTool(
           {
             name: mcpTool.name,
@@ -153,7 +154,7 @@ export namespace MCP {
           CallToolResultSchema,
           {
             resetTimeoutOnProgress: true,
-            timeout,
+            timeout: value,
           },
         )
       },
@@ -648,13 +649,36 @@ export namespace MCP {
         s: State,
         listFn: (c: Client) => Promise<T[]>,
         label: string,
-      ) {
+      ): Effect.Effect<Record<string, T & { client: string }>> {
+        const fetch = (clientName: string, client: Client) =>
+          Effect.gen(function* () {
+            const cfg = yield* cfgSvc.get()
+            const defaultTimeout = cfg.experimental?.mcp_timeout ?? DEFAULT_TIMEOUT
+            const mcpConfig = cfg.mcp?.[clientName]
+            const entry = mcpConfig && isMcpConfigured(mcpConfig) ? mcpConfig : undefined
+            const timeout = entry?.timeout ?? defaultTimeout
+            return yield* Effect.tryPromise({
+              try: () => withTimeout(listFn(client), timeout),
+              catch: (err) => (err instanceof Error ? err : new Error(String(err))),
+            }).pipe(
+              Effect.catch((err) => {
+                log.error(`failed to get ${label}`, { clientName, error: err.message })
+                return Effect.succeed([] as T[])
+              }),
+            )
+          })
         return Effect.forEach(
           Object.entries(s.clients).filter(([name]) => s.status[name]?.status === "connected"),
           ([clientName, client]) =>
-            fetchFromClient(clientName, client, listFn, label).pipe(Effect.map((items) => Object.entries(items ?? {}))),
+            fetch(clientName, client).pipe(
+              Effect.flatMap((items) =>
+                fetchFromClient(clientName, client, async () => items, label).pipe(
+                  Effect.map((value) => Object.entries(value ?? {})),
+                ),
+              ),
+            ),
           { concurrency: "unbounded" },
-        ).pipe(Effect.map((results) => Object.fromEntries<T & { client: string }>(results.flat())))
+        ).pipe(Effect.map((results) => Object.fromEntries(results.flat()) as Record<string, T & { client: string }>))
       }
 
       const prompts = Effect.fn("MCP.prompts")(function* () {
@@ -679,8 +703,14 @@ export namespace MCP {
           log.warn(`client not found for ${label}`, { clientName })
           return undefined
         }
+        const cfg = yield* cfgSvc.get()
+        const defaultTimeout = cfg.experimental?.mcp_timeout ?? DEFAULT_TIMEOUT
+        const mcpConfig = cfg.mcp?.[clientName]
+        const entry = mcpConfig && isMcpConfigured(mcpConfig) ? mcpConfig : undefined
+        const timeout = entry?.timeout ?? defaultTimeout
+        const call = () => withTimeout(fn(client), timeout)
         return yield* Effect.tryPromise({
-          try: () => fn(client),
+          try: call,
           catch: (e: any) => {
             log.error(`failed to ${label}`, { clientName, ...meta, error: e?.message })
             return e

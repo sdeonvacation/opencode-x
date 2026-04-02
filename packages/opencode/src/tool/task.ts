@@ -8,9 +8,10 @@ import { Agent } from "../agent/agent"
 import { SessionPrompt } from "../session/prompt"
 import { Config } from "../config/config"
 import { Effect } from "effect"
-import { Log } from "@/util/log"
+import { withTimeout } from "@/util/timeout"
 
 const id = "task"
+const SUBAGENT_TIMEOUT = 900_000
 
 const parameters = z.object({
   description: z.string().describe("A short (3-5 words) description of the task"),
@@ -126,21 +127,30 @@ export const TaskTool = Tool.defineEffect(
         () =>
           Effect.gen(function* () {
             const parts = yield* Effect.promise(() => SessionPrompt.resolvePromptParts(params.prompt))
+            const timeout = cfg.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT
             const result = yield* Effect.promise(() =>
-              SessionPrompt.prompt({
-                messageID,
-                sessionID: nextSession.id,
-                model: {
-                  modelID: model.modelID,
-                  providerID: model.providerID,
-                },
-                agent: next.name,
-                tools: {
-                  ...(canTodo ? {} : { todowrite: false }),
-                  ...(canTask ? {} : { task: false }),
-                  ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
-                },
-                parts,
+              withTimeout(
+                SessionPrompt.prompt({
+                  messageID,
+                  sessionID: nextSession.id,
+                  model: {
+                    modelID: model.modelID,
+                    providerID: model.providerID,
+                  },
+                  agent: next.name,
+                  tools: {
+                    ...(canTodo ? {} : { todowrite: false }),
+                    ...(canTask ? {} : { task: false }),
+                    ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
+                  },
+                  parts,
+                }),
+                timeout,
+              ).catch((err) => {
+                if (err instanceof Error && err.message.includes("Operation timed out")) {
+                  throw new Error(`Subagent timed out after ${timeout}ms`)
+                }
+                throw err
               }),
             )
 

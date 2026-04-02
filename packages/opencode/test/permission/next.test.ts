@@ -956,6 +956,9 @@ test("permission requests stay isolated by directory", async () => {
   expect(onePending[0].id).toBe(PermissionID.make("per_dir_a"))
   expect(twoPending[0].id).toBe(PermissionID.make("per_dir_b"))
 
+  const ra = a.catch((err) => err)
+  const rb = b.catch((err) => err)
+
   await Instance.provide({
     directory: one.path,
     fn: () => Permission.reply({ requestID: onePending[0].id, reply: "reject" }),
@@ -965,8 +968,8 @@ test("permission requests stay isolated by directory", async () => {
     fn: () => Permission.reply({ requestID: twoPending[0].id, reply: "reject" }),
   })
 
-  await a.catch(() => {})
-  await b.catch(() => {})
+  await ra
+  await rb
 })
 
 test("pending permission rejects on instance dispose", async () => {
@@ -1143,6 +1146,33 @@ test("ask - abort should clear pending request", async () => {
       } finally {
         await rejectAll()
       }
+    },
+  })
+})
+
+test("ask - times out and rejects when no reply", async () => {
+  await using tmp = await tmpdir({
+    git: true,
+    config: {
+      experimental: {
+        permission_ask_timeout: 10,
+      },
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const ask = Permission.ask({
+        sessionID: SessionID.make("session_timeout"),
+        permission: "bash",
+        patterns: ["ls"],
+        metadata: {},
+        always: [],
+        ruleset: [{ permission: "bash", pattern: "*", action: "ask" }],
+      })
+
+      await expect(ask).rejects.toBeInstanceOf(Permission.RejectedError)
+      expect(await Permission.list()).toHaveLength(0)
     },
   })
 })
