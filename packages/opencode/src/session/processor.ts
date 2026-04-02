@@ -46,6 +46,7 @@ export namespace SessionProcessor {
 
   interface ProcessorContext extends Input {
     toolcalls: Record<string, MessageV2.ToolPart>
+    toolemit: Record<string, number>
     shouldBreak: boolean
     snapshot: string | undefined
     blocked: boolean
@@ -93,6 +94,7 @@ export namespace SessionProcessor {
           sessionID: input.sessionID,
           model: input.model,
           toolcalls: {},
+          toolemit: {},
           shouldBreak: false,
           snapshot: initialSnapshot,
           blocked: false,
@@ -165,11 +167,36 @@ export namespace SessionProcessor {
               } satisfies MessageV2.ToolPart)
               return
 
-            case "tool-input-delta":
+            case "tool-input-delta": {
+              const part = ctx.toolcalls[value.id]
+              if (!part || part.state.status !== "pending") return
+              const delta = "delta" in value ? value.delta : ""
+              if (!delta) return
+              const raw = part.state.raw + delta
+              const chars = raw.length
+              const bytes = Buffer.byteLength(raw)
+              ctx.toolcalls[value.id] = {
+                ...part,
+                state: { ...part.state, raw },
+                metadata: {
+                  ...(part.metadata ?? {}),
+                  pending: { chars, bytes },
+                },
+              }
+              const now = Date.now()
+              if (now - (ctx.toolemit[value.id] ?? 0) < 100) return
+              ctx.toolemit[value.id] = now
+              yield* session.updatePart(ctx.toolcalls[value.id])
               return
+            }
 
-            case "tool-input-end":
+            case "tool-input-end": {
+              const part = ctx.toolcalls[value.id]
+              if (!part || part.state.status !== "pending") return
+              ctx.toolemit[value.id] = Date.now()
+              yield* session.updatePart(part)
               return
+            }
 
             case "tool-call": {
               if (ctx.assistantMessage.summary) {
@@ -183,6 +210,7 @@ export namespace SessionProcessor {
                 state: { status: "running", input: value.input, time: { start: Date.now() } },
                 metadata: value.providerMetadata,
               } satisfies MessageV2.ToolPart)
+              delete ctx.toolemit[value.toolCallId]
 
               const parts = MessageV2.parts(ctx.assistantMessage.id)
               const recentParts = parts.slice(-DOOM_LOOP_THRESHOLD)
@@ -228,6 +256,7 @@ export namespace SessionProcessor {
                 },
               })
               delete ctx.toolcalls[value.toolCallId]
+              delete ctx.toolemit[value.toolCallId]
               return
             }
 
@@ -251,6 +280,7 @@ export namespace SessionProcessor {
                 ctx.blocked = ctx.shouldBreak
               }
               delete ctx.toolcalls[value.toolCallId]
+              delete ctx.toolemit[value.toolCallId]
               return
             }
 
@@ -399,6 +429,7 @@ export namespace SessionProcessor {
             })
           }
           ctx.reasoningMap = {}
+          ctx.toolemit = {}
 
           const parts = MessageV2.parts(ctx.assistantMessage.id)
           for (const part of parts) {

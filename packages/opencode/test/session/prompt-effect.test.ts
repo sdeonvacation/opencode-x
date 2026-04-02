@@ -1035,6 +1035,51 @@ unix(
 )
 
 it.live(
+  "metadata update preserves running start time",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const { prompt, sessions, chat } = yield* boot({
+          title: "Pinned",
+        })
+        yield* sessions.setPermission({
+          sessionID: chat.id,
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+
+        yield* llm.tool("write", {
+          filePath: "out.txt",
+          content: "hello",
+        })
+        yield* llm.text("done")
+
+        const result = yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          noReply: false,
+          parts: [{ type: "text", text: "write file" }],
+        })
+
+        expect(result.info.role).toBe("assistant")
+        const msgs = yield* Effect.sync(() => MessageV2.filterCompacted(MessageV2.stream(chat.id)))
+        const part = msgs
+          .flatMap((x) => x.parts)
+          .find(
+            (x): x is MessageV2.ToolPart => x.type === "tool" && x.tool === "write" && x.state.status === "completed",
+          )
+        expect(part?.state.status).toBe("completed")
+        if (!part || part.state.status !== "completed") return
+
+        const start = part.state.time.start
+        expect(start).toBeGreaterThan(0)
+        expect(part.state.time.end).toBeGreaterThanOrEqual(start)
+      }),
+      { git: true, config: (url) => providerCfg(url) },
+    ),
+  10_000,
+)
+
+it.live(
   "loop waits while shell runs and starts after shell exits",
   () =>
     provideTmpdirServer(
