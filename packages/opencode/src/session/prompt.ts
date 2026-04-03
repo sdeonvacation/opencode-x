@@ -49,6 +49,7 @@ import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
 import { SessionRetry } from "./retry"
+import * as HistoryCache from "./history-cache"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 
@@ -256,8 +257,9 @@ export namespace SessionPrompt {
         agent: Agent.Info
         session: Session.Info
       }) {
+        let changed = false
         const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
-        if (!userMessage) return input.messages
+        if (!userMessage) return { messages: input.messages, changed }
 
         if (!Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE) {
           if (input.agent.name === "plan") {
@@ -269,6 +271,7 @@ export namespace SessionPrompt {
               text: PROMPT_PLAN,
               synthetic: true,
             })
+            changed = true
           }
           const wasPlan = input.messages.some((msg) => msg.info.role === "assistant" && msg.info.agent === "plan")
           if (wasPlan && input.agent.name === "build") {
@@ -280,14 +283,15 @@ export namespace SessionPrompt {
               text: BUILD_SWITCH,
               synthetic: true,
             })
+            changed = true
           }
-          return input.messages
+          return { messages: input.messages, changed }
         }
 
         const assistantMessage = input.messages.findLast((msg) => msg.info.role === "assistant")
         if (input.agent.name !== "plan" && assistantMessage?.info.agent === "plan") {
           const plan = Session.plan(input.session)
-          if (!(yield* fsys.existsSafe(plan))) return input.messages
+          if (!(yield* fsys.existsSafe(plan))) return { messages: input.messages, changed }
           const part = yield* sessions.updatePart({
             id: PartID.ascending(),
             messageID: userMessage.info.id,
@@ -298,10 +302,13 @@ export namespace SessionPrompt {
             synthetic: true,
           })
           userMessage.parts.push(part)
-          return input.messages
+          changed = true
+          return { messages: input.messages, changed }
         }
 
-        if (input.agent.name !== "plan" || assistantMessage?.info.agent === "plan") return input.messages
+        if (input.agent.name !== "plan" || assistantMessage?.info.agent === "plan") {
+          return { messages: input.messages, changed }
+        }
 
         const plan = Session.plan(input.session)
         const exists = yield* fsys.existsSafe(plan)
@@ -384,7 +391,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           synthetic: true,
         })
         userMessage.parts.push(part)
-        return input.messages
+        changed = true
+        return { messages: input.messages, changed }
       })
 
       const resolveTools = Effect.fn("SessionPrompt.resolveTools")(function* (input: {
@@ -1441,6 +1449,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const runLoop: (sessionID: SessionID) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(
         function* (sessionID: SessionID) {
           const ctx = yield* InstanceState.context
+          const historyCache = HistoryCache.create()
           let structured: unknown | undefined
           let step = 0
           const session = yield* sessions.get(sessionID)
@@ -1449,7 +1458,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* status.set(sessionID, { type: "busy" })
             log.info("loop", { step, sessionID })
 
-            let msgs = yield* MessageV2.filterCompactedEffect(sessionID)
+            const modelRef = yield* lastModel(sessionID)
+            const model = yield* getModel(modelRef.providerID, modelRef.modelID, sessionID)
+            const cachedHistory = yield* historyCache.get({ sessionID, model })
+            let msgs = cachedHistory.messages
 
             let lastUser: MessageV2.User | undefined
             let lastAssistant: MessageV2.Assistant | undefined
@@ -1493,7 +1505,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 history: msgs,
               }).pipe(Effect.ignore, Effect.forkIn(scope))
 
-            const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
             const task = tasks.pop()
 
             if (task?.type === "subtask") {
@@ -1536,7 +1547,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               log.info("exiting loop at max agent steps", { sessionID, step, maxSteps })
               break
             }
-            msgs = yield* insertReminders({ messages: msgs, agent, session })
+            const reminderResult = yield* insertReminders({ messages: msgs, agent, session })
+            msgs = reminderResult.messages
+            let messagesChanged = reminderResult.changed
 
             const msg: MessageV2.Assistant = {
               id: MessageID.ascending(),
@@ -1600,17 +1613,24 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                         "Please address this message and continue with your tasks.",
                         "</system-reminder>",
                       ].join("\n")
+                      messagesChanged = true
                     }
                   }
                 }
 
                 yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+                const hooks = yield* plugin.list()
+                if (hooks.some((hook) => !!hook["experimental.chat.messages.transform"])) {
+                  messagesChanged = true
+                }
 
                 const [skills, env, instructions, modelMsgs] = yield* Effect.all([
                   Effect.promise(() => SystemPrompt.skills(agent)),
                   Effect.promise(() => SystemPrompt.environment(model)),
                   instruction.system().pipe(Effect.orDie),
-                  Effect.promise(() => MessageV2.toModelMessages(msgs, model)),
+                  messagesChanged
+                    ? Effect.promise(() => MessageV2.toModelMessages(msgs, model))
+                    : Effect.succeed(cachedHistory.modelMessages),
                 ])
                 const system = [...env, ...(skills ? [skills] : []), ...instructions]
                 const format = lastUser.format ?? { type: "text" as const }

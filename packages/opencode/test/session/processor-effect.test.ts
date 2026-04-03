@@ -1,5 +1,5 @@
 import { NodeFileSystem } from "@effect/platform-node"
-import { expect } from "bun:test"
+import { expect, spyOn } from "bun:test"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import path from "path"
 import type { Agent } from "../../src/agent/agent"
@@ -213,6 +213,57 @@ it.live("session.processor effect tests capture llm input cleanly", () =>
         expect(value).toBe("continue")
         expect(calls).toBe(1)
         expect(parts.some((part) => part.type === "text" && part.text === "hello")).toBe(true)
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session.processor effect tests avoid message parts lookup for tool-call doom-loop checks", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+
+        yield* llm.tool("bash", { command: "ls" })
+        yield* llm.tool("bash", { command: "ls" })
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "no-db-doom-loop")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const input = {
+          user: {
+            id: parent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: parent.time,
+            agent: parent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies MessageV2.User,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "no-db-doom-loop" }],
+          tools: {},
+        } satisfies LLM.StreamInput
+
+        const partsSpy = spyOn(MessageV2, "parts")
+        const first = yield* handle.process(input)
+        const second = yield* handle.process(input)
+        partsSpy.mockRestore()
+
+        expect(first).toBe("continue")
+        expect(second).toBe("continue")
+        expect(yield* llm.calls).toBe(2)
+        // tool-call doom-loop and cleanup should avoid MessageV2.parts lookups (in-memory path)
+        expect(partsSpy).toHaveBeenCalledTimes(0)
       }),
     { git: true, config: (url) => providerCfg(url) },
   ),

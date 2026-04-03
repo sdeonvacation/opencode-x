@@ -39,15 +39,48 @@ import { LSP } from "../lsp"
 import { FileTime } from "../file/time"
 import { Instruction } from "../session/instruction"
 import { AppFileSystem } from "../filesystem"
+import { Bus } from "@/bus"
+import { MCP } from "@/mcp"
+import { BusEvent } from "@/bus/bus-event"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
 
+  export const Changed = BusEvent.define(
+    "tool.registry.changed",
+    z.object({
+      reason: z.enum(["register", "plugin", "mcp"]),
+    }),
+  )
+
   type State = {
     custom: Tool.Info[]
+    pluginToolCount: number
+    pluginHookID: WeakMap<object, number>
+    pluginFunctionID: WeakMap<Function, number>
+    pluginHookSeq: number
+    cache?: ToolCacheEntry
+  }
+
+  type ToolCacheKey = {
+    agentName: string
+    providerID: ProviderID
+    modelID: ModelID
+    customToolCount: number
+    pluginToolCount: number
+    pluginDefinitionSignature: string
+  }
+
+  type ToolCacheDef = Omit<Tool.Def & { id: string }, "execute">
+
+  type ToolCacheEntry = {
+    key: ToolCacheKey
+    definitions: ToolCacheDef[]
+    executors: Map<string, Tool.Def["execute"]>
   }
 
   export interface Interface {
+    readonly register: (tool: Tool.Info) => Effect.Effect<void>
     readonly ids: () => Effect.Effect<string[]>
     readonly named: {
       task: Tool.Info
@@ -125,15 +158,75 @@ export namespace ToolRegistry {
           }
 
           const plugins = yield* plugin.list()
+          let pluginToolCount = 0
           for (const p of plugins) {
             for (const [id, def] of Object.entries(p.tool ?? {})) {
               custom.push(fromPlugin(id, def))
+              pluginToolCount++
             }
           }
 
-          return { custom }
+          const s: State = {
+            custom,
+            pluginToolCount,
+            pluginHookID: new WeakMap(),
+            pluginFunctionID: new WeakMap(),
+            pluginHookSeq: 1,
+          }
+
+          const unsubRegistry = Bus.subscribe(Changed, () => {
+            s.cache = undefined
+          })
+          const unsub = Bus.subscribe(MCP.ToolsChanged, () => {
+            s.cache = undefined
+            void Bus.publish(Changed, { reason: "mcp" })
+          })
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              unsubRegistry()
+              unsub()
+            }),
+          )
+
+          return s
         }),
       )
+
+      function keyMatches(a: ToolCacheKey, b: ToolCacheKey) {
+        return (
+          a.agentName === b.agentName &&
+          a.providerID === b.providerID &&
+          a.modelID === b.modelID &&
+          a.customToolCount === b.customToolCount &&
+          a.pluginToolCount === b.pluginToolCount &&
+          a.pluginDefinitionSignature === b.pluginDefinitionSignature
+        )
+      }
+
+      const pluginDefinitionSignature = Effect.fnUntraced(function* (s: State) {
+        const hooks = yield* plugin.list()
+        const ids: string[] = []
+        for (const hook of hooks) {
+          const fn = (hook as any)["tool.definition"]
+          if (!fn) continue
+          let id = s.pluginHookID.get(hook as object)
+          if (!id) {
+            id = s.pluginHookSeq++
+            s.pluginHookID.set(hook as object, id)
+            s.cache = undefined
+            void Bus.publish(Changed, { reason: "plugin" })
+          }
+          let fnID = s.pluginFunctionID.get(fn as Function)
+          if (!fnID) {
+            fnID = s.pluginHookSeq++
+            s.pluginFunctionID.set(fn as Function, fnID)
+            s.cache = undefined
+            void Bus.publish(Changed, { reason: "plugin" })
+          }
+          ids.push(`${id}:${fnID}`)
+        }
+        return ids.join(",")
+      })
 
       const invalid = yield* build(InvalidTool)
       const ask = yield* build(QuestionTool)
@@ -181,6 +274,18 @@ export namespace ToolRegistry {
         ]
       })
 
+      const register = Effect.fn("ToolRegistry.register")(function* (tool: Tool.Info) {
+        const s = yield* InstanceState.get(state)
+        s.cache = undefined
+        void Bus.publish(Changed, { reason: "register" })
+        const idx = s.custom.findIndex((t) => t.id === tool.id)
+        if (idx >= 0) {
+          s.custom.splice(idx, 1, tool)
+          return
+        }
+        s.custom.push(tool)
+      })
+
       const ids = Effect.fn("ToolRegistry.ids")(function* () {
         const s = yield* InstanceState.get(state)
         const tools = yield* all(s.custom)
@@ -192,6 +297,23 @@ export namespace ToolRegistry {
         agent?: Agent.Info,
       ) {
         const s = yield* InstanceState.get(state)
+        const pluginSignature = yield* pluginDefinitionSignature(s)
+        const key: ToolCacheKey = {
+          agentName: agent?.name ?? "",
+          providerID: model.providerID,
+          modelID: model.modelID,
+          customToolCount: s.custom.length,
+          pluginToolCount: s.pluginToolCount,
+          pluginDefinitionSignature: pluginSignature,
+        }
+        const cache = s.cache
+        if (cache && keyMatches(cache.key, key)) {
+          return cache.definitions.map((def) => ({
+            ...def,
+            execute: cache.executors.get(def.id)!,
+          }))
+        }
+
         const allTools = yield* all(s.custom)
         const filtered = allTools.filter((tool) => {
           if (tool.id === "codesearch" || tool.id === "websearch") {
@@ -206,7 +328,8 @@ export namespace ToolRegistry {
 
           return true
         })
-        return yield* Effect.forEach(
+
+        const next = yield* Effect.forEach(
           filtered,
           Effect.fnUntraced(function* (tool: Tool.Info) {
             using _ = log.time(tool.id)
@@ -226,9 +349,21 @@ export namespace ToolRegistry {
           }),
           { concurrency: "unbounded" },
         )
+
+        s.cache = {
+          key,
+          definitions: next.map((tool) => ({
+            id: tool.id,
+            description: tool.description,
+            parameters: tool.parameters,
+            formatValidationError: tool.formatValidationError,
+          })),
+          executors: new Map(next.map((tool) => [tool.id, tool.execute])),
+        }
+        return next
       })
 
-      return Service.of({ ids, named: { task, read }, tools })
+      return Service.of({ register, ids, named: { task, read }, tools })
     }),
   )
 
@@ -248,6 +383,10 @@ export namespace ToolRegistry {
   )
 
   const { runPromise } = makeRuntime(Service, defaultLayer)
+
+  export async function register(tool: Tool.Info) {
+    return runPromise((svc) => svc.register(tool))
+  }
 
   export async function ids() {
     return runPromise((svc) => svc.ids())
