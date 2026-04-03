@@ -1285,7 +1285,7 @@ describe("tool.bash truncation", () => {
         )
         mustTruncate(result)
         expect(result.output).toContain("truncated")
-        expect(result.output).toContain("The tool call succeeded but the output was truncated")
+        expect(result.output).toContain("Output truncated. Full output:")
       },
     })
   })
@@ -1305,7 +1305,7 @@ describe("tool.bash truncation", () => {
         )
         mustTruncate(result)
         expect(result.output).toContain("truncated")
-        expect(result.output).toContain("The tool call succeeded but the output was truncated")
+        expect(result.output).toContain("Output truncated. Full output:")
       },
     })
   })
