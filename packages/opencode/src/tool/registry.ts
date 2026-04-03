@@ -369,6 +369,7 @@ export namespace ToolRegistry {
 
   export const defaultLayer: Layer.Layer<Service> = Layer.unwrap(
     Effect.sync(() =>
+<<<<<<< HEAD
       layer.pipe(
         Layer.provide(Config.defaultLayer),
         Layer.provide(Plugin.defaultLayer),
@@ -379,6 +380,9 @@ export namespace ToolRegistry {
         Layer.provide(Instruction.defaultLayer),
         Layer.provide(AppFileSystem.defaultLayer),
       ),
+=======
+      layer.pipe(Layer.provide(Bus.layer), Layer.provide(Plugin.defaultLayer), Layer.provide(Config.defaultLayer)),
+>>>>>>> 4f4726dd0 (fix(tool): defer registry default layer)
     ),
   )
 
