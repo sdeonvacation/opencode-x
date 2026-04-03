@@ -9,10 +9,17 @@ const money = new Intl.NumberFormat("en-US", {
   currency: "USD",
 })
 
+export function getUsedTokens(msg: AssistantMessage) {
+  if (msg.summary && msg.finish && !msg.error) return msg.tokens.output
+  return msg.tokens.input + (msg.tokens.cache?.read ?? 0)
+}
+
 function View(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
   const msg = createMemo(() => props.api.state.session.messages(props.session_id))
-  const messageCost = createMemo(() => msg().reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0))
+  const messageCost = createMemo(() =>
+    msg().reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0),
+  )
   const clearedCost = createMemo(() => props.api.kv.get(`cleared_cost_${props.session_id}`, 0))
   const cost = createMemo(() => messageCost() + clearedCost())
 
@@ -25,8 +32,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       }
     }
 
-    const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
+    const tokens = getUsedTokens(last)
     const model = props.api.state.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     return {
       tokens,
