@@ -7,11 +7,13 @@ function assistant(overrides: Partial<AssistantMessage> = {}): AssistantMessage 
     id: "msg_1",
     sessionID: "ses_1",
     role: "assistant",
+    parentID: "msg_parent",
     providerID: "opencode",
     modelID: "big-pickle",
-    path: { cwd: "/tmp" },
+    mode: "",
+    agent: "build",
+    path: { cwd: "/tmp", root: "/tmp" },
     time: { created: Date.now() },
-    system: [],
     cost: 0,
     tokens: {
       input: 1200,
@@ -23,17 +25,13 @@ function assistant(overrides: Partial<AssistantMessage> = {}): AssistantMessage 
       },
     },
     ...overrides,
-  }
+  } as AssistantMessage
 }
 
 describe("sidebar context", () => {
   test("uses summary output tokens after clear-compact", () => {
     const msg = assistant({
-      summary: {
-        additions: 0,
-        deletions: 0,
-        files: 0,
-      },
+      summary: true,
       finish: "stop",
       error: undefined,
       tokens: {
@@ -68,13 +66,14 @@ describe("sidebar context", () => {
   })
 
   test("handles missing cache tokens", () => {
-    const msg = assistant({
+    const msg = {
+      ...assistant(),
       tokens: {
         input: 900,
         output: 75,
         reasoning: 0,
       },
-    })
+    } as unknown as AssistantMessage
 
     expect(getUsedTokens(msg)).toBe(900)
   })
