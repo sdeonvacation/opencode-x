@@ -1,4 +1,4 @@
-import { render, TimeToFirstDraw, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { onFocus, render, TimeToFirstDraw, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { Clipboard } from "@tui/util/clipboard"
 import { Selection } from "@tui/util/selection"
 import { createCliRenderer, MouseButton, type CliRendererConfig } from "@opentui/core"
@@ -47,6 +47,7 @@ import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import { DialogPrompt } from "./ui/dialog-prompt"
+import { restoreRenderableFocus } from "./ui/dialog"
 import { ToastProvider, useToast } from "./ui/toast"
 import { ExitProvider, useExit } from "./context/exit"
 import { Session as SessionApi } from "@/session"
@@ -350,6 +351,16 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     renderer.clearSelection()
   }
   const [terminalTitleEnabled, setTerminalTitleEnabled] = createSignal(kv.get("terminal_title_enabled", true))
+
+  const refreshFocus = () => {
+    queueMicrotask(() => {
+      restoreRenderableFocus(renderer.currentFocusedRenderable)
+    })
+  }
+
+  onFocus(() => {
+    refreshFocus()
+  })
 
   // Update terminal window title based on current route and session
   createEffect(() => {
@@ -1021,6 +1032,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       onSelect: () => {
         process.once("SIGCONT", () => {
           renderer.resume()
+          refreshFocus()
         })
 
         renderer.suspend()

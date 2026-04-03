@@ -7,6 +7,7 @@ import { createStore } from "solid-js/store"
 import { useKeyboard, useRenderer } from "@opentui/solid"
 import { createSimpleContext } from "./helper"
 import { useTuiConfig } from "./tui-config"
+import { restoreRenderableFocus } from "../ui/dialog"
 
 export type KeybindKey = keyof NonNullable<TuiConfig.Info["keybinds"]> & string
 
@@ -36,15 +37,14 @@ export const { use: useKeybind, provider: KeybindProvider } = createSimpleContex
         timeout = setTimeout(() => {
           if (!store.leader) return
           leader(false)
-          if (!focus || focus.isDestroyed) return
-          focus.focus()
+          restoreRenderableFocus(focus)
         }, 2000)
         return
       }
 
       if (!active) {
         if (focus && !renderer.currentFocusedRenderable) {
-          focus.focus()
+          restoreRenderableFocus(focus)
         }
         setStore("leader", false)
       }
