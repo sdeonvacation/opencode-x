@@ -7,6 +7,15 @@ import { useToast } from "./toast"
 import { Flag } from "@/flag/flag"
 import { Selection } from "@tui/util/selection"
 
+type FocusTarget = Pick<Renderable, "isDestroyed" | "focused" | "focus" | "blur">
+
+export function restoreRenderableFocus(target?: FocusTarget | null) {
+  if (!target || target.isDestroyed) return
+  if (target.focused) target.blur()
+  if (target.isDestroyed) return
+  target.focus()
+}
+
 export function Dialog(
   props: ParentProps<{
     size?: "medium" | "large" | "xlarge"
@@ -104,7 +113,7 @@ function init() {
       }
       const found = find(renderer.root)
       if (!found) return
-      focus.focus()
+      restoreRenderableFocus(focus)
     }, 1)
   }
 

@@ -10,6 +10,30 @@ import { SplitBorder } from "../../component/border"
 import { useTextareaKeybindings } from "../../component/textarea-keybindings"
 import { useDialog } from "../../ui/dialog"
 
+type QuestionClient = {
+  question: {
+    reply: (input: { requestID: QuestionRequest["id"]; answers: QuestionAnswer[] }) => Promise<unknown>
+    reject: (input: { requestID: QuestionRequest["id"] }) => Promise<unknown>
+  }
+}
+
+export async function replyQuestionRequest(input: {
+  client: QuestionClient
+  request: QuestionRequest
+  answers: QuestionAnswer[]
+}) {
+  await input.client.question.reply({
+    requestID: input.request.id,
+    answers: input.answers,
+  })
+}
+
+export async function rejectQuestionRequest(input: { client: QuestionClient; request: QuestionRequest }) {
+  await input.client.question.reject({
+    requestID: input.request.id,
+  })
+}
+
 export function QuestionPrompt(props: { request: QuestionRequest }) {
   const sdk = useSDK()
   const { theme } = useTheme()
@@ -20,6 +44,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
   const single = createMemo(() => questions().length === 1 && questions()[0]?.multiple !== true)
   const tabs = createMemo(() => (single() ? 1 : questions().length + 1)) // questions + confirm tab (no confirm for single select)
   const [tabHover, setTabHover] = createSignal<number | "confirm" | null>(null)
+  const [closing, setClosing] = createSignal(false)
   const [store, setStore] = createStore({
     tab: 0,
     answers: [] as QuestionAnswer[],
@@ -43,21 +68,36 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
     return store.answers[store.tab]?.includes(value) ?? false
   })
 
-  function submit() {
+  async function submit() {
+    if (closing()) return
+    setClosing(true)
     const answers = questions().map((_, i) => store.answers[i] ?? [])
-    sdk.client.question.reply({
-      requestID: props.request.id,
-      answers,
-    })
+    try {
+      await replyQuestionRequest({
+        client: sdk.client,
+        request: props.request,
+        answers,
+      })
+    } catch {
+      setClosing(false)
+    }
   }
 
-  function reject() {
-    sdk.client.question.reject({
-      requestID: props.request.id,
-    })
+  async function reject() {
+    if (closing()) return
+    setClosing(true)
+    try {
+      await rejectQuestionRequest({
+        client: sdk.client,
+        request: props.request,
+      })
+    } catch {
+      setClosing(false)
+    }
   }
 
   function pick(answer: string, custom: boolean = false) {
+    if (closing()) return
     const answers = [...store.answers]
     answers[store.tab] = [answer]
     setStore("answers", answers)
@@ -67,10 +107,12 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
       setStore("custom", inputs)
     }
     if (single()) {
-      sdk.client.question.reply({
-        requestID: props.request.id,
+      setClosing(true)
+      replyQuestionRequest({
+        client: sdk.client,
+        request: props.request,
         answers: [[answer]],
-      })
+      }).catch(() => setClosing(false))
       return
     }
     setStore("tab", store.tab + 1)
@@ -123,6 +165,8 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
   const dialog = useDialog()
 
   useKeyboard((evt) => {
+    if (closing()) return
+
     // Skip processing if a dialog (e.g., command palette) is open
     if (dialog.stack.length > 0) return
 
