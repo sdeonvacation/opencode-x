@@ -1044,7 +1044,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       sessionID: input.sessionID,
                       type: "text",
                       synthetic: true,
-                      text: `Called the Read tool with the following input: ${JSON.stringify({ filePath: part.filename })}`,
+                      text: `Read input: ${JSON.stringify({ filePath: part.filename })}`,
                     },
                     {
                       messageID: info.id,
@@ -1110,7 +1110,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       sessionID: input.sessionID,
                       type: "text",
                       synthetic: true,
-                      text: `Called the Read tool with the following input: ${JSON.stringify(args)}`,
+                      text: `Read input: ${JSON.stringify(args)}`,
                     },
                   ]
                   const exit = yield* provider.getModel(info.model.providerID, info.model.modelID).pipe(
@@ -1185,7 +1185,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       sessionID: input.sessionID,
                       type: "text",
                       synthetic: true,
-                      text: `Called the Read tool with the following input: ${JSON.stringify(args)}`,
+                      text: `Read input: ${JSON.stringify(args)}`,
                     },
                     {
                       messageID: info.id,
@@ -1205,7 +1205,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     sessionID: input.sessionID,
                     type: "text",
                     synthetic: true,
-                    text: `Called the Read tool with the following input: {"filePath":"${filepath}"}`,
+                    text: `Read input: {"filePath":"${filepath}"}`,
                   },
                   {
                     id: part.id,
@@ -1419,6 +1419,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           while (true) {
             yield* status.set(sessionID, { type: "busy" })
             log.info("loop", { step, sessionID })
+
+            yield* compaction.prune({ sessionID }).pipe(Effect.ignore)
+            historyCache.invalidate()
 
             const modelRef = yield* lastModel(sessionID)
             const model = yield* getModel(modelRef.providerID, modelRef.modelID, sessionID)
@@ -1647,8 +1650,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             if (outcome === "break") break
             continue
           }
-
-          yield* compaction.prune({ sessionID }).pipe(Effect.ignore, Effect.forkIn(scope))
           return yield* lastAssistant(sessionID)
         },
       )
