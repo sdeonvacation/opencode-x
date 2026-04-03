@@ -548,7 +548,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
           await sdk.client.session.clearTodo({ sessionID: route.data.sessionID })
 
           // Refresh the message list
-          await sync.session.sync(route.data.sessionID)
+          await sync.session.sync(route.data.sessionID, { force: true })
 
           toast.show({
             variant: "info",
@@ -646,7 +646,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
           await sdk.client.session.clearTodo({ sessionID: route.data.sessionID })
 
           // Refresh the message list
-          await sync.session.sync(route.data.sessionID)
+          await sync.session.sync(route.data.sessionID, { force: true })
 
           toast.show({
             variant: "info",
