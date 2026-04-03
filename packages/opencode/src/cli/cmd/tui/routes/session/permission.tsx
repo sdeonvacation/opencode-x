@@ -20,6 +20,49 @@ import { useTuiConfig } from "../../context/tui-config"
 
 type PermissionStage = "permission" | "always" | "reject"
 
+type PermissionReplyInput = {
+  reply: "once" | "always" | "reject"
+  message?: string
+}
+
+type PermissionReplySync = {
+  data: {
+    permission: {
+      [sessionID: string]: PermissionRequest[]
+    }
+  }
+  set: (key: "permission", sessionID: string, requests: PermissionRequest[]) => void
+}
+
+type PermissionReplyClient = {
+  permission: {
+    reply: (input: {
+      requestID: PermissionRequest["id"]
+      reply: PermissionReplyInput["reply"]
+      message?: string
+    }) => Promise<unknown>
+  }
+}
+
+export async function replyPermissionRequest(input: {
+  client: PermissionReplyClient
+  sync: PermissionReplySync
+  request: PermissionRequest
+  reply: PermissionReplyInput
+}) {
+  await input.client.permission.reply({
+    requestID: input.request.id,
+    reply: input.reply.reply,
+    message: input.reply.message,
+  })
+  const requests = input.sync.data.permission[input.request.sessionID] ?? []
+  input.sync.set(
+    "permission",
+    input.request.sessionID,
+    requests.filter((item) => item.id !== input.request.id),
+  )
+}
+
 function normalizePath(input?: string) {
   if (!input) return ""
 
@@ -152,6 +195,15 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
 
   const { theme } = useTheme()
 
+  async function reply(input: PermissionReplyInput) {
+    await replyPermissionRequest({
+      client: sdk.client,
+      sync,
+      request: props.request,
+      reply: input,
+    })
+  }
+
   return (
     <Switch>
       <Match when={store.stage === "always"}>
@@ -184,9 +236,8 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
           onSelect={(option) => {
             setStore("stage", "permission")
             if (option === "cancel") return
-            sdk.client.permission.reply({
+            void reply({
               reply: "always",
-              requestID: props.request.id,
             })
           }}
         />
@@ -194,9 +245,8 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
       <Match when={store.stage === "reject"}>
         <RejectPrompt
           onConfirm={(message) => {
-            sdk.client.permission.reply({
+            void reply({
               reply: "reject",
-              requestID: props.request.id,
               message: message || undefined,
             })
           }}
@@ -447,15 +497,13 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
                     setStore("stage", "reject")
                     return
                   }
-                  sdk.client.permission.reply({
+                  void reply({
                     reply: "reject",
-                    requestID: props.request.id,
                   })
                   return
                 }
-                sdk.client.permission.reply({
+                void reply({
                   reply: "once",
-                  requestID: props.request.id,
                 })
               }}
             />
