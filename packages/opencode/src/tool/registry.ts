@@ -367,7 +367,7 @@ export namespace ToolRegistry {
     }),
   )
 
-  export const defaultLayer = Layer.unwrap(
+  export const defaultLayer: Layer.Layer<Service> = Layer.unwrap(
     Effect.sync(() =>
       layer.pipe(
         Layer.provide(Config.defaultLayer),
