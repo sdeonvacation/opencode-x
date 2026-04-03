@@ -6,7 +6,7 @@ import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessag
 import { LSP } from "../lsp"
 import { Snapshot } from "@/snapshot"
 import { SyncEvent } from "../sync"
-import { Database, NotFoundError, and, desc, eq, inArray, lt, or } from "@/storage/db"
+import { Database, NotFoundError, and, desc, eq, gt, inArray, lt, or } from "@/storage/db"
 import { MessageTable, PartTable, SessionTable } from "./session.sql"
 import { ProviderError } from "@/provider/error"
 import { iife } from "@/util/iife"
@@ -892,6 +892,32 @@ export namespace MessageV2 {
       before = next.cursor
     }
   }
+
+  export const streamAfterEffect = Effect.fnUntraced(function* (input: {
+    sessionID: SessionID
+    after: {
+      id: MessageID
+      time: number
+    }
+  }) {
+    const rows = Database.use((db) =>
+      db
+        .select()
+        .from(MessageTable)
+        .where(
+          and(
+            eq(MessageTable.session_id, input.sessionID),
+            or(
+              gt(MessageTable.time_created, input.after.time),
+              and(eq(MessageTable.time_created, input.after.time), gt(MessageTable.id, input.after.id)),
+            ),
+          ),
+        )
+        .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+        .all(),
+    )
+    return hydrate(rows)
+  })
 
   export function parts(message_id: MessageID) {
     const rows = Database.use((db) =>

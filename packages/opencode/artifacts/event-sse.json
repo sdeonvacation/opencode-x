@@ -1,0 +1,46 @@
+{
+  "artifact": "event-sse",
+  "version": 1,
+  "methodology": {
+    "type": "deterministic-proxy-metrics",
+    "notes": [
+      "No wall-clock thresholds are used as pass/fail criteria.",
+      "Metrics are derived from observed SSE event counts/types under controlled bus publications in test/server/event-sse.test.ts."
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "filtered-stream-skips-irrelevant-events",
+      "test": "session+type filters deliver only relevant/control events under noisy bus traffic",
+      "published": {
+        "message_part_delta_irrelevant": 30,
+        "session_status_control": 1,
+        "permission_asked_relevant": 2
+      },
+      "observed_sse": {
+        "session_status": 1,
+        "permission_asked": 2,
+        "message_part_delta": 0
+      },
+      "evidence": "Session/type filters suppress irrelevant noisy events while preserving control and matching events."
+    },
+    {
+      "id": "unfiltered-baseline-delivers-all",
+      "test": "without filters stream delivers all published events (baseline count)",
+      "published": {
+        "message_part_delta": 5,
+        "permission_asked": 1
+      },
+      "observed_sse": {
+        "message_part_delta": 5,
+        "permission_asked": 1,
+        "total": 6
+      },
+      "evidence": "Baseline confirms no-filter stream includes all published event types used in scenario."
+    }
+  ],
+  "summary": {
+    "pass_condition": "All scenario assertions pass.",
+    "non_flaky_design": "Observed event type/count assertions only; no timing thresholds."
+  }
+}

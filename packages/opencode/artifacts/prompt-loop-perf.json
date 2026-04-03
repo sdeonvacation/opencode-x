@@ -1,0 +1,38 @@
+{
+  "artifact": "prompt-loop-perf",
+  "version": 1,
+  "methodology": {
+    "type": "deterministic-proxy-metrics",
+    "notes": [
+      "No wall-clock thresholds are used as pass/fail criteria.",
+      "Metrics are derived from call counts and persisted-update counts asserted by integration tests in test/session/prompt-loop-perf.test.ts."
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "warm-cache-avoids-full-rebuild",
+      "test": "perf proxy: warm prompt-loop cache avoids redundant full history rebuild",
+      "metrics": {
+        "llm_calls": 2,
+        "filterCompactedEffect_calls": 1,
+        "streamAfterEffect_calls": 1,
+        "toModelMessagesEffect_calls_min": 2
+      },
+      "evidence": "Initial history load occurs once; subsequent loop step uses delta path instead of another full compacted-history rebuild."
+    },
+    {
+      "id": "tool-streaming-coalesces-persisted-updates",
+      "test": "perf proxy: tool streaming coalescer reduces persisted tool updates",
+      "metrics": {
+        "tool_input_delta_chunks": 12,
+        "llm_calls": 2,
+        "persisted_tool_update_calls": "< 12"
+      },
+      "evidence": "Coalescing suppresses one-write-per-delta behavior for tool input streaming; persisted tool updates stay below raw delta chunk count."
+    }
+  ],
+  "summary": {
+    "pass_condition": "All scenario assertions pass.",
+    "non_flaky_design": "Counts-only assertions; no timing thresholds."
+  }
+}
