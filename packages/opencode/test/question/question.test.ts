@@ -480,3 +480,29 @@ test("ask - times out and rejects when unanswered", async () => {
     },
   })
 })
+
+test("ask - uses a 15 minute default timeout", async () => {
+  await using tmp = await tmpdir({ git: true })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const started = Date.now()
+      const ask = Question.ask({
+        sessionID: SessionID.make("ses_timeout_default"),
+        questions: [
+          {
+            question: "Proceed?",
+            header: "Confirm",
+            options: [{ label: "Yes", description: "Continue" }],
+          },
+        ],
+      })
+
+      await Bun.sleep(25)
+      expect(await Question.list()).toHaveLength(1)
+      await Question.reject((await Question.list())[0].id)
+      await expect(ask).rejects.toBeInstanceOf(Question.RejectedError)
+      expect(Date.now() - started).toBeLessThan(900_000)
+    },
+  })
+})

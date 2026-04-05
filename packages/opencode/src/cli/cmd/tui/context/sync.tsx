@@ -168,9 +168,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           setStore(
             "question",
             event.properties.sessionID,
-            produce((draft) => {
-              draft.splice(match.index, 1)
-            }),
+            requests.filter((_, index) => index !== match.index),
           )
           break
         }

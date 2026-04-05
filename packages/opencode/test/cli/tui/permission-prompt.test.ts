@@ -110,6 +110,7 @@ test("replyQuestionRequest waits for sync events to remove the request", async (
     questions: [],
   } as Parameters<typeof replyQuestionRequest>[0]["request"]
   const reply = mock(async () => ({}))
+  const set = mock(() => {})
 
   await replyQuestionRequest({
     client: {
@@ -117,6 +118,14 @@ test("replyQuestionRequest waits for sync events to remove the request", async (
         reply,
         reject: mock(async () => ({})),
       },
+    },
+    sync: {
+      data: {
+        question: {
+          [sessionID]: [request, { ...request, id: "que_2" }],
+        },
+      },
+      set,
     },
     request,
     answers: [["Option 1"]],
@@ -127,6 +136,8 @@ test("replyQuestionRequest waits for sync events to remove the request", async (
     requestID: "que_1",
     answers: [["Option 1"]],
   })
+  expect(set).toHaveBeenCalledTimes(1)
+  expect(set).toHaveBeenCalledWith("question", sessionID, [expect.objectContaining({ id: "que_2" })])
 })
 
 test("rejectQuestionRequest waits for sync events to remove the request", async () => {
@@ -136,6 +147,7 @@ test("rejectQuestionRequest waits for sync events to remove the request", async 
     questions: [],
   } as Parameters<typeof rejectQuestionRequest>[0]["request"]
   const reject = mock(async () => ({}))
+  const set = mock(() => {})
 
   await rejectQuestionRequest({
     client: {
@@ -144,6 +156,14 @@ test("rejectQuestionRequest waits for sync events to remove the request", async 
         reject,
       },
     },
+    sync: {
+      data: {
+        question: {
+          [sessionID]: [request, { ...request, id: "que_2" }],
+        },
+      },
+      set,
+    },
     request,
   })
 
@@ -151,4 +171,6 @@ test("rejectQuestionRequest waits for sync events to remove the request", async 
   expect(reject).toHaveBeenCalledWith({
     requestID: "que_1",
   })
+  expect(set).toHaveBeenCalledTimes(1)
+  expect(set).toHaveBeenCalledWith("question", sessionID, [expect.objectContaining({ id: "que_2" })])
 })
