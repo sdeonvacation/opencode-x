@@ -14,9 +14,13 @@ import { ToolRegistry } from "../../src/tool/registry"
 import { provideTmpdirInstance, tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
-afterEach(async () => {
-  await Instance.disposeAll()
-})
+// Helper: initialize TaskTool (Tool.defineEffect) for non-Effect test contexts
+const initTask = () =>
+  Effect.runPromise(
+    Effect.flatMap(Effect.provide(TaskTool, Layer.mergeAll(Agent.defaultLayer, Config.defaultLayer)), (info) =>
+      Effect.promise(() => info.init()),
+    ),
+  )
 
 const ref = {
   providerID: ProviderID.make("test"),
@@ -423,8 +427,6 @@ describe("tool.task", () => {
       },
     ),
   )
-    })
-  })
 
   test("returns a clear timeout error when subagent exceeds timeout", async () => {
     await using tmp = await tmpdir({
@@ -444,6 +446,9 @@ describe("tool.task", () => {
         const cfg = spyOn(Config, "get").mockResolvedValue({
           experimental: { subagent_timeout: 20 },
         } as Awaited<ReturnType<typeof Config.get>>)
+        const get = spyOn(Session, "get").mockResolvedValue({
+          id: sessionID,
+        } as Awaited<ReturnType<typeof Session.get>>)
         const create = spyOn(Session, "create").mockResolvedValue({ id: SessionID.make("ses_sub_task") } as Awaited<
           ReturnType<typeof Session.create>
         >)
@@ -461,7 +466,7 @@ describe("tool.task", () => {
         })
 
         try {
-          const tool = await TaskTool.init()
+          const tool = await initTask()
           const run = tool.execute(
             {
               description: "hang subagent",
@@ -483,6 +488,239 @@ describe("tool.task", () => {
           await expect(run).rejects.toThrow("Subagent timed out after 20ms")
         } finally {
           cfg.mockRestore()
+          get.mockRestore()
+          create.mockRestore()
+          msg.mockRestore()
+          parts.mockRestore()
+          prompt.mockRestore()
+        }
+      },
+    })
+  })
+
+  test("description documents explicit category and ultrawork parameters", async () => {
+    await using tmp = await tmpdir()
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const tool = await initTask()
+
+        expect(tool.description).toContain("task_category")
+        expect(tool.description).toContain("use_ultrawork")
+      },
+    })
+  })
+
+  test("routes category normally, ultrawork by keyword, ignores code blocks, and keeps explicit access", async () => {
+    await using tmp = await tmpdir({
+      config: {
+        experimental: {
+          task_categories: {
+            review: { providerID: "anthropic", modelID: "claude-review" },
+          },
+          ultrawork_model: { providerID: "openai", modelID: "ultra" },
+        },
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const sessionID = SessionID.make("ses_task_route")
+        const messageID = MessageID.make("msg_task_route")
+        const createdSessionID = SessionID.make("ses_sub_task_route")
+        const ask = async () => {}
+        const metadata = () => {}
+        const baseCtx = {
+          sessionID,
+          messageID,
+          agent: "build",
+          abort: AbortSignal.any([]),
+          messages: [],
+          metadata,
+          ask,
+          extra: { bypassAgentCheck: true },
+        }
+
+        const get = spyOn(Session, "get").mockImplementation((async (id: Parameters<typeof Session.get>[0]) => {
+          if (id === sessionID) return { id: sessionID } as never
+          if (id === createdSessionID) return { id: createdSessionID, parentID: sessionID } as never
+          throw new Error(`Unknown session ${id}`)
+        }) as unknown as typeof Session.get)
+        const create = spyOn(Session, "create").mockResolvedValue({ id: createdSessionID } as Awaited<
+          ReturnType<typeof Session.create>
+        >)
+        const msg = spyOn(MessageV2, "get").mockReturnValue({
+          info: {
+            role: "assistant",
+            modelID: "gpt-5.2",
+            providerID: "openai",
+          },
+        } as ReturnType<typeof MessageV2.get>)
+        const parts = spyOn(SessionPrompt, "resolvePromptParts").mockResolvedValue([{ type: "text", text: "do work" }])
+        const prompt = spyOn(SessionPrompt, "prompt")
+          .mockResolvedValueOnce({ parts: [{ type: "text", text: "done" }] } as Awaited<
+            ReturnType<typeof SessionPrompt.prompt>
+          >)
+          .mockResolvedValueOnce({ parts: [{ type: "text", text: "done" }] } as Awaited<
+            ReturnType<typeof SessionPrompt.prompt>
+          >)
+          .mockResolvedValueOnce({ parts: [{ type: "text", text: "done" }] } as Awaited<
+            ReturnType<typeof SessionPrompt.prompt>
+          >)
+          .mockResolvedValueOnce({ parts: [{ type: "text", text: "done" }] } as Awaited<
+            ReturnType<typeof SessionPrompt.prompt>
+          >)
+
+        try {
+          const tool = await initTask()
+
+          await tool.execute(
+            {
+              description: "route by category",
+              prompt: "do work",
+              subagent_type: "general",
+              task_category: "review",
+            },
+            baseCtx,
+          )
+
+          await tool.execute(
+            {
+              description: "route by ultrawork",
+              prompt: "please use ultrawork for this",
+              subagent_type: "general",
+            },
+            baseCtx,
+          )
+
+          await tool.execute(
+            {
+              description: "ignore code block keyword",
+              prompt: "```ts\nconst mode = 'ultrawork'\n```",
+              subagent_type: "general",
+              task_category: "review",
+            },
+            baseCtx,
+          )
+
+          await tool.execute(
+            {
+              description: "route by ultrawork explicit",
+              prompt: "normal prompt",
+              subagent_type: "general",
+              use_ultrawork: true,
+            },
+            baseCtx,
+          )
+
+          expect(prompt.mock.calls[0]?.[0].model).toEqual({
+            providerID: ProviderID.make("anthropic"),
+            modelID: ModelID.make("claude-review"),
+          })
+          expect(prompt.mock.calls[1]?.[0].model).toEqual({
+            providerID: ProviderID.make("openai"),
+            modelID: ModelID.make("ultra"),
+          })
+          expect(prompt.mock.calls[2]?.[0].model).toEqual({
+            providerID: ProviderID.make("anthropic"),
+            modelID: ModelID.make("claude-review"),
+          })
+          expect(prompt.mock.calls[3]?.[0].model).toEqual({
+            providerID: ProviderID.make("openai"),
+            modelID: ModelID.make("ultra"),
+          })
+        } finally {
+          get.mockRestore()
+          create.mockRestore()
+          msg.mockRestore()
+          parts.mockRestore()
+          prompt.mockRestore()
+        }
+      },
+    })
+  })
+
+  test("uses session-scoped loop detection across task executions", async () => {
+    await using tmp = await tmpdir({
+      config: {
+        experimental: {
+          loop_detector_threshold: 2,
+        },
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const sessionID = SessionID.make("ses_task_loop")
+        const messageID = MessageID.make("msg_task_loop")
+        const tool = await initTask()
+        const get = spyOn(Session, "get").mockImplementation((async (id: Parameters<typeof Session.get>[0]) => {
+          if (id === sessionID) return { id: sessionID } as never
+          if (String(id).startsWith("ses_sub_task_loop_")) return { id, parentID: sessionID } as never
+          throw new Error(`Unknown session ${id}`)
+        }) as unknown as typeof Session.get)
+        const create = spyOn(Session, "create")
+          .mockResolvedValueOnce({ id: SessionID.make("ses_sub_task_loop_1") } as Awaited<
+            ReturnType<typeof Session.create>
+          >)
+          .mockResolvedValueOnce({ id: SessionID.make("ses_sub_task_loop_2") } as Awaited<
+            ReturnType<typeof Session.create>
+          >)
+        const msg = spyOn(MessageV2, "get").mockReturnValue({
+          info: {
+            role: "assistant",
+            modelID: "gpt-5.2",
+            providerID: "openai",
+          },
+        } as ReturnType<typeof MessageV2.get>)
+        const parts = spyOn(SessionPrompt, "resolvePromptParts").mockResolvedValue([{ type: "text", text: "repeat" }])
+        const prompt = spyOn(SessionPrompt, "prompt").mockResolvedValue({
+          parts: [{ type: "text", text: "done" }],
+        } as Awaited<ReturnType<typeof SessionPrompt.prompt>>)
+
+        try {
+          await tool.execute(
+            {
+              description: "first run",
+              prompt: "repeat",
+              subagent_type: "general",
+            },
+            {
+              sessionID,
+              messageID,
+              agent: "build",
+              abort: AbortSignal.any([]),
+              messages: [],
+              metadata: () => {},
+              ask: async () => {},
+              extra: { bypassAgentCheck: true },
+            },
+          )
+
+          await expect(
+            tool.execute(
+              {
+                description: "second run",
+                prompt: "repeat",
+                subagent_type: "general",
+              },
+              {
+                sessionID,
+                messageID,
+                agent: "build",
+                abort: AbortSignal.any([]),
+                messages: [],
+                metadata: () => {},
+                ask: async () => {},
+                extra: { bypassAgentCheck: true },
+              },
+            ),
+          ).rejects.toThrow('Loop detected: tool "task" called 2 consecutive times with identical input')
+        } finally {
+          get.mockRestore()
           create.mockRestore()
           msg.mockRestore()
           parts.mockRestore()
