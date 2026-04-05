@@ -536,6 +536,7 @@ export namespace Config {
         .boolean()
         .optional()
         .describe("Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)"),
+      parallelToolCalls: z.boolean().optional().describe("Override safe parallel tool-call behavior for this agent"),
       options: z.record(z.string(), z.any()).optional(),
       color: z
         .union([
@@ -565,6 +566,7 @@ export namespace Config {
         "top_p",
         "mode",
         "hidden",
+        "parallelToolCalls",
         "color",
         "steps",
         "maxSteps",
@@ -789,6 +791,10 @@ export namespace Config {
     .extend({
       whitelist: z.array(z.string()).optional(),
       blacklist: z.array(z.string()).optional(),
+      parallelToolCalls: z
+        .boolean()
+        .optional()
+        .describe("Override safe parallel tool-call provider support for this provider"),
       models: z
         .record(
           z.string(),
@@ -1020,6 +1026,11 @@ export namespace Config {
         .object({
           disable_paste_summary: z.boolean().optional(),
           batch_tool: z.boolean().optional().describe("Enable the batch tool"),
+          parallel_tool_calls: z
+            .boolean()
+            .optional()
+            .describe("Enable safe parallel tool calls when all active tools are pre-approved and parallel-safe"),
+          parallel_read: z.boolean().optional().describe("Allow the read tool to participate in parallel tool calls"),
           openTelemetry: z
             .boolean()
             .optional()

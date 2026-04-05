@@ -29,6 +29,7 @@ export namespace Tool {
   export interface Def<Parameters extends z.ZodType = z.ZodType, M extends Metadata = Metadata> {
     description: string
     parameters: Parameters
+    parallelSafe?: boolean
     execute(
       args: z.infer<Parameters>,
       ctx: Context,
@@ -43,6 +44,7 @@ export namespace Tool {
 
   export interface Info<Parameters extends z.ZodType = z.ZodType, M extends Metadata = Metadata> {
     id: string
+    parallelSafe?: boolean
     init: (ctx?: InitContext) => Promise<Def<Parameters, M>>
   }
 
@@ -99,6 +101,7 @@ export namespace Tool {
   ): Info<Parameters, Result> {
     return {
       id,
+      parallelSafe: init instanceof Function ? undefined : init.parallelSafe,
       init: wrap(id, init),
     }
   }
@@ -107,6 +110,10 @@ export namespace Tool {
     id: string,
     init: Effect.Effect<((ctx?: InitContext) => Promise<Def<Parameters, Result>>) | Def<Parameters, Result>, never, R>,
   ): Effect.Effect<Info<Parameters, Result>, never, R> {
-    return Effect.map(init, (next) => ({ id, init: wrap(id, next) }))
+    return Effect.map(init, (next) => ({
+      id,
+      parallelSafe: next instanceof Function ? undefined : next.parallelSafe,
+      init: wrap(id, next),
+    }))
   }
 }

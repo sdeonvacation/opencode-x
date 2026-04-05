@@ -943,6 +943,21 @@ export namespace ProviderTransform {
     return { [key]: options }
   }
 
+  export function parallelToolCallOptions(input: {
+    model: Provider.Model
+    enabled: boolean
+    provider?: {
+      parallelToolCalls?: boolean
+    }
+  }) {
+    if (input.provider?.parallelToolCalls === false) return {}
+    if (!input.enabled) return {}
+    if (input.model.api.npm === "@ai-sdk/openai" || input.model.api.npm === "@ai-sdk/github-copilot") {
+      return { parallelToolCalls: true }
+    }
+    return {}
+  }
+
   export function maxOutputTokens(model: Provider.Model): number {
     return Math.min(model.limit.output, OUTPUT_TOKEN_MAX) || OUTPUT_TOKEN_MAX
   }

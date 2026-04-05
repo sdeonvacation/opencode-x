@@ -337,12 +337,14 @@ export namespace ToolRegistry {
             const output = {
               description: next.description,
               parameters: next.parameters,
+              parallelSafe: tool.parallelSafe,
             }
             yield* plugin.trigger("tool.definition", { toolID: tool.id }, output)
             return {
               id: tool.id,
               description: output.description,
               parameters: output.parameters,
+              parallelSafe: output.parallelSafe,
               execute: next.execute,
               formatValidationError: next.formatValidationError,
             }
@@ -356,6 +358,7 @@ export namespace ToolRegistry {
             id: tool.id,
             description: tool.description,
             parameters: tool.parameters,
+            parallelSafe: tool.parallelSafe,
             formatValidationError: tool.formatValidationError,
           })),
           executors: new Map(next.map((tool) => [tool.id, tool.execute])),

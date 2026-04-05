@@ -406,6 +406,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }) {
         using _ = log.time("resolveTools")
         const tools: Record<string, AITool> = {}
+        const toolMeta = new Map<string, LLM.ToolMeta>()
 
         const context = (args: any, options: ToolExecutionOptions): Tool.Context => ({
           sessionID: input.session.id,
@@ -449,6 +450,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           input.agent,
         )) {
           const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
+          toolMeta.set(item.id, { parallelSafe: item.parallelSafe === true })
           tools[item.id] = tool({
             id: item.id as any,
             description: item.description,
@@ -555,10 +557,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 }
               }),
             )
+          toolMeta.set(key, { parallelSafe: false })
           tools[key] = item
         }
 
-        return tools
+        return { tools, toolMeta }
       })
 
       const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
@@ -1581,7 +1584,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
                 const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
 
-                const tools = yield* resolveTools({
+                const resolvedTools = yield* resolveTools({
                   agent,
                   session,
                   model,
@@ -1590,6 +1593,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   bypassAgentCheck,
                   messages: msgs,
                 })
+                const tools = resolvedTools.tools
 
                 if (lastUser.format?.type === "json_schema") {
                   tools["StructuredOutput"] = createStructuredOutputTool({
@@ -1647,6 +1651,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   system,
                   messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
                   tools,
+                  toolMeta: resolvedTools.toolMeta,
                   model,
                   toolChoice: format.type === "json_schema" ? "required" : undefined,
                 })
