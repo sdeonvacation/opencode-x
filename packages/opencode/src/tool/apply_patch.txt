@@ -16,13 +16,12 @@ Example patch:
 
 ```
 *** Begin Patch
-*** Add File: hello.txt
-+Hello world
 *** Update File: src/app.py
-*** Move to: src/main.py
 @@ def greet():
 -print("Hi")
 +print("Hello, world!")
+*** Add File: hello.txt
++Hello world
 *** Delete File: obsolete.txt
 *** End Patch
 ```
@@ -31,3 +30,8 @@ It is important to remember:
 
 - You must include a header with your intended action (Add/Delete/Update)
 - You must prefix new lines with `+` even when creating a new file
+- For `*** Update File:` hunks, copy the existing lines EXACTLY from the latest file contents before editing them
+- Prefer the smallest possible hunk that uniquely identifies the change; do not rewrite an entire function when only a few lines change
+- Use `@@` with a short unique context line when the same code pattern may appear multiple times in the file
+- Never reconstruct unchanged lines from memory; re-read the file and copy them verbatim
+- If a patch fails to apply, assume the file is stale or context was not exact, then re-read the file and generate a new minimal patch
