@@ -9,6 +9,7 @@ import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../component/border"
 import { useTextareaKeybindings } from "../../component/textarea-keybindings"
 import { useDialog } from "../../ui/dialog"
+import { useSync } from "../../context/sync"
 
 type QuestionClient = {
   question: {
@@ -17,8 +18,27 @@ type QuestionClient = {
   }
 }
 
+type QuestionSync = {
+  data: {
+    question: {
+      [sessionID: string]: QuestionRequest[]
+    }
+  }
+  set: (key: "question", sessionID: string, requests: QuestionRequest[]) => void
+}
+
+function removeQuestionRequest(sync: QuestionSync, request: QuestionRequest) {
+  const requests = sync.data.question[request.sessionID] ?? []
+  sync.set(
+    "question",
+    request.sessionID,
+    requests.filter((item) => item.id !== request.id),
+  )
+}
+
 export async function replyQuestionRequest(input: {
   client: QuestionClient
+  sync?: QuestionSync
   request: QuestionRequest
   answers: QuestionAnswer[]
 }) {
@@ -26,16 +46,23 @@ export async function replyQuestionRequest(input: {
     requestID: input.request.id,
     answers: input.answers,
   })
+  if (input.sync) removeQuestionRequest(input.sync, input.request)
 }
 
-export async function rejectQuestionRequest(input: { client: QuestionClient; request: QuestionRequest }) {
+export async function rejectQuestionRequest(input: {
+  client: QuestionClient
+  sync?: QuestionSync
+  request: QuestionRequest
+}) {
   await input.client.question.reject({
     requestID: input.request.id,
   })
+  if (input.sync) removeQuestionRequest(input.sync, input.request)
 }
 
 export function QuestionPrompt(props: { request: QuestionRequest }) {
   const sdk = useSDK()
+  const sync = useSync()
   const { theme } = useTheme()
   const keybind = useKeybind()
   const bindings = useTextareaKeybindings()
@@ -75,6 +102,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
     try {
       await replyQuestionRequest({
         client: sdk.client,
+        sync,
         request: props.request,
         answers,
       })
@@ -89,6 +117,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
     try {
       await rejectQuestionRequest({
         client: sdk.client,
+        sync,
         request: props.request,
       })
     } catch {
@@ -110,6 +139,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
       setClosing(true)
       replyQuestionRequest({
         client: sdk.client,
+        sync,
         request: props.request,
         answers: [[answer]],
       }).catch(() => setClosing(false))
