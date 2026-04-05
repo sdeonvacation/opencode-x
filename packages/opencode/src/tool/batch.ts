@@ -1,6 +1,8 @@
 import z from "zod"
 import { Tool } from "./tool"
 import { ProviderID, ModelID } from "../provider/schema"
+import { Config } from "../config/config"
+import { acquire, release } from "../orchestration/concurrency"
 import { errorMessage } from "../util/error"
 import DESCRIPTION from "./batch.txt"
 
@@ -34,9 +36,11 @@ export const BatchTool = Tool.define("batch", async () => {
     async execute(params, ctx) {
       const { Session } = await import("../session")
       const { PartID } = await import("../session/schema")
+      const config = await Config.get()
 
       const toolCalls = params.tool_calls.slice(0, 25)
       const discardedCalls = params.tool_calls.slice(25)
+      const batchConcurrency = config.experimental?.model_concurrency?.batch ?? 25
 
       const { ToolRegistry } = await import("./registry")
       const availableTools = await ToolRegistry.tools({ modelID: ModelID.make(""), providerID: ProviderID.make("") })
@@ -131,7 +135,17 @@ export const BatchTool = Tool.define("batch", async () => {
         }
       }
 
-      const results = await Promise.all(toolCalls.map((call) => executeCall(call)))
+      const results = await Promise.all(
+        toolCalls.map(async (call) => {
+          const key = `batch:${call.tool}`
+          await acquire(key, batchConcurrency, ctx.abort)
+          try {
+            return await executeCall(call)
+          } finally {
+            release(key)
+          }
+        }),
+      )
 
       // Add discarded calls as errors
       const now = Date.now()

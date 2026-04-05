@@ -678,6 +678,8 @@ it.live(
               description: z.string(),
               prompt: z.string(),
               subagent_type: z.string(),
+              task_category: z.string().optional(),
+              use_ultrawork: z.boolean().optional(),
               task_id: z.string().optional(),
               command: z.string().optional(),
             }),
@@ -773,7 +775,7 @@ it.live("concurrent loop callers get same result", () =>
         expect(a.info.role).toBe("assistant")
         yield* prompt.assertNotBusy(chat.id)
       }),
-    { git: true },
+    { git: true, config: cfg },
   ),
 )
 

@@ -1053,6 +1053,47 @@ export namespace Config {
             .positive()
             .optional()
             .describe("Timeout in milliseconds for question prompts"),
+          loop_detector_threshold: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Consecutive identical tool calls before loop detection triggers (default: 5)"),
+          max_subagent_depth: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Maximum subagent nesting depth (default: 3)"),
+          max_subagent_descendants: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Maximum total subagent descendants per root session (default: 50)"),
+          model_concurrency: z
+            .record(z.string(), z.number().int().positive())
+            .optional()
+            .describe("Per-model concurrency limits keyed by 'providerID:modelID' (default: 5 for all)"),
+          task_categories: z
+            .record(
+              z.string(),
+              z.object({
+                providerID: z.string(),
+                modelID: z.string(),
+              }),
+            )
+            .optional()
+            .describe("Map task category names to specific provider/model combos"),
+          ultrawork_model: z
+            .object({
+              providerID: z.string(),
+              modelID: z.string(),
+            })
+            .optional()
+            .describe(
+              "Model override used for keyword-triggered ultrawork routing, or when task.use_ultrawork is explicitly set to true",
+            ),
         })
         .optional(),
     })
