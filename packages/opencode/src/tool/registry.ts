@@ -260,6 +260,7 @@ export namespace ToolRegistry {
             const output = {
               description: tool.description,
               parameters: tool.parameters,
+              parallelSafe: tool.parallelSafe,
             }
             yield* plugin.trigger("tool.definition", { toolID: tool.id }, output)
             return {
@@ -272,6 +273,7 @@ export namespace ToolRegistry {
                 .filter(Boolean)
                 .join("\n"),
               parameters: output.parameters,
+              parallelSafe: output.parallelSafe,
               execute: tool.execute,
               formatValidationError: tool.formatValidationError,
             }

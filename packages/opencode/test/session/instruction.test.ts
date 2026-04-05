@@ -138,6 +138,30 @@ describe("Instruction.resolve", () => {
     })
   })
 
+  test("dedupes nearby instructions across concurrent resolve calls for one message", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "subdir", "AGENTS.md"), "# Subdir Instructions")
+        await Bun.write(path.join(dir, "subdir", "nested", "file.ts"), "const x = 1")
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const filepath = path.join(tmp.path, "subdir", "nested", "file.ts")
+        const id = MessageID.make("message-claim-concurrent")
+
+        const [first, second] = await Promise.all([
+          Instruction.resolve([], filepath, id),
+          Instruction.resolve([], filepath, id),
+        ])
+
+        expect(first.length + second.length).toBe(1)
+        expect([...first, ...second][0]?.filepath).toBe(path.join(tmp.path, "subdir", "AGENTS.md"))
+      },
+    })
+  })
+
   test("clear allows nearby instructions to be attached again for the same message", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {

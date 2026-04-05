@@ -136,6 +136,7 @@ export namespace LSPClient {
     const files: {
       [path: string]: number
     } = {}
+    const opening = new Set<string>()
 
     const result = {
       root: input.root,
@@ -148,60 +149,66 @@ export namespace LSPClient {
       notify: {
         async open(input: { path: string }) {
           input.path = path.isAbsolute(input.path) ? input.path : path.resolve(Instance.directory, input.path)
-          const text = await Filesystem.readText(input.path)
-          const extension = path.extname(input.path)
-          const languageId = LANGUAGE_EXTENSIONS[extension] ?? "plaintext"
+          if (files[input.path] !== undefined || opening.has(input.path)) return
+          opening.add(input.path)
+          try {
+            const text = await Filesystem.readText(input.path)
+            const extension = path.extname(input.path)
+            const languageId = LANGUAGE_EXTENSIONS[extension] ?? "plaintext"
 
-          const version = files[input.path]
-          if (version !== undefined) {
+            const version = files[input.path]
+            if (version !== undefined) {
+              log.info("workspace/didChangeWatchedFiles", input)
+              await connection.sendNotification("workspace/didChangeWatchedFiles", {
+                changes: [
+                  {
+                    uri: pathToFileURL(input.path).href,
+                    type: 2, // Changed
+                  },
+                ],
+              })
+
+              const next = version + 1
+              files[input.path] = next
+              log.info("textDocument/didChange", {
+                path: input.path,
+                version: next,
+              })
+              await connection.sendNotification("textDocument/didChange", {
+                textDocument: {
+                  uri: pathToFileURL(input.path).href,
+                  version: next,
+                },
+                contentChanges: [{ text }],
+              })
+              return
+            }
+
             log.info("workspace/didChangeWatchedFiles", input)
             await connection.sendNotification("workspace/didChangeWatchedFiles", {
               changes: [
                 {
                   uri: pathToFileURL(input.path).href,
-                  type: 2, // Changed
+                  type: 1, // Created
                 },
               ],
             })
 
-            const next = version + 1
-            files[input.path] = next
-            log.info("textDocument/didChange", {
-              path: input.path,
-              version: next,
-            })
-            await connection.sendNotification("textDocument/didChange", {
+            log.info("textDocument/didOpen", input)
+            diagnostics.delete(input.path)
+            await connection.sendNotification("textDocument/didOpen", {
               textDocument: {
                 uri: pathToFileURL(input.path).href,
-                version: next,
+                languageId,
+                version: 0,
+                text,
               },
-              contentChanges: [{ text }],
             })
+            files[input.path] = 0
             return
+          } finally {
+            opening.delete(input.path)
           }
-
-          log.info("workspace/didChangeWatchedFiles", input)
-          await connection.sendNotification("workspace/didChangeWatchedFiles", {
-            changes: [
-              {
-                uri: pathToFileURL(input.path).href,
-                type: 1, // Created
-              },
-            ],
-          })
-
-          log.info("textDocument/didOpen", input)
-          diagnostics.delete(input.path)
-          await connection.sendNotification("textDocument/didOpen", {
-            textDocument: {
-              uri: pathToFileURL(input.path).href,
-              languageId,
-              version: 0,
-              text,
-            },
-          })
-          files[input.path] = 0
-          return
         },
       },
       get diagnostics() {
