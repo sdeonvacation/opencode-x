@@ -189,10 +189,16 @@ export namespace Instruction {
           filepath: string,
           messageID: MessageID,
         ) {
+          const s = yield* InstanceState.get(state)
+          let claims = s.claims.get(messageID)
+          if (!claims) {
+            claims = new Set()
+            s.claims.set(messageID, claims)
+          }
+
           const sys = yield* systemPaths()
           const already = extract(messages)
           const results: { filepath: string; content: string }[] = []
-          const s = yield* InstanceState.get(state)
 
           const target = path.resolve(filepath)
           const root = path.resolve(Instance.directory)
@@ -206,17 +212,12 @@ export namespace Instruction {
               continue
             }
 
-            let set = s.claims.get(messageID)
-            if (!set) {
-              set = new Set()
-              s.claims.set(messageID, set)
-            }
-            if (set.has(found)) {
+            if (claims.has(found)) {
               current = path.dirname(current)
               continue
             }
 
-            set.add(found)
+            claims.add(found)
             const content = yield* read(found)
             if (content) {
               results.push({ filepath: found, content: `Instructions from: ${found}\n${content}` })

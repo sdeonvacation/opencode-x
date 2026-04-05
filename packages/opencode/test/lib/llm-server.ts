@@ -11,8 +11,8 @@ type Line = Record<string, unknown>
 type Flow =
   | { type: "text"; text: string }
   | { type: "reason"; text: string }
-  | { type: "tool-start"; id: string; name: string }
-  | { type: "tool-args"; text: string }
+  | { type: "tool-start"; id: string; name: string; index: number }
+  | { type: "tool-args"; text: string; index: number }
   | { type: "usage"; usage: Usage }
 
 type Hit = {
@@ -96,12 +96,12 @@ function finishLine(reason: string, usage?: Usage) {
   return chunk({ finish: reason, usage })
 }
 
-function toolStartLine(id: string, name: string) {
+function toolStartLine(id: string, name: string, index = 0) {
   return chunk({
     delta: {
       tool_calls: [
         {
-          index: 0,
+          index,
           id,
           type: "function",
           function: {
@@ -114,12 +114,12 @@ function toolStartLine(id: string, name: string) {
   })
 }
 
-function toolArgsLine(value: string) {
+function toolArgsLine(value: string, index = 0) {
   return chunk({
     delta: {
       tool_calls: [
         {
-          index: 0,
+          index,
           function: {
             arguments: value,
           },
@@ -228,11 +228,11 @@ function responseReasonDone(id: string, seq: number) {
   }
 }
 
-function responseTool(id: string, item: string, name: string, seq: number) {
+function responseTool(id: string, item: string, name: string, seq: number, output = 0) {
   return {
     type: "response.output_item.added",
     sequence_number: seq,
-    output_index: 0,
+    output_index: output,
     item: {
       type: "function_call",
       id: item,
@@ -244,31 +244,31 @@ function responseTool(id: string, item: string, name: string, seq: number) {
   }
 }
 
-function responseToolArgs(id: string, text: string, seq: number) {
+function responseToolArgs(id: string, text: string, seq: number, output = 0) {
   return {
     type: "response.function_call_arguments.delta",
     sequence_number: seq,
-    output_index: 0,
+    output_index: output,
     item_id: id,
     delta: text,
   }
 }
 
-function responseToolArgsDone(id: string, args: string, seq: number) {
+function responseToolArgsDone(id: string, args: string, seq: number, output = 0) {
   return {
     type: "response.function_call_arguments.done",
     sequence_number: seq,
-    output_index: 0,
+    output_index: output,
     item_id: id,
     arguments: args,
   }
 }
 
-function responseToolDone(tool: { id: string; item: string; name: string; args: string }, seq: number) {
+function responseToolDone(tool: { id: string; item: string; name: string; args: string }, seq: number, output = 0) {
   return {
     type: "response.output_item.done",
     sequence_number: seq,
-    output_index: 0,
+    output_index: output,
     item: {
       type: "function_call",
       id: tool.item,
@@ -307,11 +307,12 @@ function flow(item: Sse) {
       for (const tool of delta.tool_calls) {
         if (!tool || typeof tool !== "object") continue
         const fn = "function" in tool && tool.function && typeof tool.function === "object" ? tool.function : undefined
+        const index = "index" in tool && typeof tool.index === "number" ? tool.index : 0
         if ("id" in tool && typeof tool.id === "string" && fn && "name" in fn && typeof fn.name === "string") {
-          out.push({ type: "tool-start", id: tool.id, name: fn.name })
+          out.push({ type: "tool-start", id: tool.id, name: fn.name, index })
         }
         if (fn && "arguments" in fn && typeof fn.arguments === "string" && fn.arguments) {
-          out.push({ type: "tool-args", text: fn.arguments })
+          out.push({ type: "tool-args", text: fn.arguments, index })
         }
       }
     }
@@ -335,14 +336,17 @@ function responses(item: Sse, model: string) {
   let reason: string | undefined
   let hasMsg = false
   let hasReason = false
-  let call:
-    | {
-        id: string
-        item: string
-        name: string
-        args: string
-      }
-    | undefined
+  const calls = new Map<
+    number,
+    {
+      id: string
+      item: string
+      name: string
+      args: string
+      index: number
+    }
+  >()
+  const order: number[] = []
   let usage: Usage | undefined
   const lines: unknown[] = [responseCreated(model)]
 
@@ -374,17 +378,20 @@ function responses(item: Sse, model: string) {
     }
 
     if (part.type === "tool-start") {
-      call ||= { id: part.id, item: "fc_1", name: part.name, args: "" }
+      const call = { id: part.id, item: `fc_${part.index + 1}`, name: part.name, args: "", index: part.index }
+      calls.set(part.index, call)
+      order.push(part.index)
       seq += 1
-      lines.push(responseTool(call.id, call.item, call.name, seq))
+      lines.push(responseTool(call.id, call.item, call.name, seq, call.index))
       continue
     }
 
     if (part.type === "tool-args") {
+      const call = calls.get(part.index)
       if (!call) continue
       call.args += part.text
       seq += 1
-      lines.push(responseToolArgs(call.item, part.text, seq))
+      lines.push(responseToolArgs(call.item, part.text, seq, call.index))
       continue
     }
 
@@ -399,11 +406,15 @@ function responses(item: Sse, model: string) {
     seq += 1
     lines.push(responseReasonDone(reason, seq))
   }
-  if (call && !item.hang && !item.error) {
-    seq += 1
-    lines.push(responseToolArgsDone(call.item, call.args, seq))
-    seq += 1
-    lines.push(responseToolDone(call, seq))
+  if (!item.hang && !item.error) {
+    for (const index of order) {
+      const call = calls.get(index)
+      if (!call) continue
+      seq += 1
+      lines.push(responseToolArgsDone(call.item, call.args, seq, call.index))
+      seq += 1
+      lines.push(responseToolDone(call, seq, call.index))
+    }
   }
   if (!item.hang && !item.error) lines.push(responseCompleted({ seq: seq + 1, usage }))
   return { ...item, head: lines, tail: [] } satisfies Sse
@@ -459,6 +470,7 @@ export class Reply {
   #error: unknown
   #reset = false
   #seq = 0
+  #tool = 0
 
   #id() {
     this.#seq += 1
@@ -504,7 +516,9 @@ export class Reply {
   tool(name: string, input: unknown) {
     const id = this.#id()
     const args = JSON.stringify(input)
-    this.#tail = [...this.#tail, toolStartLine(id, name), toolArgsLine(args)]
+    const index = this.#tool
+    this.#tool += 1
+    this.#tail = [...this.#tail, toolStartLine(id, name, index), toolArgsLine(args, index)]
     return this.toolCalls()
   }
 
@@ -512,7 +526,9 @@ export class Reply {
     const id = this.#id()
     const args = JSON.stringify(input)
     const size = Math.max(1, Math.floor(args.length / 2))
-    this.#tail = [...this.#tail, toolStartLine(id, name), toolArgsLine(args.slice(0, size))]
+    const index = this.#tool
+    this.#tool += 1
+    this.#tail = [...this.#tail, toolStartLine(id, name, index), toolArgsLine(args.slice(0, size), index)]
     return this
   }
 

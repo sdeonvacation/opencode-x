@@ -217,6 +217,7 @@ export const ReadTool = Tool.defineEffect(
 
     return {
       description: DESCRIPTION,
+      parallelSafe: true,
       parameters,
       async execute(params: z.infer<typeof parameters>, ctx) {
         return Effect.runPromise(run(params, ctx).pipe(Effect.orDie))

@@ -30,6 +30,7 @@ export namespace Tool {
     id: string
     description: string
     parameters: Parameters
+    parallelSafe?: boolean
     execute(
       args: z.infer<Parameters>,
       ctx: Context,
@@ -48,6 +49,7 @@ export namespace Tool {
 
   export interface Info<Parameters extends z.ZodType = z.ZodType, M extends Metadata = Metadata> {
     id: string
+    parallelSafe?: boolean
     init: () => Promise<DefWithoutID<Parameters, M>>
   }
 
@@ -111,6 +113,7 @@ export namespace Tool {
   ): Info<Parameters, Result> & { id: ID } {
     return {
       id,
+      parallelSafe: init instanceof Function ? undefined : init.parallelSafe,
       init: wrap(id, init),
     }
   }
@@ -120,7 +123,11 @@ export namespace Tool {
     init: Effect.Effect<(() => Promise<DefWithoutID<Parameters, Result>>) | DefWithoutID<Parameters, Result>, never, R>,
   ): Effect.Effect<Info<Parameters, Result>, never, R> & { id: ID } {
     return Object.assign(
-      Effect.map(init, (next) => ({ id, init: wrap(id, next) })),
+      Effect.map(init, (next) => ({
+        id,
+        parallelSafe: next instanceof Function ? undefined : next.parallelSafe,
+        init: wrap(id, next),
+      })),
       { id },
     )
   }
