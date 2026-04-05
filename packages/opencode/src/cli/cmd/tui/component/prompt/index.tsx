@@ -70,6 +70,11 @@ const money = new Intl.NumberFormat("en-US", {
   currency: "USD",
 })
 
+function getUsedTokens(msg: AssistantMessage) {
+  if (msg.summary && msg.finish && !msg.error) return msg.tokens.output
+  return msg.tokens.input + (msg.tokens.cache?.read ?? 0)
+}
+
 function randomIndex(count: number) {
   if (count <= 0) return 0
   return Math.floor(Math.random() * count)
@@ -145,11 +150,10 @@ export function Prompt(props: PromptProps) {
   const usage = createMemo(() => {
     if (!props.sessionID) return
     const msg = sync.data.message[props.sessionID] ?? []
-    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
+    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && getUsedTokens(item) > 0)
     if (!last) return
 
-    const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
+    const tokens = getUsedTokens(last)
     if (tokens <= 0) return
 
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
