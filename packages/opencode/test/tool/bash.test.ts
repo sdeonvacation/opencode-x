@@ -1114,21 +1114,22 @@ describe("tool.bash permissions", () => {
     })
   })
 
-  test.skipIf(process.platform === "win32")("rejects multiline commands without continuation", async () => {
+  test.skipIf(process.platform === "win32")("allows multiline commands without continuation", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
         const bash = await BashTool.init()
-        await expect(
-          bash.execute(
-            {
-              command: "echo alpha\necho beta",
-              description: "Run unsafe multiline command",
-            },
-            ctx,
-          ),
-        ).rejects.toThrow("Multiline shell commands must use explicit line continuation")
+        const result = await bash.execute(
+          {
+            command: "echo alpha\necho beta",
+            description: "Run multiline command",
+          },
+          ctx,
+        )
+        expect(result.metadata.exit).toBe(0)
+        expect(result.output).toContain("alpha")
+        expect(result.output).toContain("beta")
       },
     })
   })
