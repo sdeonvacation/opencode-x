@@ -6,6 +6,7 @@ import { Log } from "../../src/util/log"
 import { Instance } from "../../src/project/instance"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID } from "../../src/session/schema"
+import { tmpdir } from "../fixture/fixture"
 
 const projectRoot = path.join(__dirname, "../..")
 Log.init({ print: false })
@@ -139,4 +140,28 @@ describe("step-finish token propagation via Bus event", () => {
     },
     { timeout: 30000 },
   )
+})
+
+describe("session retention", () => {
+  test("keeps only the latest 30 sessions per project", async () => {
+    await using tmp = await tmpdir()
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        for (let i = 0; i < 31; i++) {
+          await Session.create({ title: `session-${i}` })
+          await new Promise((resolve) => setTimeout(resolve, 1))
+        }
+
+        const sessions = [...Session.list({ limit: 100 })]
+        const titles = sessions.map((session) => session.title)
+
+        expect(sessions).toHaveLength(30)
+        expect(titles).not.toContain("session-0")
+        expect(titles).toContain("session-30")
+        expect(sessions.find((session) => session.title === "session-1")?.parentID).toBeUndefined()
+      },
+    })
+  })
 })
