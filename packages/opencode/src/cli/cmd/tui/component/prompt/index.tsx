@@ -123,7 +123,7 @@ export function Prompt(props: PromptProps) {
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
   let promptPartTypeId = 0
 
-  sdk.event.on(TuiEvent.PromptAppend.type, (evt) => {
+  const offPromptAppend = sdk.event.on(TuiEvent.PromptAppend.type, (evt) => {
     if (!input || input.isDestroyed) return
     input.insertText(evt.properties.text)
     setTimeout(() => {
@@ -435,6 +435,7 @@ export function Prompt(props: PromptProps) {
   }
 
   onCleanup(() => {
+    offPromptAppend()
     props.ref?.(undefined)
   })
 

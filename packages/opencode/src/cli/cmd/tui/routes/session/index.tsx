@@ -195,7 +195,7 @@ export function Session() {
   // Handle initial prompt from fork
   let seeded = false
   let lastSwitch: string | undefined = undefined
-  sdk.event.on("message.part.updated", (evt) => {
+  const offMessagePartUpdated = sdk.event.on("message.part.updated", (evt) => {
     const part = evt.properties.part
     if (part.type !== "tool") return
     if (part.sessionID !== route.sessionID) return
@@ -209,6 +209,10 @@ export function Session() {
       local.agent.set("plan")
       lastSwitch = part.id
     }
+  })
+
+  onCleanup(() => {
+    offMessagePartUpdated()
   })
 
   let scroll: ScrollBoxRenderable
