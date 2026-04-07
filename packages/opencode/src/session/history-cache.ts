@@ -45,7 +45,7 @@ export const create = (): HistoryCache => {
     model: Provider.Model,
     key: string,
   ) {
-    const modelMessages = yield* MessageV2.toModelMessagesEffect(messages, model)
+    const modelMessages = yield* MessageV2.toModelMessagesEffect(messages, model, { stripMedia: true })
     cache = {
       lastMessageID: messages.at(-1)?.info.id,
       lastMessageTime: messages.at(-1)?.info.time.created,
@@ -114,7 +114,7 @@ export const create = (): HistoryCache => {
       }
     }
 
-    const tailModelMessages = yield* MessageV2.toModelMessagesEffect(tail, input.model)
+    const tailModelMessages = yield* MessageV2.toModelMessagesEffect(tail, input.model, { stripMedia: true })
     cache = {
       ...cache,
       lastMessageID: filteredMessages.at(-1)?.info.id,
