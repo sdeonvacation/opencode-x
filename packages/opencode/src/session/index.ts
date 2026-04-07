@@ -34,6 +34,7 @@ import { makeRuntime } from "@/effect/run-service"
 
 export namespace Session {
   const log = Log.create({ service: "session" })
+  const RETENTION_LIMIT = 30
 
   const parentTitlePrefix = "New session - "
   const childTitlePrefix = "Child session - "
@@ -440,6 +441,35 @@ export namespace Session {
         }
       })
 
+      const purge = Effect.fn("Session.purge")(function* () {
+        const ctx = yield* InstanceState.context
+        const rows = yield* db((d) =>
+          d
+            .select()
+            .from(SessionTable)
+            .where(eq(SessionTable.project_id, ctx.project.id))
+            .orderBy(desc(SessionTable.time_updated), desc(SessionTable.id))
+            .all(),
+        )
+
+        const keep = rows.slice(0, RETENTION_LIMIT)
+        const purge = rows.slice(RETENTION_LIMIT)
+        const purgeIDs = new Set(purge.map((row) => row.id))
+
+        for (const row of keep) {
+          if (!row.parent_id || !purgeIDs.has(row.parent_id)) continue
+          yield* Effect.sync(() => SyncEvent.run(Event.Updated, { sessionID: row.id, info: { parentID: null } }))
+        }
+
+        for (const row of purge) {
+          yield* unshare(row.id).pipe(Effect.ignore)
+          yield* Effect.sync(() => {
+            SyncEvent.run(Event.Deleted, { sessionID: row.id, info: fromRow(row) })
+            SyncEvent.remove(row.id)
+          })
+        }
+      })
+
       const updateMessage = <T extends MessageV2.Info>(msg: T): Effect.Effect<T> =>
         Effect.gen(function* () {
           yield* Effect.sync(() => SyncEvent.run(MessageV2.Event.Updated, { sessionID: msg.sessionID, info: msg }))
@@ -488,13 +518,15 @@ export namespace Session {
         workspaceID?: WorkspaceID
       }) {
         const directory = yield* InstanceState.directory
-        return yield* createNext({
+        const result = yield* createNext({
           parentID: input?.parentID,
           directory,
           title: input?.title,
           permission: input?.permission,
           workspaceID: input?.workspaceID,
         })
+        yield* purge()
+        return result
       })
 
       const fork = Effect.fn("Session.fork")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
@@ -531,6 +563,7 @@ export namespace Session {
             })
           }
         }
+        yield* purge()
         return session
       })
 
