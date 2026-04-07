@@ -245,6 +245,7 @@ export namespace LSPClient {
       },
       async shutdown() {
         l.info("shutting down")
+        diagnostics.clear()
         connection.end()
         connection.dispose()
         await Process.stop(input.server.process)

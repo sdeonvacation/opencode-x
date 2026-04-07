@@ -145,9 +145,9 @@ describe("session/history-cache", () => {
     // streamAfter returns newest -> oldest
     streamAfter.mockReturnValueOnce(Effect.succeed([a2, u2]))
 
-    const convertCalls: string[][] = []
-    const convert = spyOn(MessageV2, "toModelMessagesEffect").mockImplementation((msgs) => {
-      convertCalls.push(msgs.map((m) => m.info.id))
+    const convertCalls: Array<{ ids: string[]; stripMedia: boolean | undefined }> = []
+    const convert = spyOn(MessageV2, "toModelMessagesEffect").mockImplementation((msgs, _model, options) => {
+      convertCalls.push({ ids: msgs.map((m) => m.info.id), stripMedia: options?.stripMedia })
       return Effect.succeed(
         msgs.map((m) => ({
           role: "user" as const,
@@ -163,8 +163,8 @@ describe("session/history-cache", () => {
     expect(second.messages.map((m) => String(m.info.id))).toStrictEqual(["msg_u1", "msg_a1", "msg_u2", "msg_a2"])
     expect(second.modelMessages).toHaveLength(4)
     expect(convertCalls).toStrictEqual([
-      ["msg_u1", "msg_a1"],
-      ["msg_u2", "msg_a2"],
+      { ids: ["msg_u1", "msg_a1"], stripMedia: true },
+      { ids: ["msg_u2", "msg_a2"], stripMedia: true },
     ])
     expect(filter).toHaveBeenCalledTimes(1)
     expect(streamAfter).toHaveBeenCalledTimes(1)
@@ -195,9 +195,9 @@ describe("session/history-cache", () => {
     const streamAfter = spyOn(MessageV2, "streamAfterEffect")
     streamAfter.mockReturnValueOnce(Effect.succeed([summaryAssistant]))
 
-    const convertCalls: string[][] = []
-    const convert = spyOn(MessageV2, "toModelMessagesEffect").mockImplementation((msgs) => {
-      convertCalls.push(msgs.map((m) => m.info.id))
+    const convertCalls: Array<{ ids: string[]; stripMedia: boolean | undefined }> = []
+    const convert = spyOn(MessageV2, "toModelMessagesEffect").mockImplementation((msgs, _model, options) => {
+      convertCalls.push({ ids: msgs.map((m) => m.info.id), stripMedia: options?.stripMedia })
       return Effect.succeed(
         msgs.map((m) => ({
           role: "user" as const,
@@ -210,8 +210,8 @@ describe("session/history-cache", () => {
     await Effect.runPromise(cache.get({ sessionID, model: modelA }))
 
     expect(convertCalls).toStrictEqual([
-      ["msg_u1", "msg_a1", "msg_u2", "msg_a2", "msg_compaction"],
-      ["msg_compaction", "msg_summary"],
+      { ids: ["msg_u1", "msg_a1", "msg_u2", "msg_a2", "msg_compaction"], stripMedia: true },
+      { ids: ["msg_compaction", "msg_summary"], stripMedia: true },
     ])
     expect(filter).toHaveBeenCalledTimes(2)
     expect(streamAfter).toHaveBeenCalledTimes(1)
@@ -230,9 +230,9 @@ describe("session/history-cache", () => {
     filter.mockReturnValueOnce(Effect.succeed([m1, m2])).mockReturnValueOnce(Effect.succeed([m1, m2]))
     const streamAfter = spyOn(MessageV2, "streamAfterEffect")
 
-    const convertCalls: string[][] = []
-    const convert = spyOn(MessageV2, "toModelMessagesEffect").mockImplementation((msgs) => {
-      convertCalls.push(msgs.map((m) => m.info.id))
+    const convertCalls: Array<{ ids: string[]; stripMedia: boolean | undefined }> = []
+    const convert = spyOn(MessageV2, "toModelMessagesEffect").mockImplementation((msgs, _model, options) => {
+      convertCalls.push({ ids: msgs.map((m) => m.info.id), stripMedia: options?.stripMedia })
       return Effect.succeed(
         msgs.map((m) => ({
           role: "user" as const,
@@ -246,8 +246,8 @@ describe("session/history-cache", () => {
     await Effect.runPromise(cache.get({ sessionID, model: modelA }))
 
     expect(convertCalls).toStrictEqual([
-      ["msg_1", "msg_2"],
-      ["msg_1", "msg_2"],
+      { ids: ["msg_1", "msg_2"], stripMedia: true },
+      { ids: ["msg_1", "msg_2"], stripMedia: true },
     ])
     expect(streamAfter).not.toHaveBeenCalled()
 
@@ -265,9 +265,9 @@ describe("session/history-cache", () => {
     filter.mockReturnValueOnce(Effect.succeed([m1, m2])).mockReturnValueOnce(Effect.succeed([m1, m2]))
     const streamAfter = spyOn(MessageV2, "streamAfterEffect")
 
-    const convertCalls: string[][] = []
-    const convert = spyOn(MessageV2, "toModelMessagesEffect").mockImplementation((msgs) => {
-      convertCalls.push(msgs.map((m) => m.info.id))
+    const convertCalls: Array<{ ids: string[]; stripMedia: boolean | undefined }> = []
+    const convert = spyOn(MessageV2, "toModelMessagesEffect").mockImplementation((msgs, _model, options) => {
+      convertCalls.push({ ids: msgs.map((m) => m.info.id), stripMedia: options?.stripMedia })
       return Effect.succeed(
         msgs.map((m) => ({
           role: "user" as const,
@@ -280,8 +280,8 @@ describe("session/history-cache", () => {
     await Effect.runPromise(cache.get({ sessionID, model: modelB }))
 
     expect(convertCalls).toStrictEqual([
-      ["msg_1", "msg_2"],
-      ["msg_1", "msg_2"],
+      { ids: ["msg_1", "msg_2"], stripMedia: true },
+      { ids: ["msg_1", "msg_2"], stripMedia: true },
     ])
     expect(streamAfter).not.toHaveBeenCalled()
 
@@ -300,9 +300,9 @@ describe("session/history-cache", () => {
     const streamAfter = spyOn(MessageV2, "streamAfterEffect")
     streamAfter.mockReturnValueOnce(Effect.succeed([]))
 
-    const convertCalls: string[][] = []
-    const convert = spyOn(MessageV2, "toModelMessagesEffect").mockImplementation((msgs) => {
-      convertCalls.push(msgs.map((m) => m.info.id))
+    const convertCalls: Array<{ ids: string[]; stripMedia: boolean | undefined }> = []
+    const convert = spyOn(MessageV2, "toModelMessagesEffect").mockImplementation((msgs, _model, options) => {
+      convertCalls.push({ ids: msgs.map((m) => m.info.id), stripMedia: options?.stripMedia })
       return Effect.succeed(
         msgs.map((m) => ({
           role: "user" as const,
@@ -316,7 +316,7 @@ describe("session/history-cache", () => {
 
     expect(filter).toHaveBeenCalledTimes(1)
     expect(streamAfter).toHaveBeenCalledTimes(1)
-    expect(convertCalls).toStrictEqual([["msg_1", "msg_2"]])
+    expect(convertCalls).toStrictEqual([{ ids: ["msg_1", "msg_2"], stripMedia: true }])
 
     filter.mockRestore()
     streamAfter.mockRestore()
@@ -333,9 +333,9 @@ describe("session/history-cache", () => {
     const streamAfter = spyOn(MessageV2, "streamAfterEffect")
     streamAfter.mockReturnValue(Effect.succeed([]))
 
-    const convertCalls: string[][] = []
-    const convert = spyOn(MessageV2, "toModelMessagesEffect").mockImplementation((msgs) => {
-      convertCalls.push(msgs.map((m) => m.info.id))
+    const convertCalls: Array<{ ids: string[]; stripMedia: boolean | undefined }> = []
+    const convert = spyOn(MessageV2, "toModelMessagesEffect").mockImplementation((msgs, _model, options) => {
+      convertCalls.push({ ids: msgs.map((m) => m.info.id), stripMedia: options?.stripMedia })
       return Effect.succeed(
         msgs.map((m) => ({
           role: "user" as const,
@@ -350,7 +350,7 @@ describe("session/history-cache", () => {
 
     expect(filter).toHaveBeenCalledTimes(1)
     expect(streamAfter).toHaveBeenCalledTimes(2)
-    expect(convertCalls).toStrictEqual([["msg_1", "msg_2"]])
+    expect(convertCalls).toStrictEqual([{ ids: ["msg_1", "msg_2"], stripMedia: true }])
 
     filter.mockRestore()
     streamAfter.mockRestore()

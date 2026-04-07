@@ -9,7 +9,7 @@ import { Session } from "."
 import { Agent } from "../agent/agent"
 import { Provider } from "../provider/provider"
 import { ModelID, ProviderID } from "../provider/schema"
-import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
+import { type ModelMessage, type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
 import { SessionCompaction } from "./compaction"
 import { Bus } from "../bus"
 import { ProviderTransform } from "../provider/transform"
@@ -1356,7 +1356,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               role: "assistant",
               mode: agent.name,
               agent: agent.name,
-              variant: user.info.variant,
+              variant: user.info.model.variant,
               path: { cwd: Instance.directory, root: Instance.worktree },
               cost: 0,
               tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -1428,8 +1428,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             const modelRef = yield* lastModel(sessionID)
             const model = yield* getModel(modelRef.providerID, modelRef.modelID, sessionID)
-            const cachedHistory = yield* historyCache.get({ sessionID, model })
-            let msgs = cachedHistory.messages
+            let msgs: MessageV2.WithParts[]
+            let cachedModelMessages: ModelMessage[]
+            {
+              const history = yield* historyCache.get({ sessionID, model })
+              msgs = history.messages
+              cachedModelMessages = history.modelMessages
+            }
 
             let lastUser: MessageV2.User | undefined
             let lastAssistant: MessageV2.Assistant | undefined
@@ -1595,30 +1600,42 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 messagesChanged = true
               }
 
-              const [skills, env, instructions, modelMsgs] = yield* Effect.all([
+              const [skills, env, instructions, initialModelMessages] = yield* Effect.all([
                 Effect.promise(() => SystemPrompt.skills(agent)),
                 Effect.promise(() => SystemPrompt.environment(model)),
                 instruction.system().pipe(Effect.orDie),
                 messagesChanged
                   ? Effect.promise(() => MessageV2.toModelMessages(msgs, model))
-                  : Effect.succeed(cachedHistory.modelMessages),
+                  : Effect.succeed(cachedModelMessages),
               ])
+              let modelMsgs = initialModelMessages
+              cachedModelMessages = []
               const system = [...env, ...(skills ? [skills] : []), ...instructions]
               const format = lastUser.format ?? { type: "text" as const }
               if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
-              const result = yield* handle.process({
-                user: lastUser,
-                agent,
-                permission: session.permission,
-                sessionID,
-                parentSessionID: session.parentID,
-                system,
-                messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
-                tools,
-                toolMeta: resolvedTools.toolMeta,
-                model,
-                toolChoice: format.type === "json_schema" ? "required" : undefined,
-              })
+              const result = yield* handle
+                .process({
+                  user: lastUser,
+                  agent,
+                  permission: session.permission,
+                  sessionID,
+                  parentSessionID: session.parentID,
+                  system,
+                  messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
+                  tools,
+                  toolMeta: resolvedTools.toolMeta,
+                  model,
+                  toolChoice: format.type === "json_schema" ? "required" : undefined,
+                })
+                .pipe(
+                  Effect.ensuring(
+                    Effect.sync(() => {
+                      msgs = []
+                      modelMsgs = []
+                      cachedModelMessages = []
+                    }),
+                  ),
+                )
 
               if (structured !== undefined) {
                 handle.message.structured = structured
