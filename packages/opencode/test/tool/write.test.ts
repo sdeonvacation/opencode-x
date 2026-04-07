@@ -1,6 +1,8 @@
-import { afterEach, describe, test, expect } from "bun:test"
+import { afterEach, describe, test, expect, spyOn } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
+import { LSP } from "../../src/lsp"
+import { LSPClient } from "../../src/lsp/client"
 import { WriteTool } from "../../src/tool/write"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
@@ -178,6 +180,98 @@ describe("tool.write", () => {
           expect(result.metadata).toHaveProperty("exists", true)
         },
       })
+    })
+  })
+
+  describe("diagnostics", () => {
+    test("does not wait for LSP touch before reporting cached diagnostics", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "diag.ts")
+      const otherpath = path.join(tmp.path, "other.ts")
+      const cached: Record<string, LSPClient.Diagnostic[]> = {
+        [filepath]: [
+          {
+            severity: 1 as const,
+            message: "current file error",
+            range: {
+              start: { line: 0, character: 1 },
+              end: { line: 0, character: 5 },
+            },
+          },
+        ],
+        [otherpath]: [
+          {
+            severity: 1 as const,
+            message: "project error",
+            range: {
+              start: { line: 1, character: 2 },
+              end: { line: 1, character: 6 },
+            },
+          },
+        ],
+      }
+      const touch = spyOn(LSP, "touchFile").mockImplementation(() => new Promise(() => {}))
+      const diagnostics = spyOn(LSP, "diagnostics").mockResolvedValue(cached)
+
+      try {
+        await Instance.provide({
+          directory: tmp.path,
+          fn: async () => {
+            const write = await WriteTool.init()
+            const result = await Promise.race([
+              write.execute(
+                {
+                  filePath: filepath,
+                  content: "const value = 1\n",
+                },
+                ctx,
+              ),
+              new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 50)),
+            ])
+
+            if (result === "timeout") throw new Error("write should not wait for LSP touch")
+            expect(result.output).toContain("LSP errors detected in this file")
+            expect(result.output).toContain("ERROR [1:2] current file error")
+            expect(result.output).toContain("LSP errors detected in other files")
+            expect(result.output).toContain("ERROR [2:3] project error")
+            expect(result.metadata.diagnostics).toEqual(cached)
+            expect(touch).toHaveBeenCalledWith(filepath, false)
+            expect(diagnostics).toHaveBeenCalledTimes(1)
+          },
+        })
+      } finally {
+        touch.mockRestore()
+        diagnostics.mockRestore()
+      }
+    })
+
+    test("ignores background LSP touch failures", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "touch-failure.ts")
+      const touch = spyOn(LSP, "touchFile").mockRejectedValue(new Error("boom"))
+      const diagnostics = spyOn(LSP, "diagnostics").mockResolvedValue({})
+
+      try {
+        await Instance.provide({
+          directory: tmp.path,
+          fn: async () => {
+            const write = await WriteTool.init()
+            const result = await write.execute(
+              {
+                filePath: filepath,
+                content: "export const ok = true\n",
+              },
+              ctx,
+            )
+
+            expect(result.output).toContain("Wrote file successfully")
+            expect(touch).toHaveBeenCalledWith(filepath, false)
+          },
+        })
+      } finally {
+        touch.mockRestore()
+        diagnostics.mockRestore()
+      }
     })
   })
 
