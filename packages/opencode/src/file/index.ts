@@ -456,9 +456,17 @@ export namespace File {
         ])
 
         if (untrackedOutput.trim()) {
+          const max = 512 * 1024
+          const skip = ["node_modules/", ".git/", "dist/", "build/", ".next/"]
           for (const file of untrackedOutput.trim().split("\n")) {
+            if (skip.some((dir) => file.includes(dir))) continue
+            const full = path.join(Instance.directory, file)
+            if (Bun.file(full).size > max) {
+              changed.push({ path: file, added: 0, removed: 0, status: "added" })
+              continue
+            }
             const content = yield* appFs
-              .readFileString(path.join(Instance.directory, file))
+              .readFileString(full)
               .pipe(Effect.catch(() => Effect.succeed<string | undefined>(undefined)))
             if (content === undefined) continue
             changed.push({

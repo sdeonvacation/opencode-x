@@ -41,7 +41,7 @@ export namespace SessionCompaction {
       tokens: MessageV2.Assistant["tokens"]
       model: Provider.Model
     }) => Effect.Effect<boolean>
-    readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
+    readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<boolean>
     readonly process: (input: {
       parentID: MessageID
       messages: MessageV2.WithParts[]
@@ -92,13 +92,13 @@ export namespace SessionCompaction {
       // calls, then erases output of older tool calls to free context space
       const prune = Effect.fn("SessionCompaction.prune")(function* (input: { sessionID: SessionID }) {
         const cfg = yield* config.get()
-        if (cfg.compaction?.prune === false) return
+        if (cfg.compaction?.prune === false) return false
         log.info("pruning")
 
         const msgs = yield* session
           .messages({ sessionID: input.sessionID })
           .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)))
-        if (!msgs) return
+        if (!msgs) return false
 
         let total = 0
         let pruned = 0
@@ -131,11 +131,14 @@ export namespace SessionCompaction {
           for (const part of toPrune) {
             if (part.state.status === "completed") {
               part.state.time.compacted = Date.now()
+              part.state.output = ""
               yield* session.updatePart(part)
             }
           }
           log.info("pruned", { count: toPrune.length })
+          return true
         }
+        return false
       })
 
       const processCompaction = Effect.fn("SessionCompaction.process")(function* (input: {
@@ -395,7 +398,7 @@ When constructing the summary, try to stick to this template:
     return runPromise((svc) => svc.isOverflow(input))
   }
 
-  export async function prune(input: { sessionID: SessionID }) {
+  export async function prune(input: { sessionID: SessionID }): Promise<boolean> {
     return runPromise((svc) => svc.prune(input))
   }
 

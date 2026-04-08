@@ -45,6 +45,15 @@ export const create = (): HistoryCache => {
     model: Provider.Model,
     key: string,
   ) {
+    // Strip full output text from compacted tool parts so historical DB data
+    // (pruned before output-clearing was introduced) doesn't bloat filteredMessages.
+    for (const msg of messages) {
+      for (const part of msg.parts) {
+        if (part.type === "tool" && part.state.status === "completed" && part.state.time.compacted) {
+          part.state.output = ""
+        }
+      }
+    }
     const modelMessages = yield* MessageV2.toModelMessagesEffect(messages, model, { stripMedia: true })
     cache = {
       lastMessageID: messages.at(-1)?.info.id,
