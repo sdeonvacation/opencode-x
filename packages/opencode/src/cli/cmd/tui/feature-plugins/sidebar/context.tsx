@@ -10,7 +10,6 @@ const money = new Intl.NumberFormat("en-US", {
 })
 
 export function getUsedTokens(msg: AssistantMessage) {
-  if (msg.summary && msg.finish && !msg.error) return msg.tokens.output
   return msg.tokens.input + (msg.tokens.cache?.read ?? 0)
 }
 
@@ -24,7 +23,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const cost = createMemo(() => messageCost() + clearedCost())
 
   const state = createMemo(() => {
-    const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
+    const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.finish != null)
     if (!last) {
       return {
         tokens: 0,

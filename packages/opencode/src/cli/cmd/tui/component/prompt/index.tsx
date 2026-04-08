@@ -83,7 +83,6 @@ const money = new Intl.NumberFormat("en-US", {
 })
 
 function getUsedTokens(msg: AssistantMessage) {
-  if (msg.summary && msg.finish && !msg.error) return msg.tokens.output
   return msg.tokens.input + (msg.tokens.cache?.read ?? 0)
 }
 
@@ -211,7 +210,7 @@ export function Prompt(props: PromptProps) {
   const usage = createMemo(() => {
     if (!props.sessionID) return
     const msg = sync.data.message[props.sessionID] ?? []
-    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && getUsedTokens(item) > 0)
+    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.finish != null)
     if (!last) return
 
     const tokens = getUsedTokens(last)
