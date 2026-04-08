@@ -210,14 +210,16 @@ export function Prompt(props: PromptProps) {
   const usage = createMemo(() => {
     if (!props.sessionID) return
     const msg = sync.data.message[props.sessionID] ?? []
-    const last = msg.findLast(
+    const completed = msg.filter(
       (item): item is AssistantMessage => item.role === "assistant" && item.finish != null && !item.summary,
     )
-    if (!last) return
+    if (completed.length === 0) return
 
-    const tokens = getUsedTokens(last)
+    // Use the high-water mark so the display never drops within a compaction window
+    const tokens = Math.max(...completed.map(getUsedTokens))
     if (tokens <= 0) return
 
+    const last = completed[completed.length - 1]
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
     const cost = msg.reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0)
