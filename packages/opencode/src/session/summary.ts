@@ -138,11 +138,20 @@ export namespace SessionSummary {
         const target = messages.find((m) => m.info.id === input.messageID)
         if (!target || target.info.role !== "user") return
         const msgDiffs = yield* computeDiff({ messages })
-        target.info.summary = { ...target.info.summary, diffs: msgDiffs }
+        // Store diffs separately to avoid bloating message.data (can be 50+ MB)
+        yield* storage.write(["message_diff", input.messageID], msgDiffs).pipe(Effect.ignore)
+        target.info.summary = { ...target.info.summary, diffs: [] }
         yield* sessions.updateMessage(target.info)
       })
 
       const diff = Effect.fn("SessionSummary.diff")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
+        // Per-message diffs are stored separately to avoid bloating message.data
+        if (input.messageID) {
+          const msgDiffs = yield* storage
+            .read<Snapshot.FileDiff[]>(["message_diff", input.messageID])
+            .pipe(Effect.catch(() => Effect.succeed([] as Snapshot.FileDiff[])))
+          if (msgDiffs.length) return msgDiffs
+        }
         const diffs = yield* storage
           .read<Snapshot.FileDiff[]>(["session_diff", input.sessionID])
           .pipe(Effect.catch(() => Effect.succeed([] as Snapshot.FileDiff[])))
