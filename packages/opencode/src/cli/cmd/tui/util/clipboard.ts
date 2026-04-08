@@ -59,7 +59,9 @@ export namespace Clipboard {
           { nothrow: true },
         )
         const buffer = await Filesystem.readBytes(tmpfile)
-        return { data: buffer.toString("base64"), mime: "image/png" }
+        if (buffer.byteLength > 0) {
+          return { data: buffer.toString("base64"), mime: "image/png" }
+        }
       } catch {
       } finally {
         await fs.rm(tmpfile, { force: true }).catch(() => {})
