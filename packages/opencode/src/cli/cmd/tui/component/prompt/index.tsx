@@ -210,7 +210,9 @@ export function Prompt(props: PromptProps) {
   const usage = createMemo(() => {
     if (!props.sessionID) return
     const msg = sync.data.message[props.sessionID] ?? []
-    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.finish != null)
+    const last = msg.findLast(
+      (item): item is AssistantMessage => item.role === "assistant" && item.finish != null && !item.summary,
+    )
     if (!last) return
 
     const tokens = getUsedTokens(last)
