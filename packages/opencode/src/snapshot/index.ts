@@ -38,7 +38,7 @@ export namespace Snapshot {
   const limit = 2 * 1024 * 1024
   /** Max total bytes of before+after content stored in a single diffFull result */
   const DIFF_CONTENT_LIMIT = 1024 * 1024
-  /** File path patterns to skip when computing full diffs (cache dirs, build output, lockfiles) */
+  /** File path patterns to skip when computing full diffs (cache dirs, build output, lockfiles, hidden files) */
   const DIFF_SKIP_PATTERNS = [
     /(?:^|\/)graphify-out\//,
     /(?:^|\/)node_modules\//,
@@ -49,6 +49,7 @@ export namespace Snapshot {
     /(?:^|\/)\.cache\//,
     /\.lock$/,
     /(?:^|\/)package-lock\.json$/,
+    /(^|\/)\./, // any path component starting with a dot (hidden files/dirs)
   ]
   const core = ["-c", "core.longpaths=true", "-c", "core.symlinks=true"]
   const cfg = ["-c", "core.autocrlf=false", ...core]

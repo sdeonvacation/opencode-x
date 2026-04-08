@@ -425,10 +425,12 @@ export namespace File {
           ).text()
 
           const changed: File.Info[] = []
+          const HIDDEN = /(^|\/)\./ // any path component starting with a dot
 
           if (diffOutput.trim()) {
             for (const line of diffOutput.trim().split("\n")) {
               const [added, removed, file] = line.split("\t")
+              if (HIDDEN.test(file)) continue
               changed.push({
                 path: file,
                 added: added === "-" ? 0 : parseInt(added, 10),
@@ -460,6 +462,8 @@ export namespace File {
             const SKIP_DIRS = ["node_modules/", ".git/", "dist/", "build/", ".next/"]
             for (const file of untrackedOutput.trim().split("\n")) {
               if (SKIP_DIRS.some((dir) => file.includes(dir))) continue
+              // Skip hidden files and directories (any path component starting with .)
+              if (/(^|\/)\./.test(file)) continue
               try {
                 const full = path.join(Instance.directory, file)
                 const st = Filesystem.stat(full)
@@ -500,6 +504,7 @@ export namespace File {
 
           if (deletedOutput.trim()) {
             for (const file of deletedOutput.trim().split("\n")) {
+              if (HIDDEN.test(file)) continue
               changed.push({
                 path: file,
                 added: 0,
