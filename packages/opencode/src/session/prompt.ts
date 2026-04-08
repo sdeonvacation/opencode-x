@@ -1461,8 +1461,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* status.set(sessionID, { type: "busy" })
             log.info("loop", { step, sessionID })
 
-            yield* compaction.prune({ sessionID }).pipe(Effect.ignore)
-            historyCache.invalidate()
+            const didPrune = yield* compaction.prune({ sessionID }).pipe(Effect.orElseSucceed(() => false))
+            if (didPrune) historyCache.invalidate()
 
             const modelRef = yield* lastModel(sessionID)
             const model = yield* getModel(modelRef.providerID, modelRef.modelID, sessionID)

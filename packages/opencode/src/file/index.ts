@@ -456,9 +456,18 @@ export namespace File {
           ).text()
 
           if (untrackedOutput.trim()) {
+            const MAX_READ_SIZE = 512 * 1024 // 512 KB — skip large files to avoid OOM
+            const SKIP_DIRS = ["node_modules/", ".git/", "dist/", "build/", ".next/"]
             for (const file of untrackedOutput.trim().split("\n")) {
+              if (SKIP_DIRS.some((dir) => file.includes(dir))) continue
               try {
-                const content = await Filesystem.readText(path.join(Instance.directory, file))
+                const full = path.join(Instance.directory, file)
+                const st = Filesystem.stat(full)
+                if (!st || (st.size ?? 0) > MAX_READ_SIZE) {
+                  changed.push({ path: file, added: 0, removed: 0, status: "added" })
+                  continue
+                }
+                const content = await Filesystem.readText(full)
                 changed.push({
                   path: file,
                   added: content.split("\n").length,
