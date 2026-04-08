@@ -64,7 +64,8 @@ const Parameters = z.object({
     .string()
     .describe(
       "Clear, concise description of what this command does in 5-10 words. Examples:\nInput: ls\nOutput: Lists files in current directory\n\nInput: git status\nOutput: Shows working tree status\n\nInput: npm install\nOutput: Installs package dependencies\n\nInput: mkdir foo\nOutput: Creates directory 'foo'",
-    ),
+    )
+    .optional(),
 })
 
 type Part = {
@@ -487,6 +488,9 @@ export const BashTool = Tool.define("bash", async () => {
       .replaceAll("${maxLines}", String(Truncate.MAX_LINES))
       .replaceAll("${maxBytes}", String(Truncate.MAX_BYTES)),
     parameters: Parameters,
+    formatValidationError(_error: z.ZodError): string {
+      return "The bash tool requires a 'command' string argument. Provide the shell command to execute as the 'command' field."
+    },
     async execute(params, ctx) {
       const cwd = params.workdir ? await resolvePath(params.workdir, Instance.directory, shell) : Instance.directory
       if (params.timeout !== undefined && params.timeout < 0) {
@@ -517,7 +521,7 @@ export const BashTool = Tool.define("bash", async () => {
           cwd,
           env: await shellEnv(ctx, cwd),
           timeout,
-          description: params.description,
+          description: params.description ?? "",
         },
         ctx,
       )
