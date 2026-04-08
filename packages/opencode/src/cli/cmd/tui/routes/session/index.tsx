@@ -2069,7 +2069,6 @@ function WebSearch(props: ToolProps<any>) {
 function Task(props: ToolProps<typeof TaskTool>) {
   const { navigate } = useRoute()
   const sync = useSync()
-  const ctx = use()
 
   onMount(() => {
     if (props.metadata.sessionId && !sync.data.message[props.metadata.sessionId]?.length)
@@ -2122,7 +2121,7 @@ function Task(props: ToolProps<typeof TaskTool>) {
       pending={SpinnerVerbs.forTool("task")}
       part={props.part}
       onClick={() => {
-        const id = props.metadata.sessionId ?? sync.data.session.find((x) => x.parentID === ctx.sessionID)?.id
+        const id = props.metadata.sessionId
         if (id) navigate({ type: "session", sessionID: id })
       }}
     >
