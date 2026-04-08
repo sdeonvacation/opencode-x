@@ -23,17 +23,19 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const cost = createMemo(() => messageCost() + clearedCost())
 
   const state = createMemo(() => {
-    const last = msg().findLast(
+    const completed = msg().filter(
       (item): item is AssistantMessage => item.role === "assistant" && item.finish != null && !item.summary,
     )
-    if (!last) {
+    if (completed.length === 0) {
       return {
         tokens: 0,
         percent: null,
       }
     }
 
-    const tokens = getUsedTokens(last)
+    // Use the high-water mark so the display never drops within a compaction window
+    const tokens = Math.max(...completed.map(getUsedTokens))
+    const last = completed[completed.length - 1]
     const model = props.api.state.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     return {
       tokens,
