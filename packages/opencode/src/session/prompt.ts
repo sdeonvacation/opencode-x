@@ -1541,6 +1541,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* status.set(sessionID, { type: "busy" })
             log.info("loop", { step, sessionID })
 
+            yield* compaction.prune({ sessionID }).pipe(Effect.orElseSucceed(() => false))
             let msgs = yield* MessageV2.filterCompactedEffect(sessionID)
 
             let lastUser: MessageV2.User | undefined
