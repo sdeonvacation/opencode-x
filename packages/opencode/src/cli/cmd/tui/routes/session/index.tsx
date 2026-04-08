@@ -65,6 +65,7 @@ import { Flag } from "@/flag/flag"
 import { LANGUAGE_EXTENSIONS } from "@/lsp/language"
 import parsers from "../../../../../../parsers-config.ts"
 import { Clipboard } from "../../util/clipboard"
+import { SpinnerVerbs } from "../../util/spinner-verbs"
 import { Toast, useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv.tsx"
 import { Editor } from "../../util/editor"
@@ -1667,7 +1668,7 @@ function GenericTool(props: ToolProps<any>) {
     <Show
       when={props.output && ctx.showGenericToolOutput()}
       fallback={
-        <InlineTool icon="⚙" pending="Writing command..." complete={true} part={props.part}>
+        <InlineTool icon="⚙" pending={SpinnerVerbs.forTool("bash")} complete={true} part={props.part}>
           {props.tool} {input(props.input)}
         </InlineTool>
       }
@@ -1886,7 +1887,7 @@ function Bash(props: ToolProps<typeof BashTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="$" pending="Writing command..." complete={props.input.command} part={props.part}>
+        <InlineTool icon="$" pending={SpinnerVerbs.forTool("bash")} complete={props.input.command} part={props.part}>
           {props.input.command}
         </InlineTool>
       </Match>
@@ -1959,7 +1960,7 @@ function size(input: number) {
 
 function Glob(props: ToolProps<typeof GlobTool>) {
   return (
-    <InlineTool icon="✱" pending="Finding files..." complete={props.input.pattern} part={props.part}>
+    <InlineTool icon="✱" pending={SpinnerVerbs.forTool("glob")} complete={props.input.pattern} part={props.part}>
       Glob "{props.input.pattern}" <Show when={props.input.path}>in {normalizePath(props.input.path)} </Show>
       <Show when={props.metadata.count}>
         ({props.metadata.count} {props.metadata.count === 1 ? "match" : "matches"})
@@ -1982,7 +1983,7 @@ function Read(props: ToolProps<typeof ReadTool>) {
     <>
       <InlineTool
         icon="→"
-        pending="Reading file..."
+        pending={SpinnerVerbs.forTool("read")}
         complete={props.input.filePath}
         spinner={isRunning()}
         part={props.part}
@@ -2004,7 +2005,7 @@ function Read(props: ToolProps<typeof ReadTool>) {
 
 function Grep(props: ToolProps<typeof GrepTool>) {
   return (
-    <InlineTool icon="✱" pending="Searching content..." complete={props.input.pattern} part={props.part}>
+    <InlineTool icon="✱" pending={SpinnerVerbs.forTool("grep")} complete={props.input.pattern} part={props.part}>
       Grep "{props.input.pattern}" <Show when={props.input.path}>in {normalizePath(props.input.path)} </Show>
       <Show when={props.metadata.matches}>
         ({props.metadata.matches} {props.metadata.matches === 1 ? "match" : "matches"})
@@ -2021,7 +2022,12 @@ function List(props: ToolProps<typeof ListTool>) {
     return ""
   })
   return (
-    <InlineTool icon="→" pending="Listing directory..." complete={props.input.path !== undefined} part={props.part}>
+    <InlineTool
+      icon="→"
+      pending={SpinnerVerbs.forTool("list")}
+      complete={props.input.path !== undefined}
+      part={props.part}
+    >
       List {dir()}
     </InlineTool>
   )
@@ -2029,7 +2035,12 @@ function List(props: ToolProps<typeof ListTool>) {
 
 function WebFetch(props: ToolProps<typeof WebFetchTool>) {
   return (
-    <InlineTool icon="%" pending="Fetching from the web..." complete={(props.input as any).url} part={props.part}>
+    <InlineTool
+      icon="%"
+      pending={SpinnerVerbs.forTool("webfetch")}
+      complete={(props.input as any).url}
+      part={props.part}
+    >
       WebFetch {(props.input as any).url}
     </InlineTool>
   )
@@ -2039,7 +2050,7 @@ function CodeSearch(props: ToolProps<any>) {
   const input = props.input as any
   const metadata = props.metadata as any
   return (
-    <InlineTool icon="◇" pending="Searching code..." complete={input.query} part={props.part}>
+    <InlineTool icon="◇" pending={SpinnerVerbs.forTool("codesearch")} complete={input.query} part={props.part}>
       Exa Code Search "{input.query}" <Show when={metadata.results}>({metadata.results} results)</Show>
     </InlineTool>
   )
@@ -2049,7 +2060,7 @@ function WebSearch(props: ToolProps<any>) {
   const input = props.input as any
   const metadata = props.metadata as any
   return (
-    <InlineTool icon="◈" pending="Searching web..." complete={input.query} part={props.part}>
+    <InlineTool icon="◈" pending={SpinnerVerbs.forTool("websearch")} complete={input.query} part={props.part}>
       Exa Web Search "{input.query}" <Show when={metadata.numResults}>({metadata.numResults} results)</Show>
     </InlineTool>
   )
@@ -2108,7 +2119,7 @@ function Task(props: ToolProps<typeof TaskTool>) {
       icon="│"
       spinner={isRunning()}
       complete={props.input.description}
-      pending="Delegating..."
+      pending={SpinnerVerbs.forTool("task")}
       part={props.part}
       onClick={() => {
         const id = props.metadata.sessionId ?? sync.data.session.find((x) => x.parentID === ctx.sessionID)?.id
@@ -2164,7 +2175,7 @@ function Edit(props: ToolProps<typeof EditTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="←" pending="Preparing edit..." complete={props.input.filePath} part={props.part}>
+        <InlineTool icon="←" pending={SpinnerVerbs.forTool("edit")} complete={props.input.filePath} part={props.part}>
           Edit {normalizePath(props.input.filePath!)} {input({ replaceAll: props.input.replaceAll })}
         </InlineTool>
       </Match>
@@ -2239,7 +2250,7 @@ function ApplyPatch(props: ToolProps<typeof ApplyPatchTool>) {
         </For>
       </Match>
       <Match when={true}>
-        <InlineTool icon="%" pending="Preparing patch..." complete={false} part={props.part}>
+        <InlineTool icon="%" pending={SpinnerVerbs.forTool("apply_patch")} complete={false} part={props.part}>
           Patch
         </InlineTool>
       </Match>
@@ -2273,7 +2284,7 @@ function Question(props: ToolProps<typeof QuestionTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="→" pending="Asking questions..." complete={count()} part={props.part}>
+        <InlineTool icon="→" pending={SpinnerVerbs.forTool("question")} complete={count()} part={props.part}>
           Asked {count()} question{count() !== 1 ? "s" : ""}
         </InlineTool>
       </Match>
@@ -2283,7 +2294,7 @@ function Question(props: ToolProps<typeof QuestionTool>) {
 
 function Skill(props: ToolProps<typeof SkillTool>) {
   return (
-    <InlineTool icon="→" pending="Loading skill..." complete={props.input.name} part={props.part}>
+    <InlineTool icon="→" pending={SpinnerVerbs.forTool("skill")} complete={props.input.name} part={props.part}>
       Skill "{props.input.name}"
     </InlineTool>
   )
