@@ -94,6 +94,16 @@ export namespace Database {
     db.run("PRAGMA foreign_keys = ON")
     db.run("PRAGMA wal_checkpoint(PASSIVE)")
 
+    // Enable incremental auto-vacuum to reclaim free pages over time.
+    // auto_vacuum must be set before first table creation; on existing DBs
+    // this is a no-op until a full VACUUM is run, but incremental_vacuum
+    // still frees any already-reclaimable pages.
+    const vacuumMode = db.get<{ auto_vacuum: number }>("PRAGMA auto_vacuum")
+    if (vacuumMode && vacuumMode.auto_vacuum === 0) {
+      db.run("PRAGMA auto_vacuum = INCREMENTAL")
+    }
+    db.run("PRAGMA incremental_vacuum(1000)")
+
     // Apply schema migrations
     const entries =
       typeof OPENCODE_MIGRATIONS !== "undefined"

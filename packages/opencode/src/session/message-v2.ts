@@ -526,12 +526,19 @@ export namespace MessageV2 {
     },
   }
 
-  const info = (row: typeof MessageTable.$inferSelect) =>
-    ({
+  const info = (row: typeof MessageTable.$inferSelect) => {
+    const result = {
       ...row.data,
       id: row.id,
       sessionID: row.session_id,
-    }) as MessageV2.Info
+    } as MessageV2.Info
+    // Strip heavy summary.diffs from memory — can be 50+ MB per message.
+    // TUI fetches diffs via dedicated session.diff() endpoint instead.
+    if (result.role === "user" && result.summary?.diffs?.length) {
+      result.summary = { ...result.summary, diffs: [] }
+    }
+    return result
+  }
 
   const part = (row: typeof PartTable.$inferSelect) =>
     ({
