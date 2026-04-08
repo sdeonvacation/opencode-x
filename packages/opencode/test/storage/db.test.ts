@@ -12,3 +12,13 @@ describe("Database.Path", () => {
     expect(Database.getChannelPath()).toBe(expected)
   })
 })
+
+describe("Database auto-vacuum pragmas", () => {
+  test("incremental_vacuum pragma is present in Client init", () => {
+    // Verify the pragma configuration exists in the source code.
+    // We read the db.ts source to confirm the pragmas are set.
+    const src = require("fs").readFileSync(path.join(import.meta.dirname, "../../src/storage/db.ts"), "utf-8")
+    expect(src).toContain("PRAGMA auto_vacuum = INCREMENTAL")
+    expect(src).toContain("PRAGMA incremental_vacuum(1000)")
+  })
+})

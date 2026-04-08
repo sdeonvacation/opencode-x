@@ -35,6 +35,20 @@ export namespace Snapshot {
   const log = Log.create({ service: "snapshot" })
   const prune = "7.days"
   const limit = 2 * 1024 * 1024
+  /** Max total bytes of before+after content stored in a single diffFull result */
+  const DIFF_CONTENT_LIMIT = 1024 * 1024
+  /** File path patterns to skip when computing full diffs (cache dirs, build output, lockfiles) */
+  const DIFF_SKIP_PATTERNS = [
+    /(?:^|\/)graphify-out\//,
+    /(?:^|\/)node_modules\//,
+    /(?:^|\/)\.next\//,
+    /(?:^|\/)dist\//,
+    /(?:^|\/)build\//,
+    /(?:^|\/)\.turbo\//,
+    /(?:^|\/)\.cache\//,
+    /\.lock$/,
+    /(?:^|\/)package-lock\.json$/,
+  ]
   const core = ["-c", "core.longpaths=true", "-c", "core.symlinks=true"]
   const cfg = ["-c", "core.autocrlf=false", ...core]
   const quote = [...cfg, "-c", "core.quotepath=false"]
@@ -603,6 +617,8 @@ export namespace Snapshot {
                   .flatMap((line) => {
                     const [adds, dels, file] = line.split("\t")
                     if (!file) return []
+                    // Skip cache dirs, build output, and lockfiles
+                    if (DIFF_SKIP_PATTERNS.some((re) => re.test(file))) return []
                     const binary = adds === "-" && dels === "-"
                     const additions = binary ? 0 : parseInt(adds)
                     const deletions = binary ? 0 : parseInt(dels)
@@ -619,6 +635,7 @@ export namespace Snapshot {
                 const step = 100
                 const patch = (file: string, before: string, after: string) =>
                   formatPatch(structuredPatch(file, file, before, after, "", "", { context: Number.MAX_SAFE_INTEGER }))
+                let contentBytes = 0
 
                 for (let i = 0; i < rows.length; i += step) {
                   const run = rows.slice(i, i + step)
@@ -626,7 +643,15 @@ export namespace Snapshot {
 
                   for (const row of run) {
                     const hit = text?.get(row.file) ?? { before: "", after: "" }
-                    const [before, after] = row.binary ? ["", ""] : text ? [hit.before, hit.after] : yield* show(row)
+                    let [before, after] = row.binary ? ["", ""] : text ? [hit.before, hit.after] : yield* show(row)
+                    // Cap total content size to avoid storing huge diffs in memory
+                    const size = before.length + after.length
+                    if (contentBytes + size > DIFF_CONTENT_LIMIT) {
+                      before = ""
+                      after = ""
+                    } else {
+                      contentBytes += size
+                    }
                     result.push({
                       file: row.file,
                       patch: row.binary ? "" : patch(row.file, before, after),
