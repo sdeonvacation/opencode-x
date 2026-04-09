@@ -4,18 +4,15 @@ import { BashTool } from "./bash"
 import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
-import { BatchTool } from "./batch"
 import { ReadTool } from "./read"
-import { TaskTool } from "./task"
+import { TaskDescription, TaskTool } from "./task"
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
-import { SkillTool } from "./skill"
-import type { Agent } from "../agent/agent"
+import { SkillDescription, SkillTool } from "./skill"
 import { Tool } from "./tool"
 import { Config } from "../config/config"
-import path from "path"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
 import z from "zod"
 import { Plugin } from "../plugin"
@@ -28,6 +25,7 @@ import { LspTool } from "./lsp"
 import { Truncate } from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
 import { Glob } from "../util/glob"
+import path from "path"
 import { pathToFileURL } from "url"
 import { Effect, Layer, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
@@ -39,22 +37,17 @@ import { LSP } from "../lsp"
 import { FileTime } from "../file/time"
 import { Instruction } from "../session/instruction"
 import { AppFileSystem } from "../filesystem"
-import { Bus } from "@/bus"
-import { MCP } from "@/mcp"
-import { BusEvent } from "@/bus/bus-event"
+import { Agent } from "../agent/agent"
+import { BatchTool } from "./batch"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
 
-  export const Changed = BusEvent.define(
-    "tool.registry.changed",
-    z.object({
-      reason: z.enum(["register", "plugin", "mcp"]),
-    }),
-  )
+  type TaskDef = Tool.InferDef<typeof TaskTool>
+  type ReadDef = Tool.InferDef<typeof ReadTool>
 
   type State = {
-    custom: Tool.Info[]
+    custom: Tool.Def[]
     pluginToolCount: number
     pluginHookID: WeakMap<object, number>
     pluginFunctionID: WeakMap<Function, number>
@@ -69,6 +62,7 @@ export namespace ToolRegistry {
     customToolCount: number
     pluginToolCount: number
     pluginDefinitionSignature: string
+    batchTool: boolean
   }
 
   type ToolCacheDef = Omit<Tool.Def & { id: string }, "execute">
@@ -82,14 +76,12 @@ export namespace ToolRegistry {
   export interface Interface {
     readonly register: (tool: Tool.Info) => Effect.Effect<void>
     readonly ids: () => Effect.Effect<string[]>
-    readonly named: {
-      task: Tool.Info
-      read: Tool.Info
-    }
-    readonly tools: (
-      model: { providerID: ProviderID; modelID: ModelID },
-      agent?: Agent.Info,
-    ) => Effect.Effect<(Tool.Def & { id: string })[]>
+    readonly named: { task: TaskDef; read: ReadDef }
+    readonly tools: (model: {
+      providerID: ProviderID
+      modelID: ModelID
+      agent?: Agent.Info
+    }) => Effect.Effect<Tool.Def[]>
   }
 
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/ToolRegistry") {}
@@ -101,6 +93,7 @@ export namespace ToolRegistry {
     | Plugin.Service
     | Question.Service
     | Todo.Service
+    | Agent.Service
     | LSP.Service
     | FileTime.Service
     | Instruction.Service
@@ -111,34 +104,58 @@ export namespace ToolRegistry {
       const config = yield* Config.Service
       const plugin = yield* Plugin.Service
 
-      const build = <T extends Tool.Info>(tool: T | Effect.Effect<T, never, any>) =>
-        Effect.isEffect(tool) ? tool : Effect.succeed(tool)
+      const taskInfo = yield* TaskTool
+      const readInfo = yield* ReadTool
+      const questionInfo = yield* QuestionTool
+      const todoInfo = yield* TodoWriteTool
+
+      const builtin = yield* Effect.all({
+        invalid: Tool.init(InvalidTool),
+        bash: Tool.init(BashTool),
+        read: Tool.init(readInfo),
+        glob: Tool.init(GlobTool),
+        grep: Tool.init(GrepTool),
+        edit: Tool.init(EditTool),
+        write: Tool.init(WriteTool),
+        task: Tool.init(taskInfo),
+        fetch: Tool.init(WebFetchTool),
+        todo: Tool.init(todoInfo),
+        search: Tool.init(WebSearchTool),
+        code: Tool.init(CodeSearchTool),
+        skill: Tool.init(SkillTool),
+        patch: Tool.init(ApplyPatchTool),
+        question: Tool.init(questionInfo),
+        lsp: Tool.init(LspTool),
+        batch: Tool.init(BatchTool),
+        plan: Tool.init(PlanExitTool),
+      })
 
       const state = yield* InstanceState.make<State>(
         Effect.fn("ToolRegistry.state")(function* (ctx) {
-          const custom: Tool.Info[] = []
+          const custom: Tool.Def[] = []
 
-          function fromPlugin(id: string, def: ToolDefinition): Tool.Info {
+          function fromPlugin(id: string, def: ToolDefinition): Tool.Def {
             return {
               id,
-              init: async (initCtx) => ({
-                parameters: z.object(def.args),
-                description: def.description,
-                execute: async (args, toolCtx) => {
-                  const pluginCtx = {
-                    ...toolCtx,
-                    directory: ctx.directory,
-                    worktree: ctx.worktree,
-                  } as unknown as PluginToolContext
-                  const result = await def.execute(args as any, pluginCtx)
-                  const out = await Truncate.output(result, {}, initCtx?.agent)
-                  return {
-                    title: "",
-                    output: out.truncated ? out.content : result,
-                    metadata: { truncated: out.truncated, outputPath: out.truncated ? out.outputPath : undefined },
-                  }
-                },
-              }),
+              parameters: z.object(def.args),
+              description: def.description,
+              execute: async (args, toolCtx) => {
+                const pluginCtx: PluginToolContext = {
+                  ...toolCtx,
+                  directory: ctx.directory,
+                  worktree: ctx.worktree,
+                }
+                const result = await def.execute(args as any, pluginCtx)
+                const out = await Truncate.output(result, {}, await Agent.get(toolCtx.agent))
+                return {
+                  title: "",
+                  output: out.truncated ? out.content : result,
+                  metadata: {
+                    truncated: out.truncated,
+                    outputPath: out.truncated ? out.outputPath : undefined,
+                  },
+                }
+              },
             }
           }
 
@@ -166,29 +183,13 @@ export namespace ToolRegistry {
             }
           }
 
-          const s: State = {
+          return {
             custom,
             pluginToolCount,
             pluginHookID: new WeakMap(),
             pluginFunctionID: new WeakMap(),
             pluginHookSeq: 1,
           }
-
-          const unsubRegistry = Bus.subscribe(Changed, () => {
-            s.cache = undefined
-          })
-          const unsub = Bus.subscribe(MCP.ToolsChanged, () => {
-            s.cache = undefined
-            void Bus.publish(Changed, { reason: "mcp" })
-          })
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
-              unsubRegistry()
-              unsub()
-            }),
-          )
-
-          return s
         }),
       )
 
@@ -199,7 +200,8 @@ export namespace ToolRegistry {
           a.modelID === b.modelID &&
           a.customToolCount === b.customToolCount &&
           a.pluginToolCount === b.pluginToolCount &&
-          a.pluginDefinitionSignature === b.pluginDefinitionSignature
+          a.pluginDefinitionSignature === b.pluginDefinitionSignature &&
+          a.batchTool === b.batchTool
         )
       }
 
@@ -209,102 +211,80 @@ export namespace ToolRegistry {
         for (const hook of hooks) {
           const fn = (hook as any)["tool.definition"]
           if (!fn) continue
-          let id = s.pluginHookID.get(hook as object)
-          if (!id) {
-            id = s.pluginHookSeq++
-            s.pluginHookID.set(hook as object, id)
+          let hookID = s.pluginHookID.get(hook as object)
+          if (!hookID) {
+            hookID = s.pluginHookSeq++
+            s.pluginHookID.set(hook as object, hookID)
             s.cache = undefined
-            void Bus.publish(Changed, { reason: "plugin" })
           }
           let fnID = s.pluginFunctionID.get(fn as Function)
           if (!fnID) {
             fnID = s.pluginHookSeq++
             s.pluginFunctionID.set(fn as Function, fnID)
             s.cache = undefined
-            void Bus.publish(Changed, { reason: "plugin" })
           }
-          ids.push(`${id}:${fnID}`)
+          ids.push(`${hookID}:${fnID}`)
         }
         return ids.join(",")
       })
 
-      const invalid = yield* build(InvalidTool)
-      const ask = yield* build(QuestionTool)
-      const bash = yield* build(BashTool)
-      const read = yield* build(ReadTool)
-      const glob = yield* build(GlobTool)
-      const grep = yield* build(GrepTool)
-      const edit = yield* build(EditTool)
-      const write = yield* build(WriteTool)
-      const task = yield* build(TaskTool)
-      const fetch = yield* build(WebFetchTool)
-      const todo = yield* build(TodoWriteTool)
-      const search = yield* build(WebSearchTool)
-      const code = yield* build(CodeSearchTool)
-      const skill = yield* build(SkillTool)
-      const patch = yield* build(ApplyPatchTool)
-      const lsp = yield* build(LspTool)
-      const batch = yield* build(BatchTool)
-      const plan = yield* build(PlanExitTool)
-
-      const all = Effect.fn("ToolRegistry.all")(function* (custom: Tool.Info[]) {
+      const all = Effect.fn("ToolRegistry.all")(function* (custom: Tool.Def[]) {
         const cfg = yield* config.get()
-        const question = ["app", "cli", "desktop"].includes(Flag.OPENCODE_CLIENT) || Flag.OPENCODE_ENABLE_QUESTION_TOOL
+        const questionEnabled =
+          ["app", "cli", "desktop"].includes(Flag.OPENCODE_CLIENT) || Flag.OPENCODE_ENABLE_QUESTION_TOOL
 
         return [
-          invalid,
-          ...(question ? [ask] : []),
-          bash,
-          read,
-          glob,
-          grep,
-          edit,
-          write,
-          task,
-          fetch,
-          todo,
-          search,
-          code,
-          skill,
-          patch,
-          ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [lsp] : []),
-          ...(cfg.experimental?.batch_tool === true ? [batch] : []),
-          ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [plan] : []),
+          builtin.invalid,
+          ...(questionEnabled ? [builtin.question] : []),
+          builtin.bash,
+          builtin.read,
+          builtin.glob,
+          builtin.grep,
+          builtin.edit,
+          builtin.write,
+          builtin.task,
+          builtin.fetch,
+          builtin.todo,
+          builtin.search,
+          builtin.code,
+          builtin.skill,
+          builtin.patch,
+          ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [builtin.lsp] : []),
+          ...(cfg.experimental?.batch_tool === true ? [builtin.batch] : []),
+          ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [builtin.plan] : []),
           ...custom,
         ]
       })
 
       const register = Effect.fn("ToolRegistry.register")(function* (tool: Tool.Info) {
         const s = yield* InstanceState.get(state)
+        const next = yield* Tool.init(tool)
         s.cache = undefined
-        void Bus.publish(Changed, { reason: "register" })
-        const idx = s.custom.findIndex((t) => t.id === tool.id)
+        const idx = s.custom.findIndex((item) => item.id === tool.id)
         if (idx >= 0) {
-          s.custom.splice(idx, 1, tool)
+          s.custom.splice(idx, 1, next)
           return
         }
-        s.custom.push(tool)
+        s.custom.push(next)
       })
 
       const ids = Effect.fn("ToolRegistry.ids")(function* () {
         const s = yield* InstanceState.get(state)
-        const tools = yield* all(s.custom)
-        return tools.map((t) => t.id)
+        return (yield* all(s.custom)).map((tool) => tool.id)
       })
 
-      const tools = Effect.fn("ToolRegistry.tools")(function* (
-        model: { providerID: ProviderID; modelID: ModelID },
-        agent?: Agent.Info,
-      ) {
+      const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
         const s = yield* InstanceState.get(state)
+        const cfg = yield* config.get()
         const pluginSignature = yield* pluginDefinitionSignature(s)
         const key: ToolCacheKey = {
-          agentName: agent?.name ?? "",
-          providerID: model.providerID,
-          modelID: model.modelID,
+          agentName: input.agent?.name ?? "",
+          providerID: input.providerID,
+          modelID: input.modelID,
           customToolCount: s.custom.length,
           pluginToolCount: s.pluginToolCount,
           pluginDefinitionSignature: pluginSignature,
+          batchTool: cfg.experimental?.batch_tool === true,
         }
         const cache = s.cache
         if (cache && keyMatches(cache.key, key)) {
@@ -314,39 +294,43 @@ export namespace ToolRegistry {
           }))
         }
 
-        const allTools = yield* all(s.custom)
-        const filtered = allTools.filter((tool) => {
-          if (tool.id === "codesearch" || tool.id === "websearch") {
-            return model.providerID === ProviderID.opencode || Flag.OPENCODE_ENABLE_EXA
+        const filtered = (yield* all(s.custom)).filter((tool) => {
+          if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {
+            return input.providerID === ProviderID.opencode || Flag.OPENCODE_ENABLE_EXA
           }
 
           const usePatch =
             !!Env.get("OPENCODE_E2E_LLM_URL") ||
-            (model.modelID.includes("gpt-") && !model.modelID.includes("oss") && !model.modelID.includes("gpt-4"))
-          if (tool.id === "apply_patch") return usePatch
-          if (tool.id === "edit" || tool.id === "write") return !usePatch
+            (input.modelID.includes("gpt-") && !input.modelID.includes("oss") && !input.modelID.includes("gpt-4"))
+          if (tool.id === ApplyPatchTool.id) return usePatch
+          if (tool.id === EditTool.id || tool.id === WriteTool.id) return !usePatch
 
           return true
         })
 
         const next = yield* Effect.forEach(
           filtered,
-          Effect.fnUntraced(function* (tool: Tool.Info) {
+          Effect.fnUntraced(function* (tool: Tool.Def) {
             using _ = log.time(tool.id)
-            const next = yield* Effect.promise(() => tool.init({ agent }))
             const output = {
-              description: next.description,
-              parameters: next.parameters,
+              description: tool.description,
+              parameters: tool.parameters,
               parallelSafe: tool.parallelSafe,
             }
             yield* plugin.trigger("tool.definition", { toolID: tool.id }, output)
             return {
               id: tool.id,
-              description: output.description,
+              description: [
+                output.description,
+                input.agent && tool.id === TaskTool.id ? yield* TaskDescription(input.agent) : undefined,
+                input.agent && tool.id === SkillTool.id ? yield* SkillDescription(input.agent) : undefined,
+              ]
+                .filter(Boolean)
+                .join("\n"),
               parameters: output.parameters,
               parallelSafe: output.parallelSafe,
-              execute: next.execute,
-              formatValidationError: next.formatValidationError,
+              execute: tool.execute,
+              formatValidationError: tool.formatValidationError,
             }
           }),
           { concurrency: "unbounded" },
@@ -366,7 +350,7 @@ export namespace ToolRegistry {
         return next
       })
 
-      return Service.of({ register, ids, named: { task, read }, tools })
+      return Service.of({ register, ids, named: { task: builtin.task, read: builtin.read }, tools })
     }),
   )
 
@@ -377,6 +361,7 @@ export namespace ToolRegistry {
         Layer.provide(Plugin.defaultLayer),
         Layer.provide(Question.defaultLayer),
         Layer.provide(Todo.defaultLayer),
+        Layer.provide(Agent.defaultLayer),
         Layer.provide(LSP.defaultLayer),
         Layer.provide(FileTime.defaultLayer),
         Layer.provide(Instruction.defaultLayer),
@@ -395,13 +380,11 @@ export namespace ToolRegistry {
     return runPromise((svc) => svc.ids())
   }
 
-  export async function tools(
-    model: {
-      providerID: ProviderID
-      modelID: ModelID
-    },
-    agent?: Agent.Info,
-  ): Promise<(Tool.Def & { id: string })[]> {
-    return runPromise((svc) => svc.tools(model, agent))
+  export async function tools(input: {
+    providerID: ProviderID
+    modelID: ModelID
+    agent?: Agent.Info
+  }): Promise<(Tool.Def & { id: string })[]> {
+    return runPromise((svc) => svc.tools(input))
   }
 }

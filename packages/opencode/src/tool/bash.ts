@@ -51,6 +51,23 @@ const FILES = new Set([
 const FLAGS = new Set(["-destination", "-literalpath", "-path"])
 const SWITCHES = new Set(["-confirm", "-debug", "-force", "-nonewline", "-recurse", "-verbose", "-whatif"])
 
+const Parameters = z.object({
+  command: z.string().describe("The command to execute"),
+  timeout: z.number().describe("Optional timeout in milliseconds").optional(),
+  workdir: z
+    .string()
+    .describe(
+      `The working directory to run the command in. Defaults to the current directory. Use this instead of 'cd' commands.`,
+    )
+    .optional(),
+  description: z
+    .string()
+    .describe(
+      "Clear, concise description of what this command does in 5-10 words. Examples:\nInput: ls\nOutput: Lists files in current directory\n\nInput: git status\nOutput: Shows working tree status\n\nInput: npm install\nOutput: Installs package dependencies\n\nInput: mkdir foo\nOutput: Creates directory 'foo'",
+    )
+    .optional(),
+})
+
 type Part = {
   type: string
   text: string
@@ -470,22 +487,7 @@ export const BashTool = Tool.define("bash", async () => {
       .replaceAll("${chaining}", chain)
       .replaceAll("${maxLines}", String(Truncate.MAX_LINES))
       .replaceAll("${maxBytes}", String(Truncate.MAX_BYTES)),
-    parameters: z.object({
-      command: z.string().describe("The command to execute"),
-      timeout: z.number().describe("Optional timeout in milliseconds").optional(),
-      workdir: z
-        .string()
-        .describe(
-          `The working directory to run the command in. Defaults to ${Instance.directory}. Use this instead of 'cd' commands.`,
-        )
-        .optional(),
-      description: z
-        .string()
-        .describe(
-          "Clear, concise description of what this command does in 5-10 words. Examples:\nInput: ls\nOutput: Lists files in current directory\n\nInput: git status\nOutput: Shows working tree status\n\nInput: npm install\nOutput: Installs package dependencies\n\nInput: mkdir foo\nOutput: Creates directory 'foo'",
-        )
-        .optional(),
-    }),
+    parameters: Parameters,
     formatValidationError(_error: z.ZodError): string {
       return "The bash tool requires a 'command' string argument. Provide the shell command to execute as the 'command' field."
     },

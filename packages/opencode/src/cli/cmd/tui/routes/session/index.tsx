@@ -84,8 +84,14 @@ import { useTuiConfig } from "../../context/tui-config"
 import { getScrollAcceleration } from "../../util/scroll"
 import { TuiPluginRuntime } from "../../plugin"
 import { within } from "../../util/selection-boundary"
+import { DialogGoUpsell } from "../../component/dialog-go-upsell"
+import { SessionRetry } from "@/session/retry"
 
 addDefaultParsers(parsers.parsers)
+
+const GO_UPSELL_LAST_SEEN_AT = "go_upsell_last_seen_at"
+const GO_UPSELL_DONT_SHOW = "go_upsell_dont_show"
+const GO_UPSELL_WINDOW = 86_400_000 // 24 hrs
 
 const context = createContext<{
   width: number
@@ -167,12 +173,6 @@ export function Session() {
   const providers = createMemo(() => Model.index(sync.data.provider))
 
   const scrollAcceleration = createMemo(() => getScrollAcceleration(tuiConfig))
-
-  createEffect(() => {
-    if (session()?.workspaceID) {
-      sdk.setWorkspace(session()?.workspaceID)
-    }
-  })
 
   createEffect(async () => {
     await sync.session
@@ -266,6 +266,27 @@ export function Session() {
       renderer.updateSelection = update
       renderer.clearSelection = clear
     })
+  })
+
+  const offSessionStatus = sdk.event.on("session.status", (evt) => {
+    if (evt.properties.sessionID !== route.sessionID) return
+    if (evt.properties.status.type !== "retry") return
+    if (evt.properties.status.message !== SessionRetry.GO_UPSELL_MESSAGE) return
+    if (dialog.stack.length > 0) return
+
+    const seen = kv.get(GO_UPSELL_LAST_SEEN_AT)
+    if (typeof seen === "number" && Date.now() - seen < GO_UPSELL_WINDOW) return
+
+    if (kv.get(GO_UPSELL_DONT_SHOW)) return
+
+    DialogGoUpsell.show(dialog).then((dontShowAgain) => {
+      if (dontShowAgain) kv.set(GO_UPSELL_DONT_SHOW, true)
+      kv.set(GO_UPSELL_LAST_SEEN_AT, Date.now())
+    })
+  })
+
+  onCleanup(() => {
+    offSessionStatus()
   })
 
   // Allow exit when in child session (prompt is hidden)
@@ -2274,7 +2295,7 @@ function ApplyPatch(props: ToolProps<typeof ApplyPatchTool>) {
                   </text>
                 }
               >
-                <Diff diff={file.diff} filePath={file.filePath} />
+                <Diff diff={file.patch} filePath={file.filePath} />
                 <Diagnostics diagnostics={props.metadata.diagnostics} filePath={file.movePath ?? file.filePath} />
               </Show>
             </BlockTool>

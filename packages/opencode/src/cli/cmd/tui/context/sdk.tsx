@@ -4,7 +4,7 @@ import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { batch, onCleanup, onMount } from "solid-js"
 
 export type EventSource = {
-  on: (handler: (event: Event) => void) => () => void
+  subscribe: (directory: string | undefined, handler: (event: Event) => void) => Promise<() => void>
   setWorkspace?: (workspaceID?: string) => void
   changeDirectory?: (directory: string) => Promise<void>
 }
@@ -30,7 +30,6 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         directory: currentDirectory,
         fetch: props.fetch,
         headers: props.headers,
-        experimental_workspaceID: workspaceID,
       })
     }
 
@@ -101,9 +100,9 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       })().catch(() => {})
     }
 
-    onMount(() => {
+    onMount(async () => {
       if (props.events) {
-        const unsub = props.events.on(handleEvent)
+        const unsub = await props.events.subscribe(currentDirectory, handleEvent)
         onCleanup(unsub)
       } else {
         startSSE()
@@ -140,6 +139,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         currentDirectory = directory
         await props.events?.changeDirectory?.(directory)
         sdk = createSDK()
+        if (!props.events) startSSE()
         // The event stream restart will emit server.instance.disposed
         // which triggers sync.bootstrap() automatically
       },
