@@ -344,10 +344,20 @@ export function Session() {
   }
 
   function toBottom() {
-    setTimeout(() => {
-      if (!scroll || scroll.isDestroyed) return
+    let attempts = 0
+    const max = 20
+    const tryScroll = () => {
+      if (!scroll || scroll.isDestroyed) {
+        // scroll ref not yet assigned — retry until it is
+        if (attempts < max) {
+          attempts++
+          setTimeout(tryScroll, 50)
+        }
+        return
+      }
       scroll.scrollTo(scroll.scrollHeight)
-    }, 50)
+    }
+    setTimeout(tryScroll, 50)
   }
 
   const local = useLocal()
@@ -2049,16 +2059,56 @@ function WebSearch(props: ToolProps<any>) {
   )
 }
 
+// Persists task part → subagent session ID across component unmount/remount cycles.
+// Keyed by part ID (unique per task tool call).
+const taskSessionIdCache = new Map<string, string>()
+
 function Task(props: ToolProps<typeof TaskTool>) {
   const { navigate } = useRoute()
   const sync = useSync()
+  const ctx = use()
 
-  onMount(() => {
-    if (props.metadata.sessionId && !sync.data.message[props.metadata.sessionId]?.length)
-      sync.session.sync(props.metadata.sessionId)
+  // Resolve session ID — prefer metadata (authoritative), fall back to creation-order
+  // index matching (handles cancelled tasks where metadata may not have arrived).
+  // Result is cached in module-level Map so it survives component unmount/remount.
+  const sessionId = createMemo<string | undefined>(() => {
+    const fromMeta = props.metadata.sessionId as string | undefined
+    if (fromMeta) {
+      taskSessionIdCache.set(props.part.id, fromMeta)
+      return fromMeta
+    }
+
+    const cached = taskSessionIdCache.get(props.part.id)
+    if (cached) return cached
+
+    // Last resort: match by start-time rank among task parts vs child session creation order
+    const startTime = (props.part.state as any).time?.start as number | undefined
+    if (!startTime) return undefined
+
+    const childSessions = sync.data.session
+      .filter((x) => x.parentID === ctx.sessionID)
+      .sort((a, b) => a.id.localeCompare(b.id))
+    if (!childSessions.length) return undefined
+
+    const taskParts = Object.values(sync.data.part)
+      .flat()
+      .filter((p): p is ToolPart => p.type === "tool" && p.tool === "task" && p.sessionID === ctx.sessionID)
+      .sort((a, b) => ((a.state as any).time?.start ?? 0) - ((b.state as any).time?.start ?? 0))
+
+    const myIndex = taskParts.findIndex((p) => p.id === props.part.id)
+    if (myIndex === -1 || myIndex >= childSessions.length) return undefined
+
+    const id = childSessions[myIndex].id
+    taskSessionIdCache.set(props.part.id, id)
+    return id
   })
 
-  const messages = createMemo(() => sync.data.message[props.metadata.sessionId ?? ""] ?? [])
+  onMount(() => {
+    const id = sessionId()
+    if (id && !sync.data.message[id]?.length) sync.session.sync(id)
+  })
+
+  const messages = createMemo(() => sync.data.message[sessionId() ?? ""] ?? [])
 
   const tools = createMemo(() => {
     return messages().flatMap((msg) =>
@@ -2104,7 +2154,7 @@ function Task(props: ToolProps<typeof TaskTool>) {
       pending={SpinnerVerbs.forTool("task")}
       part={props.part}
       onClick={() => {
-        const id = props.metadata.sessionId
+        const id = sessionId()
         if (id) navigate({ type: "session", sessionID: id })
       }}
     >
