@@ -1,17 +1,20 @@
 import z from "zod"
 import { Effect } from "effect"
 import type { MessageV2 } from "../session/message-v2"
+import type { Agent } from "../agent/agent"
 import type { Permission } from "../permission"
 import type { SessionID, MessageID } from "../session/schema"
 import { Truncate } from "./truncate"
-import { Agent } from "@/agent/agent"
-
 export namespace Tool {
   interface Metadata {
     [key: string]: any
   }
 
   export type DynamicDescription = (agent: Agent.Info) => Effect.Effect<string>
+
+  export interface InitContext {
+    agent?: Agent.Info
+  }
 
   export type Context<M extends Metadata = Metadata> = {
     sessionID: SessionID
@@ -49,7 +52,8 @@ export namespace Tool {
 
   export interface Info<Parameters extends z.ZodType = z.ZodType, M extends Metadata = Metadata> {
     id: string
-    init: () => Promise<DefWithoutID<Parameters, M>>
+    parallelSafe?: boolean
+    init: (ctx?: InitContext) => Promise<DefWithoutID<Parameters, M>>
   }
 
   export type InferParameters<T> =
@@ -71,10 +75,10 @@ export namespace Tool {
 
   function wrap<Parameters extends z.ZodType, Result extends Metadata>(
     id: string,
-    init: (() => Promise<DefWithoutID<Parameters, Result>>) | DefWithoutID<Parameters, Result>,
+    init: ((ctx?: InitContext) => Promise<DefWithoutID<Parameters, Result>>) | DefWithoutID<Parameters, Result>,
   ) {
-    return async () => {
-      const toolInfo = init instanceof Function ? await init() : { ...init }
+    return async (initCtx?: InitContext) => {
+      const toolInfo = init instanceof Function ? await init(initCtx) : { ...init }
       const execute = toolInfo.execute
       toolInfo.execute = async (args, ctx) => {
         try {
@@ -92,7 +96,7 @@ export namespace Tool {
         if (result.metadata.truncated !== undefined) {
           return result
         }
-        const truncated = await Truncate.output(result.output, {}, await Agent.get(ctx.agent))
+        const truncated = await Truncate.output(result.output, {}, initCtx?.agent)
         return {
           ...result,
           output: truncated.content,
@@ -109,27 +113,39 @@ export namespace Tool {
 
   export function define<Parameters extends z.ZodType, Result extends Metadata, ID extends string = string>(
     id: ID,
-    init: (() => Promise<DefWithoutID<Parameters, Result>>) | DefWithoutID<Parameters, Result>,
+    init: ((ctx?: InitContext) => Promise<DefWithoutID<Parameters, Result>>) | DefWithoutID<Parameters, Result>,
   ): Info<Parameters, Result> & { id: ID } {
     return {
       id,
+      parallelSafe: init instanceof Function ? undefined : init.parallelSafe,
       init: wrap(id, init),
     }
   }
 
   export function defineEffect<Parameters extends z.ZodType, Result extends Metadata, R, ID extends string = string>(
     id: ID,
-    init: Effect.Effect<(() => Promise<DefWithoutID<Parameters, Result>>) | DefWithoutID<Parameters, Result>, never, R>,
+    init: Effect.Effect<
+      ((ctx?: InitContext) => Promise<DefWithoutID<Parameters, Result>>) | DefWithoutID<Parameters, Result>,
+      never,
+      R
+    >,
   ): Effect.Effect<Info<Parameters, Result>, never, R> & { id: ID } {
     return Object.assign(
-      Effect.map(init, (next) => ({ id, init: wrap(id, next) })),
+      Effect.map(init, (next) => ({
+        id,
+        parallelSafe: next instanceof Function ? undefined : next.parallelSafe,
+        init: wrap(id, next),
+      })),
       { id },
     )
   }
 
-  export function init<P extends z.ZodType, M extends Metadata>(info: Info<P, M>): Effect.Effect<Def<P, M>> {
+  export function init<P extends z.ZodType, M extends Metadata>(
+    info: Info<P, M>,
+    ctx?: InitContext,
+  ): Effect.Effect<Def<P, M>> {
     return Effect.gen(function* () {
-      const init = yield* Effect.promise(() => info.init())
+      const init = yield* Effect.promise(() => info.init(ctx))
       return {
         ...init,
         id: info.id,
