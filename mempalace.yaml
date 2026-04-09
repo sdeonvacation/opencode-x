@@ -1,0 +1,30 @@
+wing: opencode
+rooms:
+- name: design
+  description: Files from design/
+- name: configuration
+  description: Files from infra/
+- name: nix
+  description: Files from nix/
+- name: sdks
+  description: Files from sdks/
+- name: plans
+  description: Files from plans/
+- name: planning
+  description: Files from specs/
+- name: patches
+  description: Files from patches/
+- name: script
+  description: Files from script/
+- name: github
+  description: Files from github/
+- name: packages
+  description: Files from packages/
+- name: scripts
+  description: Files from scripts/
+- name: frontend
+  description: Files from ui/
+- name: documentation
+  description: Files from docs/
+- name: general
+  description: Files that don't fit other rooms

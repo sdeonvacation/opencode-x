@@ -79,7 +79,6 @@ process.env["OPENCODE_DB"] = ":memory:"
 
 // Now safe to import from src/
 const { Log } = await import("../src/util/log")
-const { initProjectors } = await import("../src/server/projectors")
 
 Log.init({
   print: false,
@@ -87,4 +86,3 @@ Log.init({
   level: "DEBUG",
 })
 
-initProjectors()

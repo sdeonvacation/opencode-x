@@ -1,4 +1,6 @@
 import { Instance } from "../project/instance"
+import { getCompanion } from "@/cli/cmd/tui/buddy/companion"
+import { companionIntroText } from "@/cli/cmd/tui/buddy/prompt"
 
 import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
 import PROMPT_DEFAULT from "./prompt/default.txt"
@@ -60,5 +62,13 @@ export namespace SystemPrompt {
       // version of them here and a less verbose version in tool description, rather than vice versa.
       Skill.fmt(list, { verbose: true }),
     ].join("\n")
+  }
+
+  export function companion(config: import("@/config/config").Config.Info): string[] {
+    if (!config.experimental?.buddy) return []
+    if (config.companion_muted) return []
+    const c = getCompanion(config)
+    if (!c) return []
+    return [companionIntroText(c.name, c.species)]
   }
 }

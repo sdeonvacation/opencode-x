@@ -1105,8 +1105,23 @@ export namespace Config {
             .describe(
               "Model override used for keyword-triggered ultrawork routing, or when task.use_ultrawork is explicitly set to true",
             ),
+          buddy: z.boolean().optional().describe("Enable the buddy companion system"),
+          buddy_model: z
+            .object({ providerID: z.string(), modelID: z.string() })
+            .optional()
+            .describe("Override model for companion reactions (defaults to active session model)"),
         })
         .optional(),
+      companion: z
+        .object({
+          name: z.string(),
+          personality: z.string(),
+          seed: z.string().optional(),
+          hatchedAt: z.number(),
+        })
+        .optional()
+        .describe("Stored companion soul"),
+      companion_muted: z.boolean().optional().describe("Mute companion reactions"),
     })
     .strict()
     .meta({
@@ -1568,11 +1583,21 @@ export namespace Config {
 
         const update = Effect.fn("Config.update")(function* (config: Info) {
           const dir = yield* InstanceState.directory
-          const file = path.join(dir, "config.json")
-          const existing = yield* loadFile(file)
-          yield* fs
-            .writeFileString(file, JSON.stringify(mergeDeep(writable(existing), writable(config)), null, 2))
-            .pipe(Effect.orDie)
+          // Write to the project config file that loadInstanceState reads.
+          // Prefer an existing opencode.jsonc/opencode.json in the project dir;
+          // fall back to creating opencode.json (config.json is not read back by loadInstanceState).
+          const candidates = ["opencode.jsonc", "opencode.json"].map((f) => path.join(dir, f))
+          const file = candidates.find((f) => existsSync(f)) ?? path.join(dir, "opencode.json")
+          const before = (yield* readConfigFile(file)) ?? "{}"
+          const input = writable(config)
+          if (file.endsWith(".jsonc")) {
+            const updated = patchJsonc(before, input)
+            yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
+          } else {
+            const existing = parseConfig(before, file)
+            const merged = mergeDeep(writable(existing), input)
+            yield* fs.writeFileString(file, JSON.stringify(merged, null, 2)).pipe(Effect.orDie)
+          }
           yield* Effect.promise(() => Instance.dispose())
         })
 

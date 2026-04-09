@@ -14,6 +14,7 @@ import {
   useContext,
 } from "solid-js"
 import { Dynamic } from "solid-js/web"
+import { reconcile } from "solid-js/store"
 import path from "path"
 import { useRoute, useRouteData } from "@tui/context/route"
 import { useSync } from "@tui/context/sync"
@@ -84,6 +85,11 @@ import { useTuiConfig } from "../../context/tui-config"
 import { getScrollAcceleration } from "../../util/scroll"
 import { TuiPluginRuntime } from "../../plugin"
 import { within } from "../../util/selection-boundary"
+import { CompanionSprite } from "@tui/buddy/CompanionSprite"
+import { getCompanion, generateSeed, rollWithSeed } from "@tui/buddy/companion"
+import { triggerCompanionReaction } from "@tui/buddy/react"
+import { SPECIES_NAMES, SPECIES_PERSONALITY } from "@tui/buddy/types"
+import type { Config as ConfigInfo } from "@/config/config"
 
 addDefaultParsers(parsers.parsers)
 
@@ -351,6 +357,33 @@ export function Session() {
   }
 
   const local = useLocal()
+
+  const [companionReaction, setCompanionReaction] = createSignal<string | undefined>()
+  const [companionPetAt, setCompanionPetAt] = createSignal<number | undefined>()
+  const reactionAbort = new AbortController()
+
+  // Refresh sync.data.config after any buddy config mutation so the sprite renders immediately.
+  // The config.update API has no server-sent event, so the TUI must pull after each write.
+  // reconcile() is required so SolidJS detects new keys (e.g. companion) and fires reactivity.
+  async function refreshConfig() {
+    const fresh = await sdk.client.config.get({})
+    if (fresh.data) sync.set("config", reconcile(fresh.data))
+  }
+  onCleanup(() => reactionAbort.abort())
+
+  createEffect(
+    on(
+      () => lastAssistant()?.time.completed,
+      (completed) => {
+        if (!completed) return
+        const cfg = sync.data.config as ConfigInfo.Info
+        if (!cfg.experimental?.buddy) return
+        const activeModel = local.model.current()
+        if (!activeModel) return
+        triggerCompanionReaction(messages(), setCompanionReaction, cfg, activeModel, reactionAbort.signal)
+      },
+    ),
+  )
 
   function moveFirstChild() {
     if (children().length === 1) return
@@ -1005,6 +1038,100 @@ export function Session() {
         dialog.clear()
       }),
     },
+    {
+      title: "Buddy companion",
+      value: "buddy",
+      category: "Companion",
+      hidden: !(sync.data.config as ConfigInfo.Info).experimental?.buddy,
+      slash: { name: "buddy" },
+      onSelect: async (dialog) => {
+        const cfg = sync.data.config as ConfigInfo.Info
+        const companion = getCompanion(cfg)
+        if (!companion) {
+          const seed = generateSeed()
+          const { bones } = rollWithSeed(seed)
+          const name = SPECIES_NAMES[bones.species] ?? bones.species
+          const personality = SPECIES_PERSONALITY[bones.species] ?? "A curious coding companion."
+          await sdk.client.config.update({
+            config: {
+              ...cfg,
+              companion: { name, personality, seed, hatchedAt: Date.now() },
+              companion_muted: false,
+            } as unknown as NonNullable<Parameters<typeof sdk.client.config.update>[0]>["config"],
+          })
+          await refreshConfig()
+          toast.show({ message: `${name} has hatched! ✨`, variant: "success" })
+        } else {
+          const { CompanionCard } = await import("@tui/buddy/CompanionCard")
+          dialog.replace(() => (
+            <CompanionCard companion={companion} lastReaction={companionReaction()} onDone={() => dialog.clear()} />
+          ))
+          return // don't clear — card handles its own dismissal
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "Pet your buddy",
+      value: "buddy.pet",
+      category: "Companion",
+      hidden:
+        !(sync.data.config as ConfigInfo.Info).experimental?.buddy || !(sync.data.config as ConfigInfo.Info).companion,
+      slash: { name: "buddy", aliases: ["buddy pet"] },
+      onSelect: async (_dialog) => {
+        setCompanionPetAt(Date.now())
+        const cfg = sync.data.config as ConfigInfo.Info
+        await sdk.client.config.update({
+          config: { ...cfg, companion_muted: false } as unknown as NonNullable<
+            Parameters<typeof sdk.client.config.update>[0]
+          >["config"],
+        })
+        await refreshConfig()
+        const activeModel = local.model.current()
+        if (activeModel) {
+          triggerCompanionReaction(messages(), setCompanionReaction, cfg, activeModel)
+        }
+        _dialog.clear()
+      },
+    },
+    {
+      title: "Mute buddy",
+      value: "buddy.off",
+      category: "Companion",
+      hidden:
+        !(sync.data.config as ConfigInfo.Info).experimental?.buddy || !(sync.data.config as ConfigInfo.Info).companion,
+      slash: { name: "buddy off" },
+      onSelect: async (dialog) => {
+        const cfg = sync.data.config as ConfigInfo.Info
+        await sdk.client.config.update({
+          config: { ...cfg, companion_muted: true } as unknown as NonNullable<
+            Parameters<typeof sdk.client.config.update>[0]
+          >["config"],
+        })
+        await refreshConfig()
+        toast.show({ message: "Buddy muted", variant: "info" })
+        dialog.clear()
+      },
+    },
+    {
+      title: "Unmute buddy",
+      value: "buddy.on",
+      category: "Companion",
+      hidden:
+        !(sync.data.config as ConfigInfo.Info).experimental?.buddy || !(sync.data.config as ConfigInfo.Info).companion,
+      slash: { name: "buddy on" },
+      onSelect: async (dialog) => {
+        const cfg = sync.data.config as ConfigInfo.Info
+        await sdk.client.config.update({
+          config: { ...cfg, companion_muted: false } as unknown as NonNullable<
+            Parameters<typeof sdk.client.config.update>[0]
+          >["config"],
+        })
+        await refreshConfig()
+        toast.show({ message: "Buddy unmuted", variant: "success" })
+        dialog.clear()
+      },
+    },
   ])
 
   const revertInfo = createMemo(() => session()?.revert)
@@ -1229,7 +1356,19 @@ export function Session() {
                       toBottom()
                     }}
                     sessionID={route.sessionID}
-                    right={<TuiPluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
+                    right={
+                      <box flexDirection="row" flexShrink={0}>
+                        <Show when={(sync.data.config as ConfigInfo.Info).experimental?.buddy}>
+                          <CompanionSprite
+                            reaction={companionReaction}
+                            setReaction={setCompanionReaction}
+                            petAt={companionPetAt}
+                            config={sync.data.config as ConfigInfo.Info}
+                          />
+                        </Show>
+                        <TuiPluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />
+                      </box>
+                    }
                   />
                 </TuiPluginRuntime.Slot>
               </Show>

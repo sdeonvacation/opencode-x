@@ -30,3 +30,4 @@ logs/
 *.bun-build
 tsconfig.tsbuildinfo
 graphify-out/cache
+/packages/opencode/src/graphify-out/cache
