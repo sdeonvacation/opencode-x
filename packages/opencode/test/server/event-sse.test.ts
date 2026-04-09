@@ -49,7 +49,7 @@ describe("server/event SSE perf proxies", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const app = Server.Default()
+        const app = Server.Default().app
         const wanted = SessionID.make("session_perf_match")
         const other = SessionID.make("session_perf_other")
 
@@ -101,7 +101,7 @@ describe("server/event SSE perf proxies", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const app = Server.Default()
+        const app = Server.Default().app
         const sessionID = SessionID.make("session_perf_all")
 
         const res = await app.request(`/event?directory=${encodeURIComponent(tmp.path)}`)

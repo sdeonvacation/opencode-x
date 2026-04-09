@@ -111,8 +111,8 @@ describe("tool.registry cache", () => {
           }),
         )
 
-        await ToolRegistry.tools(model, build)
-        await ToolRegistry.tools(model, general)
+        await ToolRegistry.tools({ ...model, agent: build })
+        await ToolRegistry.tools({ ...model, agent: general })
 
         expect(initCount).toBe(2)
       },
@@ -196,15 +196,14 @@ describe("tool.registry cache", () => {
     })
   })
 
-  test("mcp tools changed publishes tool registry change signal", async () => {
+  test("mcp tools changed publishes current tools-changed signal", async () => {
     await using tmp = await tmpdir()
     let changed = 0
 
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        await ToolRegistry.ids()
-        const unsub = Bus.subscribe(ToolRegistry.Changed, () => {
+        const unsub = Bus.subscribe(MCP.ToolsChanged, () => {
           changed++
         })
         try {
@@ -249,32 +248,21 @@ describe("tool.registry cache", () => {
         }
         hooks.push(hook)
 
-        let pluginChanged = 0
-        const unsub = Bus.subscribe(ToolRegistry.Changed, (evt) => {
-          if (evt.properties.reason === "plugin") pluginChanged++
-        })
+        const first = await ToolRegistry.tools(model)
+        expect(first.find((tool) => tool.id === "cache_plugin_tool")?.description).toBe("v1")
 
-        try {
-          const first = await ToolRegistry.tools(model)
-          expect(first.find((tool) => tool.id === "cache_plugin_tool")?.description).toBe("v1")
-
-          pluginVersion = "v2"
-          hook["tool.definition"] = async (_input: any, output: any) => {
-            output.description = pluginVersion
-          }
-          const second = await ToolRegistry.tools(model)
-          expect(second.find((tool) => tool.id === "cache_plugin_tool")?.description).toBe("v2")
-          expect(initCount).toBe(2)
-          await waitFor(() => pluginChanged > 0)
-          expect(pluginChanged).toBeGreaterThan(0)
-        } finally {
-          unsub()
+        pluginVersion = "v2"
+        hook["tool.definition"] = async (_input: any, output: any) => {
+          output.description = pluginVersion
         }
+        const second = await ToolRegistry.tools(model)
+        expect(second.find((tool) => tool.id === "cache_plugin_tool")?.description).toBe("v2")
+        expect(initCount).toBe(2)
       },
     })
   })
 
-  test("tool registry changed signal invalidates cache", async () => {
+  test("mcp tools changed signal invalidates cache", async () => {
     await using tmp = await tmpdir()
     let initCount = 0
     const model = {
@@ -297,7 +285,7 @@ describe("tool.registry cache", () => {
         )
 
         await ToolRegistry.tools(model)
-        await Bus.publish(ToolRegistry.Changed, { reason: "mcp" })
+        await Bus.publish(MCP.ToolsChanged, { server: "demo" })
         await waitFor(async () => {
           await ToolRegistry.tools(model)
           return initCount === 2

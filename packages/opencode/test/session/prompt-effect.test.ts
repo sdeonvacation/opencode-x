@@ -1,5 +1,5 @@
 import { NodeFileSystem } from "@effect/platform-node"
-import { expect } from "bun:test"
+import { expect, spyOn } from "bun:test"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import path from "path"
 import { Agent as AgentSvc } from "../../src/agent/agent"
@@ -671,9 +671,9 @@ it.live(
           const ready = defer<void>()
           const aborted = defer<void>()
           const registry = yield* ToolRegistry.Service
-          const { task } = yield* registry.named()
+          const task = yield* registry.named.task()
           const original = task.execute
-          task.execute = async (_args, ctx) => {
+          task.execute = async (_args: Parameters<typeof original>[0], ctx: Parameters<typeof original>[1]) => {
             ready.resolve()
             ctx.abort.addEventListener("abort", () => aborted.resolve(), { once: true })
             await new Promise<void>(() => {})
@@ -1350,16 +1350,16 @@ unix(
 // Abort signal propagation tests for inline tool execution
 
 /** Override a tool's execute to hang until aborted. Returns ready/aborted defers and a finalizer. */
-function hangUntilAborted(tool: { execute: (...args: any[]) => any }) {
+function hangUntilAborted<T extends { execute: (...args: any[]) => Promise<any> }>(tool: T) {
   const ready = defer<void>()
   const aborted = defer<void>()
   const original = tool.execute
-  tool.execute = async (_args: any, ctx: any) => {
+  tool.execute = (async (...[_args, ctx]: Parameters<typeof original>) => {
     ready.resolve()
     ctx.abort.addEventListener("abort", () => aborted.resolve(), { once: true })
     await new Promise<void>(() => {})
-    return { title: "", metadata: {}, output: "" }
-  }
+    return { title: "", metadata: {}, output: "" } as Awaited<ReturnType<typeof original>>
+  }) as typeof original
   const restore = Effect.addFinalizer(() => Effect.sync(() => void (tool.execute = original)))
   return { ready, aborted, restore }
 }
@@ -1371,7 +1371,7 @@ it.live(
       (dir) =>
         Effect.gen(function* () {
           const registry = yield* ToolRegistry.Service
-          const { read } = yield* registry.named()
+          const read = yield* registry.named.read()
           const { ready, aborted, restore } = hangUntilAborted(read)
           yield* restore
 
@@ -1417,7 +1417,7 @@ it.live(
       (dir) =>
         Effect.gen(function* () {
           const registry = yield* ToolRegistry.Service
-          const { read } = yield* registry.named()
+          const read = yield* registry.named.read()
           const { ready, aborted, restore } = hangUntilAborted(read)
           yield* restore
 
