@@ -1,0 +1,27 @@
+Execute multiple eligible built-in tools in parallel with one request.
+
+Use this tool only when batching multiple independent tool calls will reduce total latency. Provide an array of tool calls, each with a tool name and parameters object.
+
+Restrictions:
+- Only built-in tools that are registered in the current runtime can be batched.
+- External or environment-provided tools may not be available for batch execution.
+- The batch tool cannot call itself.
+- Maximum 25 tool calls per batch.
+
+Payload format:
+[
+  {
+    "tool": "read",
+    "parameters": {
+      "filePath": "/absolute/path/to/file"
+    }
+  },
+  {
+    "tool": "glob",
+    "parameters": {
+      "pattern": "**/*.ts"
+    }
+  }
+]
+
+Use normal direct tool calls instead of batch when order matters or when one call depends on another.
