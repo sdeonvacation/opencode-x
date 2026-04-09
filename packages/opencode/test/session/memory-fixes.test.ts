@@ -49,8 +49,7 @@ describe("Fix 1: strip summary.diffs from hydrated messages", () => {
       diffs: [
         {
           file: "src/big-file.ts",
-          before: "a".repeat(10000),
-          after: "b".repeat(10000),
+          patch: "x".repeat(10000),
           additions: 100,
           deletions: 50,
           status: "modified",
@@ -59,7 +58,7 @@ describe("Fix 1: strip summary.diffs from hydrated messages", () => {
     })
     // Verify the summary has diffs before stripping
     expect(info.summary?.diffs).toHaveLength(1)
-    expect(info.summary?.diffs?.[0]?.before).toHaveLength(10000)
+    expect(info.summary?.diffs?.[0]?.patch).toHaveLength(10000)
 
     // Simulate what the info() function does: strip diffs from user messages
     if (info.role === "user" && info.summary?.diffs?.length) {
@@ -180,47 +179,45 @@ describe("Fix 3: DIFF_CONTENT_LIMIT cap", () => {
 
   test("caps content when total exceeds limit", () => {
     const files = [
-      { file: "a.ts", before: "x".repeat(500_000), after: "y".repeat(500_000) },
-      { file: "b.ts", before: "x".repeat(500_000), after: "y".repeat(500_000) },
+      { file: "a.ts", patch: "x".repeat(1_000_000) },
+      { file: "b.ts", patch: "y".repeat(1_000_000) },
     ]
 
     let contentBytes = 0
     const result = files.map((f) => {
-      const size = f.before.length + f.after.length
+      const size = f.patch.length
       if (contentBytes + size > DIFF_CONTENT_LIMIT) {
-        return { ...f, before: "", after: "" }
+        return { ...f, patch: "" }
       }
       contentBytes += size
       return f
     })
 
     // First file fits (1MB exactly at limit)
-    expect(result[0]!.before).toHaveLength(500_000)
-    expect(result[0]!.after).toHaveLength(500_000)
+    expect(result[0]!.patch).toHaveLength(1_000_000)
     // Second file exceeds limit — content stripped
-    expect(result[1]!.before).toBe("")
-    expect(result[1]!.after).toBe("")
+    expect(result[1]!.patch).toBe("")
     // File metadata preserved
     expect(result[1]!.file).toBe("b.ts")
   })
 
   test("small diffs are not capped", () => {
     const files = [
-      { file: "a.ts", before: "hello", after: "world" },
-      { file: "b.ts", before: "foo", after: "bar" },
+      { file: "a.ts", patch: "hello" },
+      { file: "b.ts", patch: "foo" },
     ]
 
     let contentBytes = 0
     const result = files.map((f) => {
-      const size = f.before.length + f.after.length
+      const size = f.patch.length
       if (contentBytes + size > DIFF_CONTENT_LIMIT) {
-        return { ...f, before: "", after: "" }
+        return { ...f, patch: "" }
       }
       contentBytes += size
       return f
     })
 
-    expect(result[0]!.before).toBe("hello")
-    expect(result[1]!.before).toBe("foo")
+    expect(result[0]!.patch).toBe("hello")
+    expect(result[1]!.patch).toBe("foo")
   })
 })

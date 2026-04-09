@@ -21,7 +21,6 @@ import { Wildcard } from "@/util/wildcard"
 import { SessionID } from "@/session/schema"
 import { Auth } from "@/auth"
 import { Installation } from "@/installation"
-import { Wildcard } from "@/util/wildcard"
 
 export namespace LLM {
   const log = Log.create({ service: "llm" })

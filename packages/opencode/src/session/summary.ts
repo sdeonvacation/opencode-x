@@ -115,8 +115,7 @@ export namespace SessionSummary {
         const diffs = yield* computeDiff({ messages: all })
         const current = (yield* file.status()).map((item) => ({
           file: item.path,
-          before: "",
-          after: "",
+          patch: "",
           additions: item.added,
           deletions: item.removed,
           status: item.status,

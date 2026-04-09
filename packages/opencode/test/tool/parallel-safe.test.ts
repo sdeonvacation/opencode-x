@@ -38,11 +38,15 @@ describe("tool parallelSafe metadata", () => {
     expect(resolved.parallelSafe).toBe(true)
   })
 
-  test("leaves stateful tools non-parallel-safe", () => {
+  test("leaves stateful tools non-parallel-safe", async () => {
     expect(BashTool.parallelSafe).toBeUndefined()
     expect(EditTool.parallelSafe).toBeUndefined()
     expect(WriteTool.parallelSafe).toBeUndefined()
-    expect(TaskTool.parallelSafe).toBeUndefined()
     expect(BatchTool.parallelSafe).toBeUndefined()
+
+    const task = await Effect.runPromise(TaskTool)
+    const resolved = await task.init()
+    expect(task.parallelSafe).toBeUndefined()
+    expect(resolved.parallelSafe).toBeUndefined()
   })
 })

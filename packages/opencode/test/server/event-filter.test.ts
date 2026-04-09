@@ -39,7 +39,7 @@ describe("server/event filter", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const app = Server.Default()
+        const app = Server.Default().app
         const wanted = SessionID.make("session_wanted")
         const other = SessionID.make("session_other")
 
@@ -76,7 +76,7 @@ describe("server/event filter", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const app = Server.Default()
+        const app = Server.Default().app
         const sessionID = SessionID.make("session_any")
 
         const res = await app.request(`/event?directory=${encodeURIComponent(tmp.path)}&types=permission`)
@@ -112,7 +112,7 @@ describe("server/event filter", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const app = Server.Default()
+        const app = Server.Default().app
         const sessionID = SessionID.make("session_any_3")
 
         const res = await app.request(`/event?directory=${encodeURIComponent(tmp.path)}&types=permission`)
@@ -133,7 +133,7 @@ describe("server/event filter", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const app = Server.Default()
+        const app = Server.Default().app
         const sessionID = SessionID.make("session_any_2")
 
         const res = await app.request(`/event?directory=${encodeURIComponent(tmp.path)}`)
@@ -159,7 +159,7 @@ describe("server/event filter", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const app = Server.Default()
+        const app = Server.Default().app
         const wanted = SessionID.make("session_match")
         const other = SessionID.make("session_other_many")
 
