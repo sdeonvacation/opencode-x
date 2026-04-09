@@ -2108,7 +2108,7 @@ function Task(props: ToolProps<typeof TaskTool>) {
 
     const childSessions = sync.data.session
       .filter((x) => x.parentID === ctx.sessionID)
-      .sort((a, b) => a.id.localeCompare(b.id))
+      .sort((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))
     if (!childSessions.length) return undefined
 
     const taskParts = Object.values(sync.data.part)
