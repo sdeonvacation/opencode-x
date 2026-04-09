@@ -29,4 +29,4 @@ UPCOMING_CHANGELOG.md
 logs/
 *.bun-build
 tsconfig.tsbuildinfo
-graphify-out/cache
+**/graphify-out/cache
