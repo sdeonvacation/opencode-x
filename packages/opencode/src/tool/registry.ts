@@ -30,7 +30,6 @@ import { pathToFileURL } from "url"
 import { Effect, Layer, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
-import { Env } from "../env"
 import { Question } from "../question"
 import { Todo } from "../session/todo"
 import { LSP } from "../lsp"
@@ -39,6 +38,8 @@ import { Instruction } from "../session/instruction"
 import { AppFileSystem } from "../filesystem"
 import { Agent } from "../agent/agent"
 import { BatchTool } from "./batch"
+import { computePluginDefinitionSignature, createPluginSignatureState } from "./plugin-signature"
+import { filterTools } from "./tool-filter"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -191,9 +192,7 @@ export namespace ToolRegistry {
           return {
             custom,
             pluginToolCount,
-            pluginHookID: new WeakMap(),
-            pluginFunctionID: new WeakMap(),
-            pluginHookSeq: 1,
+            ...createPluginSignatureState<ToolCacheEntry>(),
           }
         }),
       )
@@ -209,29 +208,6 @@ export namespace ToolRegistry {
           a.batchTool === b.batchTool
         )
       }
-
-      const pluginDefinitionSignature = Effect.fnUntraced(function* (s: State) {
-        const hooks = yield* plugin.list()
-        const ids: string[] = []
-        for (const hook of hooks) {
-          const fn = (hook as any)["tool.definition"]
-          if (!fn) continue
-          let hookID = s.pluginHookID.get(hook as object)
-          if (!hookID) {
-            hookID = s.pluginHookSeq++
-            s.pluginHookID.set(hook as object, hookID)
-            s.cache = undefined
-          }
-          let fnID = s.pluginFunctionID.get(fn as Function)
-          if (!fnID) {
-            fnID = s.pluginHookSeq++
-            s.pluginFunctionID.set(fn as Function, fnID)
-            s.cache = undefined
-          }
-          ids.push(`${hookID}:${fnID}`)
-        }
-        return ids.join(",")
-      })
 
       const all = Effect.fn("ToolRegistry.all")(function* (custom: Tool.Info[]) {
         const cfg = yield* config.get()
@@ -280,7 +256,8 @@ export namespace ToolRegistry {
       const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
         const s = yield* InstanceState.get(state)
         const cfg = yield* config.get()
-        const pluginSignature = yield* pluginDefinitionSignature(s)
+        const hooks = yield* plugin.list()
+        const pluginSignature = computePluginDefinitionSignature(hooks, s)
         const key: ToolCacheKey = {
           agentName: input.agent?.name ?? "",
           providerID: input.providerID,
@@ -298,19 +275,7 @@ export namespace ToolRegistry {
           }))
         }
 
-        const filtered = (yield* all(s.custom)).filter((tool) => {
-          if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {
-            return input.providerID === ProviderID.opencode || Flag.OPENCODE_ENABLE_EXA
-          }
-
-          const usePatch =
-            !!Env.get("OPENCODE_E2E_LLM_URL") ||
-            (input.modelID.includes("gpt-") && !input.modelID.includes("oss") && !input.modelID.includes("gpt-4"))
-          if (tool.id === ApplyPatchTool.id) return usePatch
-          if (tool.id === EditTool.id || tool.id === WriteTool.id) return !usePatch
-
-          return true
-        })
+        const filtered = filterTools(yield* all(s.custom), { providerID: input.providerID, modelID: input.modelID })
 
         const next = yield* Effect.forEach(
           filtered,
