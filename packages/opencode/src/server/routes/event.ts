@@ -28,11 +28,17 @@ export const EventRoutes = () =>
     }),
     async (c) => {
       log.info("event connected")
+      const sessionFilter = c.req.query("sessionID")
+      const typeFilter = c.req
+        .query("types")
+        ?.split(",")
+        .map((x) => x.trim())
+        .filter(Boolean)
       c.header("Cache-Control", "no-cache, no-transform")
       c.header("X-Accel-Buffering", "no")
       c.header("X-Content-Type-Options", "nosniff")
       return streamSSE(c, async (stream) => {
-        const q = new AsyncQueue<string | null>()
+        const q = new AsyncQueue<string | null>({ maxSize: 1000 })
         let done = false
 
         q.push(
@@ -62,6 +68,12 @@ export const EventRoutes = () =>
         }
 
         const unsub = Bus.subscribeAll((event) => {
+          const control =
+            event.type.startsWith("server.") || event.type === "session.status" || event.type === "permission.asked"
+          if (!control) {
+            if (sessionFilter && event.properties?.sessionID && event.properties.sessionID !== sessionFilter) return
+            if (typeFilter?.length && !typeFilter.some((type) => event.type.startsWith(type))) return
+          }
           q.push(JSON.stringify(event))
           if (event.type === Bus.InstanceDisposed.type) {
             stop()

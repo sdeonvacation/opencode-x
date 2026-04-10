@@ -92,4 +92,25 @@ describe("LSPClient interop", () => {
 
     await client.shutdown()
   })
+
+  test("clears cached diagnostics on shutdown", async () => {
+    const handle = spawnFakeServer() as any
+
+    const client = await Instance.provide({
+      directory: process.cwd(),
+      fn: () =>
+        LSPClient.create({
+          serverID: "fake",
+          server: handle as unknown as LSPServer.Handle,
+          root: process.cwd(),
+        }),
+    })
+
+    client.diagnostics.set("/tmp/a.ts", [])
+    client.diagnostics.set("/tmp/b.ts", [])
+
+    await client.shutdown()
+
+    expect(client.diagnostics.size).toBe(0)
+  })
 })

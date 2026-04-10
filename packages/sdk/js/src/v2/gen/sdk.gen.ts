@@ -3202,6 +3202,8 @@ export class Event extends HeyApiClient {
     parameters?: {
       directory?: string
       workspace?: string
+      sessionID?: string
+      types?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3212,6 +3214,8 @@ export class Event extends HeyApiClient {
           args: [
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
+            { in: "query", key: "sessionID" },
+            { in: "query", key: "types" },
           ],
         },
       ],

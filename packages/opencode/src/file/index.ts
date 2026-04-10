@@ -432,10 +432,12 @@ export namespace File {
         ])
 
         const changed: File.Info[] = []
+        const hidden = /(^|\/)\./
 
         if (diffOutput.trim()) {
           for (const line of diffOutput.trim().split("\n")) {
             const [added, removed, file] = line.split("\t")
+            if (hidden.test(file)) continue
             changed.push({
               path: file,
               added: added === "-" ? 0 : parseInt(added, 10),
@@ -456,9 +458,18 @@ export namespace File {
         ])
 
         if (untrackedOutput.trim()) {
+          const max = 512 * 1024
+          const skip = ["node_modules/", ".git/", "dist/", "build/", ".next/"]
           for (const file of untrackedOutput.trim().split("\n")) {
+            if (skip.some((dir) => file.includes(dir))) continue
+            if (hidden.test(file)) continue
+            const full = path.join(Instance.directory, file)
+            if (Bun.file(full).size > max) {
+              changed.push({ path: file, added: 0, removed: 0, status: "added" })
+              continue
+            }
             const content = yield* appFs
-              .readFileString(path.join(Instance.directory, file))
+              .readFileString(full)
               .pipe(Effect.catch(() => Effect.succeed<string | undefined>(undefined)))
             if (content === undefined) continue
             changed.push({
@@ -483,6 +494,7 @@ export namespace File {
 
         if (deletedOutput.trim()) {
           for (const file of deletedOutput.trim().split("\n")) {
+            if (hidden.test(file)) continue
             changed.push({
               path: file,
               added: 0,

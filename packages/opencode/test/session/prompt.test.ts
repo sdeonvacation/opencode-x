@@ -176,7 +176,7 @@ describe("session.prompt missing file", () => {
         })
         const text = stored.parts.filter((part) => part.type === "text").map((part) => part.text)
 
-        expect(text[0]?.startsWith("Called the Read tool with the following input:")).toBe(true)
+        expect(text[0]?.startsWith("Read input:")).toBe(true)
         expect(text[1]?.includes("Read tool failed to read")).toBe(true)
         expect(text[2]).toBe("after-file")
 

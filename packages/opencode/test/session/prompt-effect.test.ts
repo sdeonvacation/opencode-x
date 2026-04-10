@@ -1,5 +1,5 @@
 import { NodeFileSystem } from "@effect/platform-node"
-import { expect } from "bun:test"
+import { expect, spyOn } from "bun:test"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import path from "path"
 import z from "zod"
@@ -497,6 +497,47 @@ it.live("loop continues when finish is stop but assistant has tool parts", () =>
   ),
 )
 
+it.live("loop stops after max steps hard limit", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "hello" }],
+      })
+      yield* llm.tool("read", { filePath: "README.md" })
+
+      const result = yield* prompt.loop({ sessionID: session.id })
+      expect(result.info.role).toBe("assistant")
+      expect(yield* llm.calls).toBe(1)
+
+      const msgs = yield* MessageV2.filterCompactedEffect(session.id)
+      const last = msgs.findLast((m) => m.info.role === "assistant")
+      expect(last?.info.role).toBe("assistant")
+      if (!last || last.info.role !== "assistant") return
+      expect(last.info.finish).toBe("tool-calls")
+    }),
+    {
+      git: true,
+      config: (url) => ({
+        ...providerCfg(url),
+        agent: {
+          build: {
+            steps: 1,
+          },
+        },
+      }),
+    },
+  ),
+)
+
 it.live("failed subtask preserves metadata on error tool state", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
@@ -726,9 +767,9 @@ it.live(
           const ready = defer<void>()
           const aborted = defer<void>()
           const registry = yield* ToolRegistry.Service
-          const { task } = yield* registry.named()
+          const task = yield* registry.named.task()
           const original = task.execute
-          task.execute = async (_args, ctx) => {
+          task.execute = async (_args: Parameters<typeof original>[0], ctx: Parameters<typeof original>[1]) => {
             ready.resolve()
             ctx.abort.addEventListener("abort", () => aborted.resolve(), { once: true })
             await new Promise<void>(() => {})
@@ -1123,6 +1164,51 @@ unix(
 )
 
 it.live(
+  "metadata update preserves running start time",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const { prompt, sessions, chat } = yield* boot({
+          title: "Pinned",
+        })
+        yield* sessions.setPermission({
+          sessionID: chat.id,
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+
+        yield* llm.tool("write", {
+          filePath: "out.txt",
+          content: "hello",
+        })
+        yield* llm.text("done")
+
+        const result = yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          noReply: false,
+          parts: [{ type: "text", text: "write file" }],
+        })
+
+        expect(result.info.role).toBe("assistant")
+        const msgs = yield* Effect.sync(() => MessageV2.filterCompacted(MessageV2.stream(chat.id)))
+        const part = msgs
+          .flatMap((x) => x.parts)
+          .find(
+            (x): x is MessageV2.ToolPart => x.type === "tool" && x.tool === "write" && x.state.status === "completed",
+          )
+        expect(part?.state.status).toBe("completed")
+        if (!part || part.state.status !== "completed") return
+
+        const start = part.state.time.start
+        expect(start).toBeGreaterThan(0)
+        expect(part.state.time.end).toBeGreaterThanOrEqual(start)
+      }),
+      { git: true, config: (url) => providerCfg(url) },
+    ),
+  10_000,
+)
+
+it.live(
   "loop waits while shell runs and starts after shell exits",
   () =>
     provideTmpdirServer(
@@ -1198,6 +1284,36 @@ it.live(
       { git: true, config: providerCfg },
     ),
   3_000,
+)
+
+unix(
+  "shell spawn error does not leave session busy",
+  () =>
+    withSh(() =>
+      provideTmpdirInstance(
+        (dir) =>
+          Effect.gen(function* () {
+            const { prompt, chat } = yield* boot()
+            const spy = spyOn(Shell, "preferred").mockReturnValue("/__missing_shell__")
+
+            try {
+              const exit = yield* prompt
+                .shell({ sessionID: chat.id, agent: "build", command: "echo hi" })
+                .pipe(Effect.exit)
+              expect(Exit.isFailure(exit)).toBe(true)
+            } finally {
+              spy.mockRestore()
+            }
+
+            const status = yield* SessionStatus.Service
+            expect((yield* status.get(chat.id)).type).toBe("idle")
+            const busy = yield* prompt.assertNotBusy(chat.id).pipe(Effect.exit)
+            expect(Exit.isSuccess(busy)).toBe(true)
+          }),
+        { git: true, config: cfg },
+      ),
+    ),
+  30_000,
 )
 
 unix(
@@ -1382,16 +1498,16 @@ unix(
 // Abort signal propagation tests for inline tool execution
 
 /** Override a tool's execute to hang until aborted. Returns ready/aborted defers and a finalizer. */
-function hangUntilAborted(tool: { execute: (...args: any[]) => any }) {
+function hangUntilAborted<T extends { execute: (...args: any[]) => Promise<any> }>(tool: T) {
   const ready = defer<void>()
   const aborted = defer<void>()
   const original = tool.execute
-  tool.execute = async (_args: any, ctx: any) => {
+  tool.execute = (async (...[_args, ctx]: Parameters<typeof original>) => {
     ready.resolve()
     ctx.abort.addEventListener("abort", () => aborted.resolve(), { once: true })
     await new Promise<void>(() => {})
-    return { title: "", metadata: {}, output: "" }
-  }
+    return { title: "", metadata: {}, output: "" } as Awaited<ReturnType<typeof original>>
+  }) as typeof original
   const restore = Effect.addFinalizer(() => Effect.sync(() => void (tool.execute = original)))
   return { ready, aborted, restore }
 }
@@ -1403,7 +1519,7 @@ it.live(
       (dir) =>
         Effect.gen(function* () {
           const registry = yield* ToolRegistry.Service
-          const { read } = yield* registry.named()
+          const read = yield* registry.named.read()
           const { ready, aborted, restore } = hangUntilAborted(read)
           yield* restore
 
@@ -1449,7 +1565,7 @@ it.live(
       (dir) =>
         Effect.gen(function* () {
           const registry = yield* ToolRegistry.Service
-          const { read } = yield* registry.named()
+          const read = yield* registry.named.read()
           const { ready, aborted, restore } = hangUntilAborted(read)
           yield* restore
 

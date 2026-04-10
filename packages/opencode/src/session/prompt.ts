@@ -9,7 +9,7 @@ import { Session } from "."
 import { Agent } from "../agent/agent"
 import { Provider } from "../provider/provider"
 import { ModelID, ProviderID } from "../provider/schema"
-import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
+import { type ModelMessage, type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
 import { SessionCompaction } from "./compaction"
 import { Bus } from "../bus"
 import { ProviderTransform } from "../provider/transform"
@@ -535,7 +535,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }) {
         const { task, model, lastUser, sessionID, session, msgs } = input
         const ctx = yield* InstanceState.context
-        const { task: taskTool } = yield* registry.named()
+        const taskTool = yield* registry.named.task()
         const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID) : model
         const assistantMessage: MessageV2.Assistant = yield* sessions.updateMessage({
           id: MessageID.ascending(),
@@ -591,8 +591,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           throw error
         }
 
+        type TaskResult = Awaited<ReturnType<typeof taskTool.execute>>
+
         let error: Error | undefined
-        const result = yield* Effect.tryPromise({
+        const result: TaskResult | undefined = yield* Effect.tryPromise({
           try: (signal) =>
             taskTool.execute(taskArgs, {
               agent: task.agent,
@@ -640,7 +642,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           Effect.catch((e) => {
             error = e instanceof Error ? e : new Error(String(e))
             log.error("subtask execution failed", { error, agent: task.agent, description: task.description })
-            return Effect.succeed(undefined as Awaited<ReturnType<typeof taskTool.execute>> | undefined)
+            return Effect.succeed(undefined as TaskResult | undefined)
           }),
           Effect.onInterrupt(() =>
             Effect.gen(function* () {
@@ -938,7 +940,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         return yield* provider.defaultModel()
       })
 
-      const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: PromptInput) {
+      const createUserMessage: (
+        input: PromptInput,
+      ) => Effect.Effect<{ info: MessageV2.User; parts: MessageV2.Part[] }> = Effect.fn(
+        "SessionPrompt.createUserMessage",
+      )(function* (input: PromptInput) {
         const agentName = input.agent || (yield* agents.defaultAgent())
         const ag = yield* agents.get(agentName)
         if (!ag) {
@@ -1065,9 +1071,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 const filepath = fileURLToPath(part.url)
                 if (yield* fsys.isDir(filepath)) part.mime = "application/x-directory"
 
-                const { read } = yield* registry.named()
-                const execRead = (args: Parameters<typeof read.execute>[0], extra?: Tool.Context["extra"]) =>
-                  Effect.promise((signal: AbortSignal) =>
+                const read = yield* registry.named.read()
+                type ReadArgs = z.infer<typeof read.parameters>
+                type ReadResult = Awaited<ReturnType<typeof read.execute>>
+                const execRead = (args: ReadArgs, extra?: Tool.Context["extra"]) =>
+                  Effect.promise<ReadResult>((signal: AbortSignal) =>
                     read.execute(args, {
                       sessionID: input.sessionID,
                       abort: signal,
@@ -1350,14 +1358,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               throw error
             }
 
+            const ctx = yield* InstanceState.context
             const msg: MessageV2.Assistant = {
               id: MessageID.ascending(),
               parentID: user.info.id,
               role: "assistant",
               mode: agent.name,
               agent: agent.name,
-              variant: user.info.variant,
-              path: { cwd: Instance.directory, root: Instance.worktree },
+              variant: user.info.model.variant,
+              path: { cwd: ctx.directory, root: ctx.worktree },
               cost: 0,
               tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
               modelID: model.id,
@@ -1423,13 +1432,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* status.set(sessionID, { type: "busy" })
             log.info("loop", { step, sessionID })
 
-            yield* compaction.prune({ sessionID }).pipe(Effect.ignore)
-            historyCache.invalidate()
+            const didPrune = yield* compaction.prune({ sessionID }).pipe(Effect.orElseSucceed(() => false))
+            if (didPrune) historyCache.invalidate()
 
             const modelRef = yield* lastModel(sessionID)
             const model = yield* getModel(modelRef.providerID, modelRef.modelID, sessionID)
-            const cachedHistory = yield* historyCache.get({ sessionID, model })
-            let msgs = cachedHistory.messages
+            let msgs: MessageV2.WithParts[]
+            let cachedModelMessages: ModelMessage[]
+            {
+              const history = yield* historyCache.get({ sessionID, model })
+              msgs = history.messages
+              cachedModelMessages = history.modelMessages
+            }
 
             let lastUser: MessageV2.User | undefined
             let lastAssistant: MessageV2.Assistant | undefined
@@ -1595,30 +1609,42 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 messagesChanged = true
               }
 
-              const [skills, env, instructions, modelMsgs] = yield* Effect.all([
+              const [skills, env, instructions, initialModelMessages] = yield* Effect.all([
                 Effect.promise(() => SystemPrompt.skills(agent)),
                 Effect.promise(() => SystemPrompt.environment(model)),
                 instruction.system().pipe(Effect.orDie),
                 messagesChanged
                   ? Effect.promise(() => MessageV2.toModelMessages(msgs, model))
-                  : Effect.succeed(cachedHistory.modelMessages),
+                  : Effect.succeed(cachedModelMessages),
               ])
+              let modelMsgs = initialModelMessages
+              cachedModelMessages = []
               const system = [...env, ...(skills ? [skills] : []), ...instructions]
               const format = lastUser.format ?? { type: "text" as const }
               if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
-              const result = yield* handle.process({
-                user: lastUser,
-                agent,
-                permission: session.permission,
-                sessionID,
-                parentSessionID: session.parentID,
-                system,
-                messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
-                tools,
-                toolMeta: resolvedTools.toolMeta,
-                model,
-                toolChoice: format.type === "json_schema" ? "required" : undefined,
-              })
+              const result = yield* handle
+                .process({
+                  user: lastUser,
+                  agent,
+                  permission: session.permission,
+                  sessionID,
+                  parentSessionID: session.parentID,
+                  system,
+                  messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
+                  tools,
+                  toolMeta: resolvedTools.toolMeta,
+                  model,
+                  toolChoice: format.type === "json_schema" ? "required" : undefined,
+                })
+                .pipe(
+                  Effect.ensuring(
+                    Effect.sync(() => {
+                      msgs = []
+                      modelMsgs = []
+                      cachedModelMessages = []
+                    }),
+                  ),
+                )
 
               if (structured !== undefined) {
                 handle.message.structured = structured

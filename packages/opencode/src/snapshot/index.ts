@@ -35,6 +35,21 @@ export namespace Snapshot {
   const log = Log.create({ service: "snapshot" })
   const prune = "7.days"
   const limit = 2 * 1024 * 1024
+  /** Max total bytes of before+after content stored in a single diffFull result */
+  const DIFF_CONTENT_LIMIT = 1024 * 1024
+  /** File path patterns to skip when computing full diffs (cache dirs, build output, lockfiles, hidden files) */
+  const DIFF_SKIP_PATTERNS = [
+    /(?:^|\/)graphify-out\//,
+    /(?:^|\/)node_modules\//,
+    /(?:^|\/)\.next\//,
+    /(?:^|\/)dist\//,
+    /(?:^|\/)build\//,
+    /(?:^|\/)\.turbo\//,
+    /(?:^|\/)\.cache\//,
+    /\.lock$/,
+    /(?:^|\/)package-lock\.json$/,
+    /(^|\/)\./, // any path component starting with a dot (hidden files/dirs)
+  ]
   const core = ["-c", "core.longpaths=true", "-c", "core.symlinks=true"]
   const cfg = ["-c", "core.autocrlf=false", ...core]
   const quote = [...cfg, "-c", "core.quotepath=false"]
@@ -149,6 +164,55 @@ export namespace Snapshot {
             yield* fs.writeFileString(target, text ? `${text}\n` : "").pipe(Effect.orDie)
           })
 
+          // Run a git command against the project's own git repo (not the snapshot repo).
+          const projectGit = Effect.fnUntraced(
+            function* (cmd: string[], opts?: { cwd?: string }) {
+              const proc = ChildProcess.make("git", cmd, {
+                cwd: opts?.cwd,
+                extendEnv: true,
+              })
+              const handle = yield* spawner.spawn(proc)
+              const [text, stderr] = yield* Effect.all(
+                [Stream.mkString(Stream.decodeText(handle.stdout)), Stream.mkString(Stream.decodeText(handle.stderr))],
+                { concurrency: 2 },
+              )
+              const code = yield* handle.exitCode
+              return { code, text, stderr } satisfies GitResult
+            },
+            Effect.scoped,
+            Effect.catch((err) =>
+              Effect.succeed({
+                code: ChildProcessSpawner.ExitCode(1),
+                text: "",
+                stderr: String(err),
+              }),
+            ),
+          )
+
+          // Returns a Set of file paths (relative to worktree) that are gitignored
+          // in the project's own git repository.
+          const projectIgnored = Effect.fnUntraced(function* (files: string[]) {
+            if (!files.length) return new Set<string>()
+            const ignored = new Set<string>()
+            // git check-ignore has argument length limits; process in batches.
+            // Note: -z only works with --stdin; without it, output is newline-separated.
+            const BATCH = 200
+            for (let i = 0; i < files.length; i += BATCH) {
+              const batch = files.slice(i, i + BATCH)
+              const result = yield* projectGit(
+                ["-c", "core.fsmonitor=false", "-c", "core.quotepath=false", "check-ignore", "--no-index", ...batch],
+                { cwd: state.worktree },
+              ).pipe(
+                // exit 1 = no files matched (not an error), exit 128 = error
+                Effect.orElseSucceed(() => ({ code: ChildProcessSpawner.ExitCode(0), text: "", stderr: "" })),
+              )
+              for (const f of result.text.split("\n").filter(Boolean)) {
+                ignored.add(f)
+              }
+            }
+            return ignored
+          })
+
           const add = Effect.fnUntraced(function* () {
             yield* sync()
             const [diff, other] = yield* Effect.all(
@@ -172,8 +236,29 @@ export namespace Snapshot {
               return
             }
 
-            const tracked = diff.text.split("\0").filter(Boolean)
+            let tracked = diff.text.split("\0").filter(Boolean)
             const untracked = other.text.split("\0").filter(Boolean)
+
+            // Remove any tracked snapshot files that are now gitignored by the project.
+            // This handles the case where files were staged in the snapshot before a
+            // .gitignore entry was added — diff-files still shows them as modified.
+            if (tracked.length > 0) {
+              const ignored = yield* projectIgnored(tracked)
+              if (ignored.size > 0) {
+                const toRemove = tracked.filter((f) => ignored.has(f))
+                tracked = tracked.filter((f) => !ignored.has(f))
+                // Untrack gitignored files from the snapshot index in batches
+                const step = 200
+                for (let i = 0; i < toRemove.length; i += step) {
+                  yield* git(
+                    [...args(["rm", "--cached", "--ignore-unmatch", "-r", "--"]), ...toRemove.slice(i, i + step)],
+                    { cwd: state.directory },
+                  ).pipe(Effect.ignore)
+                }
+                log.info("removed gitignored files from snapshot index", { count: toRemove.length })
+              }
+            }
+
             const all = Array.from(new Set([...tracked, ...untracked]))
             if (!all.length) return
 
@@ -603,6 +688,8 @@ export namespace Snapshot {
                   .flatMap((line) => {
                     const [adds, dels, file] = line.split("\t")
                     if (!file) return []
+                    // Skip cache dirs, build output, and lockfiles
+                    if (DIFF_SKIP_PATTERNS.some((re) => re.test(file))) return []
                     const binary = adds === "-" && dels === "-"
                     const additions = binary ? 0 : parseInt(adds)
                     const deletions = binary ? 0 : parseInt(dels)
@@ -616,17 +703,32 @@ export namespace Snapshot {
                       } satisfies Row,
                     ]
                   })
+                // Also filter out files that are now gitignored in the project.
+                // Snapshot trees may have been captured before a .gitignore entry was added.
+                const ignoredInDiff = yield* projectIgnored(rows.map((r) => r.file))
+                const filteredRows = ignoredInDiff.size > 0 ? rows.filter((r) => !ignoredInDiff.has(r.file)) : rows
+
                 const step = 100
                 const patch = (file: string, before: string, after: string) =>
                   formatPatch(structuredPatch(file, file, before, after, "", "", { context: Number.MAX_SAFE_INTEGER }))
+                let contentBytes = 0
 
-                for (let i = 0; i < rows.length; i += step) {
-                  const run = rows.slice(i, i + step)
+                // Keep batches bounded so a large diff does not buffer every blob at once.
+                for (let i = 0; i < filteredRows.length; i += step) {
+                  const run = filteredRows.slice(i, i + step)
                   const text = yield* load(run)
 
                   for (const row of run) {
                     const hit = text?.get(row.file) ?? { before: "", after: "" }
-                    const [before, after] = row.binary ? ["", ""] : text ? [hit.before, hit.after] : yield* show(row)
+                    let [before, after] = row.binary ? ["", ""] : text ? [hit.before, hit.after] : yield* show(row)
+                    // Cap total content size to avoid storing huge diffs in memory
+                    const size = before.length + after.length
+                    if (contentBytes + size > DIFF_CONTENT_LIMIT) {
+                      before = ""
+                      after = ""
+                    } else {
+                      contentBytes += size
+                    }
                     result.push({
                       file: row.file,
                       patch: row.binary ? "" : patch(row.file, before, after),

@@ -2,6 +2,7 @@ import z from "zod"
 import { Effect, Layer, ServiceMap } from "effect"
 import { makeRuntime } from "@/effect/run-service"
 import { Bus } from "@/bus"
+import { File } from "@/file"
 import { Snapshot } from "@/snapshot"
 import { Storage } from "@/storage/storage"
 import { Session } from "."
@@ -78,6 +79,7 @@ export namespace SessionSummary {
     Effect.gen(function* () {
       const sessions = yield* Session.Service
       const snapshot = yield* Snapshot.Service
+      const file = yield* File.Service
       const storage = yield* Storage.Service
       const bus = yield* Bus.Service
 
@@ -111,6 +113,13 @@ export namespace SessionSummary {
         if (!all.length) return
 
         const diffs = yield* computeDiff({ messages: all })
+        const current = (yield* file.status()).map((item) => ({
+          file: item.path,
+          patch: "",
+          additions: item.added,
+          deletions: item.removed,
+          status: item.status,
+        }))
         yield* sessions.setSummary({
           sessionID: input.sessionID,
           summary: {
@@ -119,8 +128,8 @@ export namespace SessionSummary {
             files: diffs.length,
           },
         })
-        yield* storage.write(["session_diff", input.sessionID], diffs).pipe(Effect.ignore)
-        yield* bus.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: diffs })
+        yield* storage.write(["session_diff", input.sessionID], current).pipe(Effect.ignore)
+        yield* bus.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: current })
 
         const messages = all.filter(
           (m) => m.info.id === input.messageID || (m.info.role === "assistant" && m.info.parentID === input.messageID),
@@ -128,11 +137,20 @@ export namespace SessionSummary {
         const target = messages.find((m) => m.info.id === input.messageID)
         if (!target || target.info.role !== "user") return
         const msgDiffs = yield* computeDiff({ messages })
-        target.info.summary = { ...target.info.summary, diffs: msgDiffs }
+        // Store diffs separately to avoid bloating message.data (can be 50+ MB)
+        yield* storage.write(["message_diff", input.messageID], msgDiffs).pipe(Effect.ignore)
+        target.info.summary = { ...target.info.summary, diffs: [] }
         yield* sessions.updateMessage(target.info)
       })
 
       const diff = Effect.fn("SessionSummary.diff")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
+        // Per-message diffs are stored separately to avoid bloating message.data
+        if (input.messageID) {
+          const msgDiffs = yield* storage
+            .read<Snapshot.FileDiff[]>(["message_diff", input.messageID])
+            .pipe(Effect.catch(() => Effect.succeed([] as Snapshot.FileDiff[])))
+          if (msgDiffs.length) return msgDiffs
+        }
         const diffs = yield* storage
           .read<Snapshot.FileDiff[]>(["session_diff", input.sessionID])
           .pipe(Effect.catch(() => Effect.succeed([] as Snapshot.FileDiff[])))
@@ -154,6 +172,7 @@ export namespace SessionSummary {
     layer.pipe(
       Layer.provide(Session.defaultLayer),
       Layer.provide(Snapshot.defaultLayer),
+      Layer.provide(File.defaultLayer),
       Layer.provide(Storage.defaultLayer),
       Layer.provide(Bus.layer),
     ),

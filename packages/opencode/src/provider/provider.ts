@@ -1422,8 +1422,8 @@ export namespace Provider {
 
             if (opts.signal) signals.push(opts.signal)
             if (chunkAbortCtl) signals.push(chunkAbortCtl.signal)
-            if (options["timeout"] !== undefined && options["timeout"] !== null && options["timeout"] !== false)
-              signals.push(AbortSignal.timeout(options["timeout"]))
+            const timeout = options["timeout"] === false ? false : (options["timeout"] ?? 300000)
+            if (timeout !== false) signals.push(AbortSignal.timeout(timeout))
 
             const combined = signals.length === 0 ? null : signals.length === 1 ? signals[0] : AbortSignal.any(signals)
             if (combined) opts.signal = combined
@@ -1659,11 +1659,13 @@ export namespace Provider {
     }),
   )
 
-  export const defaultLayer = Layer.suspend(() =>
-    layer.pipe(
-      Layer.provide(Config.defaultLayer),
-      Layer.provide(Auth.defaultLayer),
-      Layer.provide(Plugin.defaultLayer),
+  export const defaultLayer = Layer.unwrap(
+    Effect.sync(() =>
+      layer.pipe(
+        Layer.provide(Config.defaultLayer),
+        Layer.provide(Auth.defaultLayer),
+        Layer.provide(Plugin.defaultLayer),
+      ),
     ),
   )
 

@@ -89,7 +89,7 @@ export namespace Npm {
         save: true,
         saveType: "prod",
       })
-      .catch((cause) => {
+      .catch((cause: unknown) => {
         throw new InstallFailedError(
           { pkg },
           {

@@ -443,10 +443,11 @@ export const RunCommand = cmd({
         return false
       }
 
-      const events = await sdk.event.subscribe()
       let error: string | undefined
 
       async function loop() {
+        const types = ["message.updated", "message.part", "session.error", "session.status", "permission"].join(",")
+        const events = await sdk.event.subscribe({ sessionID, types })
         const toggles = new Map<string, boolean>()
 
         for await (const event of events.stream) {
