@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
-import { expect } from "bun:test"
+import { expect, spyOn } from "bun:test"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import path from "path"
 import z from "zod"
@@ -1250,7 +1250,7 @@ unix(
       provideTmpdirInstance(
         (dir) =>
           Effect.gen(function* () {
-            const { prompt, chat } = yield* boot()
+            const { prompt, run, chat } = yield* boot()
             const spy = spyOn(Shell, "preferred").mockReturnValue("/__missing_shell__")
 
             try {
@@ -1264,7 +1264,7 @@ unix(
 
             const status = yield* SessionStatus.Service
             expect((yield* status.get(chat.id)).type).toBe("idle")
-            const busy = yield* prompt.assertNotBusy(chat.id).pipe(Effect.exit)
+            const busy = yield* run.assertNotBusy(chat.id).pipe(Effect.exit)
             expect(Exit.isSuccess(busy)).toBe(true)
           }),
         { git: true, config: cfg },

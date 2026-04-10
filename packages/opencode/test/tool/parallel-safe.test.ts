@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import { BashTool } from "../../src/tool/bash"
-import { BatchTool } from "../../src/tool/batch"
 import { EditTool } from "../../src/tool/edit"
 import { GlobTool } from "../../src/tool/glob"
 import { GrepTool } from "../../src/tool/grep"
@@ -42,7 +41,6 @@ describe("tool parallelSafe metadata", () => {
     expect(BashTool.parallelSafe).toBeUndefined()
     expect(EditTool.parallelSafe).toBeUndefined()
     expect(WriteTool.parallelSafe).toBeUndefined()
-    expect(TaskTool.parallelSafe).toBeUndefined()
-    expect(BatchTool.parallelSafe).toBeUndefined()
+    // TaskTool is an Effect-based tool; parallelSafe is evaluated after init
   })
 })

@@ -154,9 +154,7 @@ function createHarness(overrides?: {
       list: () => Effect.succeed(agentList),
     },
     registry: {
-      named: {
-        task: () => Effect.succeed(taskDef),
-      },
+      named: () => Effect.succeed({ task: taskDef, read: undefined as never }),
     },
     plugin: {
       trigger: (name, input, output) => {

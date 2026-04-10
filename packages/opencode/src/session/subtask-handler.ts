@@ -35,9 +35,7 @@ export type HandleSubtaskDeps = {
     get: (agent: string) => Effect.Effect<Agent.Info | undefined>
     list: () => Effect.Effect<Agent.Info[]>
   }
-  registry: {
-    named: Pick<ToolRegistry.Interface["named"], "task">
-  }
+  registry: Pick<ToolRegistry.Interface, "named">
   plugin: Pick<Plugin.Interface, "trigger">
   permission: Pick<Permission.Interface, "ask">
   bus: Pick<Bus.Interface, "publish">
@@ -51,7 +49,7 @@ export const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* 
 ) {
   const { task, model, lastUser, sessionID, session, msgs } = input
   const ctx = yield* InstanceState.context
-  const taskTool = yield* deps.registry.named.task()
+  const taskTool = (yield* deps.registry.named()).task
   const taskModel = task.model ? yield* deps.getModel(task.model.providerID, task.model.modelID, sessionID) : model
   const assistantMessage: MessageV2.Assistant = yield* deps.sessions.updateMessage({
     id: MessageID.ascending(),
@@ -181,12 +179,14 @@ export const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* 
     ),
   )
 
-  const attachments = result?.attachments?.map((attachment) => ({
-    ...attachment,
-    id: PartID.ascending(),
-    sessionID,
-    messageID: assistantMessage.id,
-  }))
+  const attachments = result?.attachments?.map(
+    (attachment: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">) => ({
+      ...attachment,
+      id: PartID.ascending(),
+      sessionID,
+      messageID: assistantMessage.id,
+    }),
+  )
 
   if (result) {
     yield* deps.plugin.trigger(

@@ -49,8 +49,7 @@ describe("Fix 1: strip summary.diffs from hydrated messages", () => {
       diffs: [
         {
           file: "src/big-file.ts",
-          before: "a".repeat(10000),
-          after: "b".repeat(10000),
+          patch: "a".repeat(10000),
           additions: 100,
           deletions: 50,
           status: "modified",
@@ -59,7 +58,7 @@ describe("Fix 1: strip summary.diffs from hydrated messages", () => {
     })
     // Verify the summary has diffs before stripping
     expect(info.summary?.diffs).toHaveLength(1)
-    expect(info.summary?.diffs?.[0]?.before).toHaveLength(10000)
+    expect(info.summary?.diffs?.[0]?.patch).toHaveLength(10000)
 
     // Simulate what the info() function does: strip diffs from user messages
     if (info.role === "user" && info.summary?.diffs?.length) {

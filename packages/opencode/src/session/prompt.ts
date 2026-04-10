@@ -46,6 +46,7 @@ import { handleSubtask } from "./subtask-handler"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { SessionRunState } from "./run-state"
+import { Instance } from "@/project/instance"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -963,9 +964,9 @@ export namespace SessionPrompt {
       const complete: (input: CompleteInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn(
         "SessionPrompt.complete",
       )(function* (input: CompleteInput) {
-        const s = yield* InstanceState.get(state)
-        const runner = getRunner(s.runners, input.sessionID)
-        return yield* runner.ensureRunning(
+        return yield* state.ensureRunning(
+          input.sessionID,
+          lastAssistant(input.sessionID),
           Effect.promise(async (abort) => {
             const session = await Session.get(input.sessionID)
             await SessionRevert.cleanup(session)
@@ -985,7 +986,7 @@ export namespace SessionPrompt {
               },
               parts: input.parts,
             }).pipe(Effect.runPromise)
-            await Session.touch(input.sessionID)
+            await sessions.touch(input.sessionID).pipe(Effect.runPromise)
 
             const agent = await Agent.get(user.info.agent)
             if (!agent) throw new Error(`Agent not found: ${user.info.agent}`)
@@ -996,7 +997,7 @@ export namespace SessionPrompt {
               role: "assistant",
               mode: agent.name,
               agent: agent.name,
-              variant: user.info.variant,
+              variant: user.info.model.variant,
               path: {
                 cwd: Instance.directory,
                 root: Instance.worktree,

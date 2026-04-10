@@ -91,14 +91,16 @@ export const rpc = {
   },
   async changeDirectory(input: { directory: string }) {
     // Dispose current instance first
-    if (eventStream.abort) eventStream.abort.abort()
+    for (const id of [...eventStreams.keys()]) {
+      stopEventStream(id)
+    }
     await Instance.disposeAll()
 
     // Change process working directory
     process.chdir(input.directory)
 
     // Start fresh event stream with new directory
-    startEventStream({ directory: input.directory })
+    startEventStream(input.directory)
   },
   async shutdown() {
     Log.Default.info("worker shutting down")

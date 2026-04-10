@@ -31,6 +31,9 @@ import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
+import { SessionRevert } from "../../src/session/revert"
+import { SessionRunState } from "../../src/session/run-state"
+import { Skill } from "../../src/skill"
 
 const ref = {
   providerID: ProviderID.openai,
@@ -120,6 +123,8 @@ function makeHttp() {
   const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
   const proc = SessionProcessor.layer.pipe(Layer.provideMerge(deps))
   const compact = SessionCompaction.layer.pipe(Layer.provideMerge(proc), Layer.provideMerge(deps))
+  const runState = SessionRunState.layer.pipe(Layer.provideMerge(deps))
+  const revert = SessionRevert.defaultLayer
   return Layer.mergeAll(
     TestLLMServer.layer,
     SessionPrompt.layer.pipe(
@@ -127,7 +132,10 @@ function makeHttp() {
       Layer.provideMerge(proc),
       Layer.provideMerge(registry),
       Layer.provideMerge(trunc),
+      Layer.provideMerge(runState),
+      Layer.provide(revert),
       Layer.provide(Instruction.defaultLayer),
+      Layer.provide(Skill.defaultLayer),
       Layer.provideMerge(deps),
     ),
   )

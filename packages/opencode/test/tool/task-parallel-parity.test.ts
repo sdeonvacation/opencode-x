@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { Effect, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"
+import { Config } from "../../src/config/config"
 import { Permission } from "../../src/permission"
 import { Instance } from "../../src/project/instance"
 import { ModelID, ProviderID } from "../../src/provider/schema"
@@ -59,7 +61,10 @@ describe("tool.task parallel parity", () => {
         } as Awaited<ReturnType<typeof SessionPrompt.prompt>>)
 
         try {
-          const tool = await TaskTool.init()
+          const toolInfo = await Effect.runPromise(
+            TaskTool.pipe(Effect.provide(Layer.mergeAll(Agent.defaultLayer, Config.defaultLayer))),
+          )
+          const tool = await toolInfo.init()
           await tool.execute(
             {
               description: "delegate inspect",
@@ -145,7 +150,10 @@ describe("tool.task parallel parity", () => {
         } as Awaited<ReturnType<typeof SessionPrompt.prompt>>)
 
         try {
-          const tool = await TaskTool.init()
+          const toolInfo = await Effect.runPromise(
+            TaskTool.pipe(Effect.provide(Layer.mergeAll(Agent.defaultLayer, Config.defaultLayer))),
+          )
+          const tool = await toolInfo.init()
           await tool.execute(
             {
               description: "delegate inspect",

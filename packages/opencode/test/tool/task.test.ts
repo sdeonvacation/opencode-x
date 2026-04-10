@@ -506,8 +506,9 @@ describe("tool.task", () => {
       fn: async () => {
         const tool = await initTask()
 
-        expect(tool.description).toContain("task_category")
-        expect(tool.description).toContain("use_ultrawork")
+        // task_category and use_ultrawork are documented in the parameter schema
+        expect(tool.parameters.shape).toHaveProperty("task_category")
+        expect(tool.parameters.shape).toHaveProperty("use_ultrawork")
       },
     })
   })
