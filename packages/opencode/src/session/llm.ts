@@ -398,7 +398,7 @@ export namespace LLM {
       topK: params.topK,
       providerOptions,
       activeTools: Object.keys(tools).filter((x) => x !== "invalid"),
-      tools,
+      tools: ProviderTransform.toolCaching(tools, input.model) as typeof tools,
       toolChoice: input.toolChoice,
       maxOutputTokens: params.maxOutputTokens,
       abortSignal: input.abort,

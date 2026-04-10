@@ -275,17 +275,42 @@ export namespace ProviderTransform {
     })
   }
 
+  export function toolCaching(tools: Record<string, { providerOptions?: Record<string, any> }>, model: Provider.Model) {
+    const isAnthropicLike =
+      model.providerID === "anthropic" ||
+      model.providerID === "google-vertex-anthropic" ||
+      model.providerID.includes("bedrock") ||
+      model.api.npm === "@ai-sdk/anthropic" ||
+      model.api.npm === "@ai-sdk/amazon-bedrock"
+    if (!isAnthropicLike) return tools
+    const keys = Object.keys(tools)
+    if (keys.length === 0) return tools
+    const last = keys[keys.length - 1]
+    return {
+      ...tools,
+      [last]: {
+        ...tools[last],
+        providerOptions: mergeDeep(tools[last].providerOptions ?? {}, {
+          anthropic: { cacheControl: { type: "ephemeral" } },
+          bedrock: { cachePoint: { type: "default" } },
+        }),
+      },
+    }
+  }
+
   export function message(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown>) {
     msgs = unsupportedParts(msgs, model)
     msgs = normalizeMessages(msgs, model, options)
     if (
       (model.providerID === "anthropic" ||
         model.providerID === "google-vertex-anthropic" ||
+        model.providerID === "openrouter" ||
         model.api.id.includes("anthropic") ||
         model.api.id.includes("claude") ||
         model.id.includes("anthropic") ||
         model.id.includes("claude") ||
-        model.api.npm === "@ai-sdk/anthropic") &&
+        model.api.npm === "@ai-sdk/anthropic" ||
+        model.api.npm === "@openrouter/ai-sdk-provider") &&
       model.api.npm !== "@ai-sdk/gateway"
     ) {
       msgs = applyCaching(msgs, model)
