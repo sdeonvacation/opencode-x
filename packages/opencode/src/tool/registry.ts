@@ -5,7 +5,7 @@ import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
-import { TaskTool } from "./task"
+import { TaskDescription, TaskTool } from "./task"
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
@@ -30,7 +30,6 @@ import { pathToFileURL } from "url"
 import { Effect, Layer, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
-import { Env } from "../env"
 import { Question } from "../question"
 import { Todo } from "../session/todo"
 import { LSP } from "../lsp"
@@ -39,7 +38,8 @@ import { Instruction } from "../session/instruction"
 import { AppFileSystem } from "../filesystem"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
-import { Permission } from "@/permission"
+import { computePluginDefinitionSignature, createPluginSignatureState } from "./plugin-signature"
+import { filterTools } from "./tool-filter"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -47,11 +47,33 @@ export namespace ToolRegistry {
   type TaskDef = Tool.InferDef<typeof TaskTool>
   type ReadDef = Tool.InferDef<typeof ReadTool>
 
+  type ToolCacheKey = {
+    agentName: string
+    providerID: ProviderID
+    modelID: ModelID
+    customToolCount: number
+    pluginToolCount: number
+    pluginDefinitionSignature: string
+  }
+
+  type ToolCacheDef = Omit<Tool.Def & { id: string }, "execute">
+
+  type ToolCacheEntry = {
+    key: ToolCacheKey
+    definitions: ToolCacheDef[]
+    executors: Map<string, Tool.Def["execute"]>
+  }
+
   type State = {
     custom: Tool.Def[]
     builtin: Tool.Def[]
     task: TaskDef
     read: ReadDef
+    pluginToolCount: number
+    pluginHookID: WeakMap<object, number>
+    pluginFunctionID: WeakMap<Function, number>
+    pluginHookSeq: number
+    cache?: ToolCacheEntry
   }
 
   export interface Interface {
@@ -85,7 +107,6 @@ export namespace ToolRegistry {
     Effect.gen(function* () {
       const config = yield* Config.Service
       const plugin = yield* Plugin.Service
-      const agents = yield* Agent.Service
       const skill = yield* Skill.Service
 
       const task = yield* TaskTool
@@ -138,9 +159,11 @@ export namespace ToolRegistry {
           }
 
           const plugins = yield* plugin.list()
+          let pluginToolCount = 0
           for (const p of plugins) {
             for (const [id, def] of Object.entries(p.tool ?? {})) {
               custom.push(fromPlugin(id, def))
+              pluginToolCount++
             }
           }
 
@@ -191,9 +214,22 @@ export namespace ToolRegistry {
             ],
             task: tool.task,
             read: tool.read,
+            pluginToolCount,
+            ...createPluginSignatureState<ToolCacheEntry>(),
           }
         }),
       )
+
+      function keyMatches(a: ToolCacheKey, b: ToolCacheKey) {
+        return (
+          a.agentName === b.agentName &&
+          a.providerID === b.providerID &&
+          a.modelID === b.modelID &&
+          a.customToolCount === b.customToolCount &&
+          a.pluginToolCount === b.pluginToolCount &&
+          a.pluginDefinitionSignature === b.pluginDefinitionSignature
+        )
+      }
 
       const all: Interface["all"] = Effect.fn("ToolRegistry.all")(function* () {
         const s = yield* InstanceState.get(state)
@@ -223,37 +259,29 @@ export namespace ToolRegistry {
         ].join("\n")
       })
 
-      const describeTask = Effect.fn("ToolRegistry.describeTask")(function* (agent: Agent.Info) {
-        const items = (yield* agents.list()).filter((item) => item.mode !== "primary")
-        const filtered = items.filter(
-          (item) => Permission.evaluate("task", item.name, agent.permission).action !== "deny",
-        )
-        const list = filtered.toSorted((a, b) => a.name.localeCompare(b.name))
-        const description = list
-          .map(
-            (item) =>
-              `- ${item.name}: ${item.description ?? "This subagent should only be called manually by the user."}`,
-          )
-          .join("\n")
-        return ["Available agent types and the tools they have access to:", description].join("\n")
-      })
-
       const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
-        const filtered = (yield* all()).filter((tool) => {
-          if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {
-            return input.providerID === ProviderID.opencode || Flag.OPENCODE_ENABLE_EXA
-          }
+        const s = yield* InstanceState.get(state)
+        const hooks = yield* plugin.list()
+        const pluginDefinitionSignature = computePluginDefinitionSignature(hooks, s)
+        const key: ToolCacheKey = {
+          agentName: input.agent.name,
+          providerID: input.providerID,
+          modelID: input.modelID,
+          customToolCount: s.custom.length,
+          pluginToolCount: s.pluginToolCount,
+          pluginDefinitionSignature,
+        }
+        const cache = s.cache
+        if (cache && keyMatches(cache.key, key)) {
+          return cache.definitions.map((def) => ({
+            ...def,
+            execute: cache.executors.get(def.id)!,
+          }))
+        }
 
-          const usePatch =
-            !!Env.get("OPENCODE_E2E_LLM_URL") ||
-            (input.modelID.includes("gpt-") && !input.modelID.includes("oss") && !input.modelID.includes("gpt-4"))
-          if (tool.id === ApplyPatchTool.id) return usePatch
-          if (tool.id === EditTool.id || tool.id === WriteTool.id) return !usePatch
+        const filtered = filterTools(yield* all(), { providerID: input.providerID, modelID: input.modelID })
 
-          return true
-        })
-
-        return yield* Effect.forEach(
+        const next = yield* Effect.forEach(
           filtered,
           Effect.fnUntraced(function* (tool: Tool.Def) {
             using _ = log.time(tool.id)
@@ -266,7 +294,7 @@ export namespace ToolRegistry {
               id: tool.id,
               description: [
                 output.description,
-                tool.id === TaskTool.id ? yield* describeTask(input.agent) : undefined,
+                tool.id === TaskTool.id ? yield* TaskDescription(input.agent) : undefined,
                 tool.id === SkillTool.id ? yield* describeSkill(input.agent) : undefined,
               ]
                 .filter(Boolean)
@@ -278,6 +306,18 @@ export namespace ToolRegistry {
           }),
           { concurrency: "unbounded" },
         )
+
+        s.cache = {
+          key,
+          definitions: next.map((tool) => ({
+            id: tool.id,
+            description: tool.description,
+            parameters: tool.parameters,
+            formatValidationError: tool.formatValidationError,
+          })),
+          executors: new Map(next.map((tool) => [tool.id, tool.execute])),
+        }
+        return next
       })
 
       const named: Interface["named"] = Effect.fn("ToolRegistry.named")(function* () {
