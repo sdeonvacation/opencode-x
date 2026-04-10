@@ -18,6 +18,8 @@ export type ClearCommandsDeps = {
         messages: (input: { sessionID: string }) => Promise<{ data?: Array<{ info: Message["info"] }> }>
         deleteMessage: (input: { sessionID: string; messageID: string }) => Promise<unknown>
         clearTodo: (input: { sessionID: string }) => Promise<unknown>
+        delete: (input: { sessionID: string }) => Promise<unknown>
+        children: (input: { sessionID: string }) => Promise<{ data?: Array<{ id: string }> }>
         summarize: (input: {
           sessionID: string
           providerID: string
@@ -81,6 +83,11 @@ export function createClearCommands(deps: ClearCommandsDeps): CommandOption[] {
               sessionID,
               messageID: msg.info.id,
             })
+          }
+
+          const kidsResponse = await deps.sdk.client.session.children({ sessionID })
+          for (const kid of kidsResponse.data ?? []) {
+            await deps.sdk.client.session.delete({ sessionID: kid.id })
           }
 
           await deps.sdk.client.session.clearTodo({ sessionID })
@@ -171,6 +178,11 @@ export function createClearCommands(deps: ClearCommandsDeps): CommandOption[] {
 
           const existingClearedCost = deps.kv.get<number>(`cleared_cost_${sessionID}`, 0)
           deps.kv.set(`cleared_cost_${sessionID}`, existingClearedCost + deletedCost)
+
+          const kidsResponse = await deps.sdk.client.session.children({ sessionID })
+          for (const kid of kidsResponse.data ?? []) {
+            await deps.sdk.client.session.delete({ sessionID: kid.id })
+          }
 
           await deps.sdk.client.session.clearTodo({ sessionID })
           await deps.sync.session.sync(sessionID, { force: true })

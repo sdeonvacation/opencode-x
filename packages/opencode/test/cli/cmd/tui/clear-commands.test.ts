@@ -36,6 +36,8 @@ describe("createClearCommands", () => {
       messages: mock(async (_input: { sessionID: string }) => ({ data: messages })),
       deleteMessage: mock(async (_input: { sessionID: string; messageID: string }) => undefined),
       clearTodo: mock(async (_input: { sessionID: string }) => undefined),
+      delete: mock(async (_input: { sessionID: string }) => undefined),
+      children: mock(async (_input: { sessionID: string }) => ({ data: [] })),
       summarize: mock(
         async (_input: { sessionID: string; providerID: string; modelID: string; auto: boolean }) => undefined,
       ),
@@ -68,6 +70,8 @@ describe("createClearCommands", () => {
       })),
       deleteMessage: mock(async (_input: { sessionID: string; messageID: string }) => undefined),
       clearTodo: mock(async (_input: { sessionID: string }) => undefined),
+      delete: mock(async (_input: { sessionID: string }) => undefined),
+      children: mock(async (_input: { sessionID: string }) => ({ data: [] })),
       summarize: mock(
         async (_input: { sessionID: string; providerID: string; modelID: string; auto: boolean }) => undefined,
       ),
