@@ -18,7 +18,7 @@ export class SpawnLimitError extends Error {
 
 const descendants = new Map<string, number>()
 
-type SpawnReservation = {
+export type SpawnReservation = {
   depth: number
   rootSessionID: string
   release: () => void

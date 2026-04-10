@@ -31,7 +31,6 @@ import { pathToFileURL } from "url"
 import { Effect, Layer, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
-import { Env } from "../env"
 import { Question } from "../question"
 import { Todo } from "../session/todo"
 import { LSP } from "../lsp"
@@ -40,6 +39,8 @@ import { Instruction } from "../session/instruction"
 import { AppFileSystem } from "../filesystem"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
+import { computePluginDefinitionSignature, createPluginSignatureState } from "./plugin-signature"
+import { filterTools } from "./tool-filter"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -49,6 +50,29 @@ export namespace ToolRegistry {
 
   type State = {
     custom: Tool.Info[]
+    pluginToolCount: number
+    pluginHookID: WeakMap<object, number>
+    pluginFunctionID: WeakMap<Function, number>
+    pluginHookSeq: number
+    cache?: ToolCacheEntry
+  }
+
+  type ToolCacheKey = {
+    agentName: string
+    providerID: ProviderID
+    modelID: ModelID
+    customToolCount: number
+    pluginToolCount: number
+    pluginDefinitionSignature: string
+    batchTool: boolean
+  }
+
+  type ToolCacheDef = Omit<Tool.Def & { id: string }, "execute">
+
+  type ToolCacheEntry = {
+    key: ToolCacheKey
+    definitions: ToolCacheDef[]
+    executors: Map<string, Tool.Def["execute"]>
   }
 
   export interface Interface {
@@ -161,17 +185,35 @@ export namespace ToolRegistry {
           }
 
           const plugins = yield* plugin.list()
+          let pluginToolCount = 0
           for (const p of plugins) {
             for (const [id, def] of Object.entries(p.tool ?? {})) {
               custom.push(fromPlugin(id, def))
+              pluginToolCount++
             }
           }
 
-          return { custom }
+          return {
+            custom,
+            pluginToolCount,
+            ...createPluginSignatureState<ToolCacheEntry>(),
+          }
         }),
       )
 
-      const allInfo = Effect.fn("ToolRegistry.allInfo")(function* (custom: Tool.Info[]) {
+      function keyMatches(a: ToolCacheKey, b: ToolCacheKey) {
+        return (
+          a.agentName === b.agentName &&
+          a.providerID === b.providerID &&
+          a.modelID === b.modelID &&
+          a.customToolCount === b.customToolCount &&
+          a.pluginToolCount === b.pluginToolCount &&
+          a.pluginDefinitionSignature === b.pluginDefinitionSignature &&
+          a.batchTool === b.batchTool
+        )
+      }
+
+      const allInfo = Effect.fn("ToolRegistry.all")(function* (custom: Tool.Info[]) {
         const cfg = yield* config.get()
         const questionEnabled =
           ["app", "cli", "desktop"].includes(Flag.OPENCODE_CLIENT) || Flag.OPENCODE_ENABLE_QUESTION_TOOL
@@ -193,7 +235,7 @@ export namespace ToolRegistry {
           builtin.skill,
           builtin.patch,
           ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [builtin.lsp] : []),
-          builtin.batch,
+          ...(cfg.experimental?.batch_tool === true ? [builtin.batch] : []),
           ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [builtin.plan] : []),
           ...custom,
         ]
@@ -220,6 +262,7 @@ export namespace ToolRegistry {
 
       const register = Effect.fn("ToolRegistry.register")(function* (tool: Tool.Info) {
         const s = yield* InstanceState.get(state)
+        s.cache = undefined
         const idx = s.custom.findIndex((item) => item.id === tool.id)
         if (idx >= 0) {
           s.custom.splice(idx, 1, tool)
@@ -246,21 +289,29 @@ export namespace ToolRegistry {
 
       const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
         const s = yield* InstanceState.get(state)
-        const filtered = (yield* allInfo(s.custom)).filter((tool) => {
-          if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {
-            return input.providerID === ProviderID.opencode || Flag.OPENCODE_ENABLE_EXA
-          }
+        const cfg = yield* config.get()
+        const hooks = yield* plugin.list()
+        const pluginSignature = computePluginDefinitionSignature(hooks, s)
+        const key: ToolCacheKey = {
+          agentName: input.agent?.name ?? "",
+          providerID: input.providerID,
+          modelID: input.modelID,
+          customToolCount: s.custom.length,
+          pluginToolCount: s.pluginToolCount,
+          pluginDefinitionSignature: pluginSignature,
+          batchTool: cfg.experimental?.batch_tool === true,
+        }
+        const cache = s.cache
+        if (cache && keyMatches(cache.key, key)) {
+          return cache.definitions.map((def) => ({
+            ...def,
+            execute: cache.executors.get(def.id)!,
+          }))
+        }
 
-          const usePatch =
-            !!Env.get("OPENCODE_E2E_LLM_URL") ||
-            (input.modelID.includes("gpt-") && !input.modelID.includes("oss") && !input.modelID.includes("gpt-4"))
-          if (tool.id === ApplyPatchTool.id) return usePatch
-          if (tool.id === EditTool.id || tool.id === WriteTool.id) return !usePatch
+        const filtered = filterTools(yield* allInfo(s.custom), { providerID: input.providerID, modelID: input.modelID })
 
-          return true
-        })
-
-        return yield* Effect.forEach(
+        const next = yield* Effect.forEach(
           filtered,
           Effect.fnUntraced(function* (tool: Tool.Info) {
             using _ = log.time(tool.id)
@@ -288,6 +339,19 @@ export namespace ToolRegistry {
           }),
           { concurrency: "unbounded" },
         )
+
+        s.cache = {
+          key,
+          definitions: next.map((tool) => ({
+            id: tool.id,
+            description: tool.description,
+            parameters: tool.parameters,
+            parallelSafe: tool.parallelSafe,
+            formatValidationError: tool.formatValidationError,
+          })),
+          executors: new Map(next.map((tool) => [tool.id, tool.execute])),
+        }
+        return next
       })
 
       return Service.of({
