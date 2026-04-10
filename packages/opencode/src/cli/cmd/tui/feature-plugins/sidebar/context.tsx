@@ -10,6 +10,7 @@ const money = new Intl.NumberFormat("en-US", {
 })
 
 export function getUsedTokens(msg: AssistantMessage) {
+  if (msg.summary && msg.finish && !msg.error) return msg.tokens.output
   return msg.tokens.input + (msg.tokens.cache?.read ?? 0)
 }
 
