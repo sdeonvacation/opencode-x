@@ -103,6 +103,289 @@ describe("session.llm.hasToolCalls", () => {
   })
 })
 
+describe("session.llm.parallelToolCalls", () => {
+  test("sends parallel_tool_calls for subagent when tools are parallel-safe", async () => {
+    const server = state.server
+    if (!server) throw new Error("Server not initialized")
+
+    const source = await loadFixture("openai", "gpt-5.2")
+    const model = source.model
+    const request = waitRequest(
+      "/responses",
+      createEventResponse(
+        [
+          {
+            type: "response.created",
+            response: { id: "resp-parallel", created_at: Math.floor(Date.now() / 1000), model: model.id },
+          },
+          {
+            type: "response.completed",
+            response: { incomplete_details: null, usage: { input_tokens: 1, output_tokens: 1 } },
+          },
+        ],
+        true,
+      ),
+    )
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: ["openai"],
+            provider: {
+              openai: {
+                name: "OpenAI",
+                env: ["OPENAI_API_KEY"],
+                npm: "@ai-sdk/openai",
+                api: "https://api.openai.com/v1",
+                models: { [model.id]: model },
+                options: { apiKey: "test-openai-key", baseURL: `${server.url.origin}/v1` },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await Provider.getModel(ProviderID.openai, ModelID.make(model.id))
+        const sessionID = SessionID.make("session-parallel-subagent")
+        const agent = {
+          name: "test",
+          mode: "subagent",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+        const user = {
+          id: MessageID.make("user-parallel-subagent"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: ProviderID.make("openai"), modelID: resolved.id },
+        } satisfies MessageV2.User
+
+        const stream = await LLM.stream({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: [],
+          abort: new AbortController().signal,
+          messages: [{ role: "user", content: "Hello" }],
+          tools: {
+            grep: tool({ description: "grep", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+            glob: tool({ description: "glob", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+          },
+          toolMeta: new Map([
+            ["grep", { parallelSafe: true }],
+            ["glob", { parallelSafe: true }],
+          ]),
+        })
+
+        for await (const _ of stream.fullStream) {
+        }
+
+        const capture = await request
+        expect(capture.body.parallel_tool_calls).toBe(true)
+      },
+    })
+  })
+
+  test("omits parallel_tool_calls for mixed safe and unsafe tools", async () => {
+    const server = state.server
+    if (!server) throw new Error("Server not initialized")
+
+    const source = await loadFixture("openai", "gpt-5.2")
+    const model = source.model
+    const request = waitRequest(
+      "/responses",
+      createEventResponse(
+        [
+          {
+            type: "response.created",
+            response: { id: "resp-serial", created_at: Math.floor(Date.now() / 1000), model: model.id },
+          },
+          {
+            type: "response.completed",
+            response: { incomplete_details: null, usage: { input_tokens: 1, output_tokens: 1 } },
+          },
+        ],
+        true,
+      ),
+    )
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: ["openai"],
+            provider: {
+              openai: {
+                name: "OpenAI",
+                env: ["OPENAI_API_KEY"],
+                npm: "@ai-sdk/openai",
+                api: "https://api.openai.com/v1",
+                models: { [model.id]: model },
+                options: { apiKey: "test-openai-key", baseURL: `${server.url.origin}/v1` },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await Provider.getModel(ProviderID.openai, ModelID.make(model.id))
+        const sessionID = SessionID.make("session-parallel-mixed")
+        const agent = {
+          name: "test",
+          mode: "subagent",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+        const user = {
+          id: MessageID.make("user-parallel-mixed"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: ProviderID.make("openai"), modelID: resolved.id },
+        } satisfies MessageV2.User
+
+        const stream = await LLM.stream({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: [],
+          abort: new AbortController().signal,
+          messages: [{ role: "user", content: "Hello" }],
+          tools: {
+            grep: tool({ description: "grep", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+            bash: tool({ description: "bash", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+          },
+          toolMeta: new Map([
+            ["grep", { parallelSafe: true }],
+            ["bash", { parallelSafe: false }],
+          ]),
+        })
+
+        for await (const _ of stream.fullStream) {
+        }
+
+        const capture = await request
+        expect(capture.body.parallel_tool_calls ?? false).toBe(false)
+      },
+    })
+  })
+
+  test("omits parallel_tool_calls when provider override disables it", async () => {
+    const server = state.server
+    if (!server) throw new Error("Server not initialized")
+
+    const source = await loadFixture("openai", "gpt-5.2")
+    const model = source.model
+    const request = waitRequest(
+      "/responses",
+      createEventResponse(
+        [
+          {
+            type: "response.created",
+            response: {
+              id: "resp-parallel-provider-disabled",
+              created_at: Math.floor(Date.now() / 1000),
+              model: model.id,
+            },
+          },
+          {
+            type: "response.completed",
+            response: { incomplete_details: null, usage: { input_tokens: 1, output_tokens: 1 } },
+          },
+        ],
+        true,
+      ),
+    )
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: ["openai"],
+            provider: {
+              openai: {
+                name: "OpenAI",
+                env: ["OPENAI_API_KEY"],
+                npm: "@ai-sdk/openai",
+                api: "https://api.openai.com/v1",
+                parallelToolCalls: false,
+                models: { [model.id]: model },
+                options: { apiKey: "test-openai-key", baseURL: `${server.url.origin}/v1` },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await Provider.getModel(ProviderID.openai, ModelID.make(model.id))
+        const sessionID = SessionID.make("session-parallel-provider-disabled")
+        const agent = {
+          name: "test",
+          mode: "subagent",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+        const user = {
+          id: MessageID.make("user-parallel-provider-disabled"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: ProviderID.make("openai"), modelID: resolved.id },
+        } satisfies MessageV2.User
+
+        const stream = await LLM.stream({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: [],
+          abort: new AbortController().signal,
+          messages: [{ role: "user", content: "Hello" }],
+          tools: {
+            grep: tool({ description: "grep", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+            glob: tool({ description: "glob", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+          },
+          toolMeta: new Map([
+            ["grep", { parallelSafe: true }],
+            ["glob", { parallelSafe: true }],
+          ]),
+        })
+
+        for await (const _ of stream.fullStream) {
+        }
+
+        const capture = await request
+        expect(capture.body.parallel_tool_calls ?? false).toBe(false)
+      },
+    })
+  })
+})
+
 type Capture = {
   url: URL
   headers: Headers
@@ -537,6 +820,96 @@ describe("session.llm.stream", () => {
         await Promise.race([pending.requestAborted, timeout(500)]).catch(() => undefined)
       },
     })
+  })
+
+  test("applies default provider timeout to cancel stalled streams", async () => {
+    const server = state.server
+    if (!server) throw new Error("Server not initialized")
+
+    const providerID = "alibaba"
+    const modelID = "qwen-plus"
+    const fixture = await loadFixture(providerID, modelID)
+    const model = fixture.model
+    const pending = waitStreamingRequest("/chat/completions")
+
+    const original = AbortSignal.timeout
+    let seen = 0
+    Object.defineProperty(AbortSignal, "timeout", {
+      configurable: true,
+      value(ms: number) {
+        seen = ms
+        return original(ms === 300000 ? 20 : ms)
+      },
+    })
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: [providerID],
+            provider: {
+              [providerID]: {
+                options: {
+                  apiKey: "test-key",
+                  baseURL: `${server.url.origin}/v1`,
+                },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    try {
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const resolved = await Provider.getModel(ProviderID.make(providerID), ModelID.make(model.id))
+          const sessionID = SessionID.make("session-test-default-timeout")
+          const agent = {
+            name: "test",
+            mode: "primary",
+            options: {},
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          } satisfies Agent.Info
+          const user = {
+            id: MessageID.make("user-default-timeout"),
+            sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: agent.name,
+            model: { providerID: ProviderID.make(providerID), modelID: resolved.id },
+          } satisfies MessageV2.User
+
+          const stream = await LLM.stream({
+            user,
+            sessionID,
+            model: resolved,
+            agent,
+            system: ["You are a helpful assistant."],
+            abort: new AbortController().signal,
+            messages: [{ role: "user", content: "Hello" }],
+            tools: {},
+          })
+
+          const iter = stream.fullStream[Symbol.asyncIterator]()
+          await pending.request
+          await iter.next()
+
+          await Promise.race([pending.responseCanceled, timeout(1000)])
+          expect(seen).toBe(300000)
+
+          await iter.return?.()
+        },
+      })
+    } finally {
+      Object.defineProperty(AbortSignal, "timeout", {
+        configurable: true,
+        value: original,
+      })
+    }
   })
 
   test("keeps tools enabled by prompt permissions", async () => {

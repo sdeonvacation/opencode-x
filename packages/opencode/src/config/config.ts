@@ -540,6 +540,7 @@ export namespace Config {
         .boolean()
         .optional()
         .describe("Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)"),
+      parallelToolCalls: z.boolean().optional().describe("Override safe parallel tool-call behavior for this agent"),
       options: z.record(z.string(), z.any()).optional(),
       color: z
         .union([
@@ -569,6 +570,7 @@ export namespace Config {
         "top_p",
         "mode",
         "hidden",
+        "parallelToolCalls",
         "color",
         "steps",
         "maxSteps",
@@ -1081,6 +1083,11 @@ export namespace Config {
         .object({
           disable_paste_summary: z.boolean().optional(),
           batch_tool: z.boolean().optional().describe("Enable the batch tool"),
+          parallel_tool_calls: z
+            .boolean()
+            .optional()
+            .describe("Enable safe parallel tool calls when all active tools are pre-approved and parallel-safe"),
+          parallel_read: z.boolean().optional().describe("Allow the read tool to participate in parallel tool calls"),
           openTelemetry: z
             .boolean()
             .optional()
@@ -1096,6 +1103,65 @@ export namespace Config {
             .positive()
             .optional()
             .describe("Timeout in milliseconds for model context protocol (MCP) requests"),
+          subagent_timeout: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Timeout in milliseconds for subagent task execution (default: 900000 / 15 minutes)"),
+          permission_ask_timeout: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Timeout in milliseconds for permission prompts"),
+          question_ask_timeout: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Timeout in milliseconds for question prompts"),
+          loop_detector_threshold: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Consecutive identical tool calls before loop detection triggers (default: 5)"),
+          max_subagent_depth: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Maximum subagent nesting depth (default: 3)"),
+          max_subagent_descendants: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Maximum total subagent descendants per root session (default: 50)"),
+          model_concurrency: z
+            .record(z.string(), z.number().int().positive())
+            .optional()
+            .describe("Per-model concurrency limits keyed by 'providerID:modelID' (default: 5 for all)"),
+          task_categories: z
+            .record(
+              z.string(),
+              z.object({
+                providerID: z.string(),
+                modelID: z.string(),
+              }),
+            )
+            .optional()
+            .describe("Map task category names to specific provider/model combos"),
+          ultrawork_model: z
+            .object({
+              providerID: z.string(),
+              modelID: z.string(),
+            })
+            .optional()
+            .describe(
+              "Model override used for keyword-triggered ultrawork routing, or when task.use_ultrawork is explicitly set to true",
+            ),
         })
         .optional(),
     })
