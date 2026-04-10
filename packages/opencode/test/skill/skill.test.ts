@@ -1,4 +1,6 @@
 import { afterEach, test, expect } from "bun:test"
+
+const skipExternal = test.skipIf(process.env.OPENCODE_DISABLE_EXTERNAL_SKILLS === "1")
 import { Skill } from "../../src/skill"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
@@ -159,7 +161,7 @@ Just some content without YAML frontmatter.
   })
 })
 
-test("discovers skills from .claude/skills/ directory", async () => {
+skipExternal("discovers skills from .claude/skills/ directory", async () => {
   await using tmp = await tmpdir({
     git: true,
     init: async (dir) => {
@@ -189,7 +191,7 @@ description: A skill in the .claude/skills directory.
   })
 })
 
-test("discovers global skills from ~/.claude/skills/ directory", async () => {
+skipExternal("discovers global skills from ~/.claude/skills/ directory", async () => {
   await using tmp = await tmpdir({ git: true })
 
   const originalHome = process.env.OPENCODE_TEST_HOME
@@ -224,7 +226,7 @@ test("returns empty array when no skills exist", async () => {
   })
 })
 
-test("discovers skills from .agents/skills/ directory", async () => {
+skipExternal("discovers skills from .agents/skills/ directory", async () => {
   await using tmp = await tmpdir({
     git: true,
     init: async (dir) => {
@@ -254,7 +256,7 @@ description: A skill in the .agents/skills directory.
   })
 })
 
-test("discovers global skills from ~/.agents/skills/ directory", async () => {
+skipExternal("discovers global skills from ~/.agents/skills/ directory", async () => {
   await using tmp = await tmpdir({ git: true })
 
   const originalHome = process.env.OPENCODE_TEST_HOME
@@ -291,7 +293,7 @@ This skill is loaded from the global home directory.
   }
 })
 
-test("discovers skills from both .claude/skills/ and .agents/skills/", async () => {
+skipExternal("discovers skills from both .claude/skills/ and .agents/skills/", async () => {
   await using tmp = await tmpdir({
     git: true,
     init: async (dir) => {
@@ -331,7 +333,7 @@ description: A skill in the .agents/skills directory.
   })
 })
 
-test("properly resolves directories that skills live in", async () => {
+skipExternal("properly resolves directories that skills live in", async () => {
   await using tmp = await tmpdir({
     git: true,
     init: async (dir) => {
