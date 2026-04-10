@@ -33,7 +33,6 @@ import { Effect, Layer, ServiceMap } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
-import { Env } from "../env"
 import { Question } from "../question"
 import { Todo } from "../session/todo"
 import { LSP } from "../lsp"
@@ -43,6 +42,7 @@ import { AppFileSystem } from "../filesystem"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
 import { Permission } from "@/permission"
+import { filterTools } from "./tool-filter"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -206,6 +206,34 @@ export namespace ToolRegistry {
         }),
       )
 
+      const infos = Effect.fn("ToolRegistry.infos")(function* () {
+        const s = yield* InstanceState.get(state)
+        const cfg = yield* config.get()
+        const questionEnabled =
+          ["app", "cli", "desktop"].includes(Flag.OPENCODE_CLIENT) || Flag.OPENCODE_ENABLE_QUESTION_TOOL
+
+        return [
+          InvalidTool,
+          ...(questionEnabled ? [question] : []),
+          BashTool,
+          read,
+          GlobTool,
+          GrepTool,
+          EditTool,
+          WriteTool,
+          task,
+          webfetch,
+          todo,
+          websearch,
+          codesearch,
+          SkillTool,
+          ApplyPatchTool,
+          ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [lsptool] : []),
+          ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [plan] : []),
+          ...s.custom,
+        ]
+      })
+
       const all: Interface["all"] = Effect.fn("ToolRegistry.all")(function* () {
         const s = yield* InstanceState.get(state)
         return [...s.builtin, ...s.custom] as Tool.Def[]
@@ -250,19 +278,7 @@ export namespace ToolRegistry {
       })
 
       const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
-        const filtered = (yield* all()).filter((tool) => {
-          if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {
-            return input.providerID === ProviderID.opencode || Flag.OPENCODE_ENABLE_EXA
-          }
-
-          const usePatch =
-            !!Env.get("OPENCODE_E2E_LLM_URL") ||
-            (input.modelID.includes("gpt-") && !input.modelID.includes("oss") && !input.modelID.includes("gpt-4"))
-          if (tool.id === ApplyPatchTool.id) return usePatch
-          if (tool.id === EditTool.id || tool.id === WriteTool.id) return !usePatch
-
-          return true
-        })
+        const filtered = filterTools(yield* infos(), { providerID: input.providerID, modelID: input.modelID })
 
         return yield* Effect.forEach(
           filtered,
