@@ -203,6 +203,13 @@ export function createTuiApi(input: Input): TuiPluginApi {
     },
   }
 
+  function kvGet(key: string): unknown
+  function kvGet<Value>(key: string, fallback: Value): Value
+  function kvGet<Value>(key: string, fallback?: Value) {
+    if (arguments.length === 1) return input.kv.get(key)
+    return input.kv.get(key, fallback)
+  }
+
   return {
     app: appApi(),
     command: {
@@ -322,9 +329,7 @@ export function createTuiApi(input: Input): TuiPluginApi {
       return input.tuiConfig
     },
     kv: {
-      get(key, fallback) {
-        return input.kv.get(key, fallback)
-      },
+      get: kvGet,
       set(key, value) {
         input.kv.set(key, value)
       },

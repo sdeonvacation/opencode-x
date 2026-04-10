@@ -1,7 +1,10 @@
 import { onFocus, render, TimeToFirstDraw, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { Clipboard } from "@tui/util/clipboard"
-import { Selection } from "@tui/util/selection"
-import { createCliRenderer, MouseButton, type CliRendererConfig } from "@opentui/core"
+import { createCliRenderer, type CliRendererConfig } from "@opentui/core"
+import { createBtwCommand } from "@tui/command/btw-command"
+import { createClearCommands } from "@tui/command/clear-commands"
+import { createGotoCommand } from "@tui/command/goto-command"
+import { useTerminalTitle } from "@tui/component/terminal-title"
 import { RouteProvider, useRoute } from "@tui/context/route"
 import {
   Switch,
@@ -17,8 +20,7 @@ import {
 } from "solid-js"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { Flag } from "@/flag/flag"
-import semver from "semver"
-import { DialogProvider, useDialog } from "@tui/ui/dialog"
+import { DialogProvider, useDialog, type DialogContext } from "@tui/ui/dialog"
 import { DialogProvider as DialogProviderList } from "@tui/component/dialog-provider"
 import { ErrorComponent } from "@tui/component/error-component"
 import { PluginRouteMissing } from "@tui/component/plugin-route-missing"
@@ -44,14 +46,11 @@ import { Session } from "@tui/routes/session"
 import { PromptHistoryProvider } from "./component/prompt/history"
 import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
-import { DialogAlert } from "./ui/dialog-alert"
-import { DialogConfirm } from "./ui/dialog-confirm"
-import { DialogPrompt } from "./ui/dialog-prompt"
+import { setupAppEventListeners } from "@tui/effect/app-event-listeners"
+import { setupConsoleCopyHandler, setupCopySelectionHandlers } from "@tui/util/copy-handler"
 import { restoreRenderableFocus } from "./ui/dialog"
 import { ToastProvider, useToast } from "./ui/toast"
 import { ExitProvider, useExit } from "./context/exit"
-import { Session as SessionApi } from "@/session"
-import { TuiEvent } from "./event"
 import { KVProvider, useKV } from "./context/kv"
 import { Provider } from "@/provider/provider"
 import { ArgsProvider, useArgs, type Args } from "./context/args"
@@ -60,8 +59,6 @@ import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { TuiConfigProvider, useTuiConfig } from "./context/tui-config"
 import { TuiConfig } from "@/config/tui"
 import { createTuiApi, TuiPluginRuntime, type RouteMap } from "./plugin"
-import { FormatError, FormatUnknownError } from "@/cli/error"
-import { Filesystem } from "@/util/filesystem"
 
 async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
   // can't set raw mode if not a TTY
@@ -125,7 +122,6 @@ async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
-import { DialogBtw } from "./component/dialog-btw"
 
 function rendererConfig(_config: TuiConfig.Info): CliRendererConfig {
   const mouseEnabled = !Flag.OPENCODE_DISABLE_MOUSE && (_config.mouse ?? true)
@@ -148,23 +144,6 @@ function rendererConfig(_config: TuiConfig.Info): CliRendererConfig {
       },
     },
   }
-}
-
-function errorMessage(error: unknown) {
-  const formatted = FormatError(error)
-  if (formatted !== undefined) return formatted
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "data" in error &&
-    typeof error.data === "object" &&
-    error.data !== null &&
-    "message" in error.data &&
-    typeof error.data.message === "string"
-  ) {
-    return error.data.message
-  }
-  return FormatUnknownError(error)
 }
 
 export function tui(input: {
@@ -305,51 +284,8 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       setReady(true)
     })
 
-  useKeyboard((evt) => {
-    if (!Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) return
-    const sel = renderer.getSelection()
-    if (!sel) return
-
-    // Windows Terminal-like behavior:
-    // - Ctrl+C copies and dismisses selection
-    // - Esc dismisses selection
-    // - Most other key input dismisses selection and is passed through
-    if (evt.ctrl && evt.name === "c") {
-      if (!Selection.copy(renderer, toast)) {
-        renderer.clearSelection()
-        return
-      }
-
-      evt.preventDefault()
-      evt.stopPropagation()
-      return
-    }
-
-    if (evt.name === "escape") {
-      renderer.clearSelection()
-      evt.preventDefault()
-      evt.stopPropagation()
-      return
-    }
-
-    const focus = renderer.currentFocusedRenderable
-    if (focus?.hasSelection() && sel.selectedRenderables.includes(focus)) {
-      return
-    }
-
-    renderer.clearSelection()
-  })
-
-  // Wire up console copy-to-clipboard via opentui's onCopySelection callback
-  renderer.console.onCopySelection = async (text: string) => {
-    if (!text || text.length === 0) return
-
-    await Clipboard.copy(text)
-      .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
-      .catch(toast.error)
-
-    renderer.clearSelection()
-  }
+  const copySelection = setupCopySelectionHandlers({ renderer, toast }, useKeyboard)
+  setupConsoleCopyHandler({ renderer, toast })
   const [terminalTitleEnabled, setTerminalTitleEnabled] = createSignal(kv.get("terminal_title_enabled", true))
 
   const refreshFocus = () => {
@@ -362,31 +298,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     refreshFocus()
   })
 
-  // Update terminal window title based on current route and session
-  createEffect(() => {
-    if (!terminalTitleEnabled() || Flag.OPENCODE_DISABLE_TERMINAL_TITLE) return
-
-    if (route.data.type === "home") {
-      renderer.setTerminalTitle("OpenCode")
-      return
-    }
-
-    if (route.data.type === "session") {
-      const session = sync.session.get(route.data.sessionID)
-      if (!session || SessionApi.isDefaultTitle(session.title)) {
-        renderer.setTerminalTitle("OpenCode")
-        return
-      }
-
-      const title = session.title.length > 40 ? session.title.slice(0, 37) + "..." : session.title
-      renderer.setTerminalTitle(`OC | ${title}`)
-      return
-    }
-
-    if (route.data.type === "plugin") {
-      renderer.setTerminalTitle(`OC | ${route.data.id}`)
-    }
-  })
+  useTerminalTitle({ terminalTitleEnabled, route, sync, renderer })
 
   const args = useArgs()
   onMount(() => {
@@ -486,7 +398,6 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       category: "Session",
       slash: {
         name: "new",
-        aliases: ["clear"],
       },
       onSelect: () => {
         const current = promptRef.current
@@ -499,159 +410,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         dialog.clear()
       },
     },
-    {
-      title: "Clear conversation",
-      value: "session.clear",
-      category: "Session",
-      slash: {
-        name: "clear",
-      },
-      onSelect: async () => {
-        if (route.data.type !== "session") return
-
-        try {
-          const response = await sdk.client.session.messages({ sessionID: route.data.sessionID })
-          const messages = response.data || []
-
-          if (messages.length === 0) {
-            toast.show({
-              variant: "info",
-              message: "No messages to clear",
-            })
-            return
-          }
-
-          // Calculate and preserve the cost before clearing
-          const currentCost = messages.reduce(
-            (sum, msg) => sum + (msg.info.role === "assistant" ? msg.info.cost : 0),
-            0,
-          )
-          const existingClearedCost = kv.get(`cleared_cost_${route.data.sessionID}`, 0)
-          kv.set(`cleared_cost_${route.data.sessionID}`, existingClearedCost + currentCost)
-
-          for (const msg of messages) {
-            await sdk.client.session.deleteMessage({
-              sessionID: route.data.sessionID,
-              messageID: msg.info.id,
-            })
-          }
-
-          // Clear TODOs
-          await sdk.client.session.clearTodo({ sessionID: route.data.sessionID })
-
-          // Refresh the message list
-          await sync.session.sync(route.data.sessionID, { force: true })
-
-          toast.show({
-            variant: "info",
-            message: `Cleared ${messages.length} message(s)`,
-          })
-        } catch (error) {
-          toast.show({
-            variant: "error",
-            message: `Failed to clear conversation: ${error instanceof Error ? error.message : String(error)}`,
-          })
-        }
-      },
-    },
-    {
-      title: "Compact and clear conversation",
-      value: "session.compact_clear",
-      category: "Session",
-      slash: {
-        name: "clear-compact",
-      },
-      onSelect: async () => {
-        if (route.data.type !== "session") return
-
-        try {
-          const response = await sdk.client.session.messages({ sessionID: route.data.sessionID })
-          const messages = response.data || []
-
-          if (messages.length === 0) {
-            toast.show({
-              variant: "info",
-              message: "No messages to compact",
-            })
-            return
-          }
-
-          toast.show({
-            variant: "info",
-            message: "Creating summary...",
-            duration: 8000,
-          })
-
-          // Get current model for summarization
-          const currentModel = local.model.current()
-          if (!currentModel) {
-            toast.show({
-              variant: "error",
-              message: "No model selected. Please select a model first.",
-            })
-            return
-          }
-
-          // Create compaction summary
-          await sdk.client.session.summarize({
-            sessionID: route.data.sessionID,
-            providerID: currentModel.providerID,
-            modelID: currentModel.modelID,
-            auto: false,
-          })
-
-          // Get updated messages to find the summary (summarize waits for completion)
-          const updatedResponse = await sdk.client.session.messages({ sessionID: route.data.sessionID })
-          const updatedMessages = updatedResponse.data || []
-          const summaryMessage = updatedMessages.findLast(
-            (m: any) => m.info.role === "assistant" && m.info.summary === true,
-          )
-
-          if (!summaryMessage) {
-            toast.show({
-              variant: "error",
-              message: "Failed to create summary. Use /clear instead.",
-            })
-            return
-          }
-
-          // Delete all messages except the summary
-          let deletedCount = 0
-          let deletedCost = 0
-          for (const msg of messages) {
-            if (msg.info.id === summaryMessage.info.id) continue
-            if (msg.info.role === "assistant") {
-              deletedCost += msg.info.cost
-            }
-            await sdk.client.session.deleteMessage({
-              sessionID: route.data.sessionID,
-              messageID: msg.info.id,
-            })
-            deletedCount++
-          }
-
-          // Preserve the cost of deleted messages
-          const existingClearedCost = kv.get(`cleared_cost_${route.data.sessionID}`, 0)
-          kv.set(`cleared_cost_${route.data.sessionID}`, existingClearedCost + deletedCost)
-
-          // Clear TODOs
-          await sdk.client.session.clearTodo({ sessionID: route.data.sessionID })
-
-          // Refresh the message list
-          await sync.session.sync(route.data.sessionID, { force: true })
-
-          toast.show({
-            variant: "info",
-            message: `Compacted: created summary and cleared ${deletedCount} message(s)`,
-          })
-        } catch (error) {
-          toast.show({
-            variant: "error",
-            message: `Failed to compact: ${error instanceof Error ? error.message : String(error)}`,
-          })
-        }
-      },
-    },
+    ...createClearCommands({ sdk, sync, kv, toast, route, local }),
     {
       title: "Switch model",
       value: "model.list",
@@ -826,7 +585,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     {
       title: "Toggle theme mode",
       value: "theme.switch_mode",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         setMode(mode() === "dark" ? "light" : "dark")
         dialog.clear()
       },
@@ -835,7 +594,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     {
       title: locked() ? "Unlock theme mode" : "Lock theme mode",
       value: "theme.mode.lock",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         if (locked()) unlock()
         else lock()
         dialog.clear()
@@ -853,82 +612,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       category: "System",
     },
-    {
-      title: "By the way",
-      value: "btw.ask",
-      slash: {
-        name: "btw",
-      },
-      onSelect: async () => {
-        const q = await DialogPrompt.show(dialog, "btw", {
-          placeholder: "Ask a quick question...",
-        })
-        if (!q?.trim()) {
-          dialog.clear()
-          return
-        }
-
-        const model = local.model.current()
-        if (!model) {
-          toast.show({
-            variant: "warning",
-            message: "Connect a provider to send prompts",
-            duration: 3000,
-          })
-          if (sync.data.provider.length === 0) {
-            dialog.replace(() => <DialogProviderList />)
-            return
-          }
-          dialog.clear()
-          return
-        }
-
-        const contextSessionID = route.data.type === "session" ? route.data.sessionID : undefined
-        const res = contextSessionID
-          ? await sdk.client.session.fork({ sessionID: contextSessionID })
-          : await sdk.client.session.create()
-        const sessionID = res.data?.id
-        if (!sessionID) {
-          toast.show({
-            variant: "error",
-            message: "Failed to create session",
-          })
-          dialog.clear()
-          return
-        }
-
-        const api = sdk.client.session as typeof sdk.client.session & {
-          complete: (input: {
-            sessionID: string
-            contextSessionID?: string
-            parts: { type: "text"; text: string }[]
-            small?: boolean
-          }) => Promise<unknown>
-        }
-
-        api
-          .complete({
-            sessionID,
-            parts: [
-              {
-                type: "text",
-                text: `Answer the following question concisely, in plain text, without using any markdown formatting.\n\n${q}`,
-              },
-            ],
-            small: true,
-          })
-          .catch(() => {})
-
-        dialog.replace(
-          () => <DialogBtw sessionID={sessionID} question={q} />,
-          () => {
-            sdk.client.session.abort({ sessionID }).catch(() => {})
-            sdk.client.session.delete({ sessionID }).catch(() => {})
-          },
-        )
-      },
-      category: "Agent",
-    },
+    createBtwCommand({ dialog, local, toast, sync, sdk, route }),
     {
       title: "Open docs",
       value: "docs.open",
@@ -938,48 +622,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       category: "System",
     },
-    {
-      title: "Change directory",
-      value: "app.goto",
-      slash: {
-        name: "goto",
-        aliases: ["cd"],
-      },
-      onSelect: async () => {
-        const path = await DialogPrompt.show(dialog, "Change directory", {
-          placeholder: "Enter path...",
-          value: sync.data.path.directory || process.cwd(),
-        })
-        dialog.clear()
-        if (!path) return
-
-        const resolved = path.startsWith("~") ? path.replace("~", process.env.HOME || "") : path
-
-        const valid = await Filesystem.isDir(resolved)
-
-        if (!valid) {
-          toast.show({
-            variant: "error",
-            message: `Invalid directory: ${path}`,
-          })
-          return
-        }
-
-        try {
-          await sdk.changeDirectory(resolved)
-          toast.show({
-            variant: "info",
-            message: `Changed to ${path}`,
-          })
-        } catch (e) {
-          toast.show({
-            variant: "error",
-            message: `Failed: ${e instanceof Error ? e.message : e}`,
-          })
-        }
-      },
-      category: "System",
-    },
+    createGotoCommand({ dialog, sdk, toast, sync }),
     {
       title: "Exit the app",
       value: "app.exit",
@@ -994,7 +637,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       title: "Toggle debug panel",
       category: "System",
       value: "app.debug",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         renderer.toggleDebugOverlay()
         dialog.clear()
       },
@@ -1003,7 +646,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       title: "Toggle console",
       category: "System",
       value: "app.console",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         renderer.console.toggle()
         dialog.clear()
       },
@@ -1012,7 +655,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       title: "Write heap snapshot",
       category: "System",
       value: "app.heap_snapshot",
-      onSelect: async (dialog) => {
+      onSelect: async (dialog: DialogContext) => {
         const files = await props.onSnapshot?.()
         toast.show({
           variant: "info",
@@ -1045,7 +688,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       value: "terminal.title.toggle",
       keybind: "terminal_title_toggle",
       category: "System",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         setTerminalTitleEnabled((prev) => {
           const next = !prev
           kv.set("terminal_title_enabled", next)
@@ -1059,7 +702,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       title: kv.get("animations_enabled", true) ? "Disable animations" : "Enable animations",
       value: "app.toggle.animations",
       category: "System",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         kv.set("animations_enabled", !kv.get("animations_enabled", true))
         dialog.clear()
       },
@@ -1068,7 +711,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       title: kv.get("diff_wrap_mode", "word") === "word" ? "Disable diff wrapping" : "Enable diff wrapping",
       value: "app.toggle.diffwrap",
       category: "System",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         const current = kv.get("diff_wrap_mode", "word")
         kv.set("diff_wrap_mode", current === "word" ? "none" : "word")
         dialog.clear()
@@ -1076,94 +719,8 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     },
   ])
 
-  event.on(TuiEvent.CommandExecute.type, (evt) => {
-    command.trigger(evt.properties.command)
-  })
-
-  event.on(TuiEvent.ToastShow.type, (evt) => {
-    toast.show({
-      title: evt.properties.title,
-      message: evt.properties.message,
-      variant: evt.properties.variant,
-      duration: evt.properties.duration,
-    })
-  })
-
-  event.on(TuiEvent.SessionSelect.type, (evt) => {
-    route.navigate({
-      type: "session",
-      sessionID: evt.properties.sessionID,
-    })
-  })
-
-  event.on("session.deleted", (evt) => {
-    if (route.data.type === "session" && route.data.sessionID === evt.properties.info.id) {
-      route.navigate({ type: "home" })
-      toast.show({
-        variant: "info",
-        message: "The current session was deleted",
-      })
-    }
-  })
-
-  event.on("session.error", (evt) => {
-    const error = evt.properties.error
-    if (error && typeof error === "object" && error.name === "MessageAbortedError") return
-    const message = errorMessage(error)
-
-    toast.show({
-      variant: "error",
-      message,
-      duration: 5000,
-    })
-  })
-
-  event.on("installation.update-available", async (evt) => {
-    const version = evt.properties.version
-
-    const skipped = kv.get("skipped_version")
-    if (skipped && !semver.gt(version, skipped)) return
-
-    const choice = await DialogConfirm.show(
-      dialog,
-      `Update Available`,
-      `A new release v${version} is available. Would you like to update now?`,
-      "skip",
-    )
-
-    if (choice === false) {
-      kv.set("skipped_version", version)
-      return
-    }
-
-    if (choice !== true) return
-
-    toast.show({
-      variant: "info",
-      message: `Updating to v${version}...`,
-      duration: 30000,
-    })
-
-    const result = await sdk.client.global.upgrade({ target: version })
-
-    if (result.error || !result.data?.success) {
-      toast.show({
-        variant: "error",
-        title: "Update Failed",
-        message: "Update failed",
-        duration: 10000,
-      })
-      return
-    }
-
-    await DialogAlert.show(
-      dialog,
-      "Update Complete",
-      `Successfully updated to OpenCode v${result.data.version}. Please restart the application.`,
-    )
-
-    exit()
-  })
+  const off = setupAppEventListeners({ sdk, route, command, toast, dialog, kv, exit })
+  onCleanup(() => off.forEach((fn) => fn()))
 
   const plugin = createMemo(() => {
     if (!ready()) return
@@ -1178,15 +735,8 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       width={dimensions().width}
       height={dimensions().height}
       backgroundColor={theme.background}
-      onMouseDown={(evt) => {
-        if (!Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) return
-        if (evt.button !== MouseButton.RIGHT) return
-
-        if (!Selection.copy(renderer, toast)) return
-        evt.preventDefault()
-        evt.stopPropagation()
-      }}
-      onMouseUp={Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT ? undefined : () => Selection.copy(renderer, toast)}
+      onMouseDown={copySelection.onMouseDown}
+      onMouseUp={copySelection.onMouseUp}
     >
       <Show when={Flag.OPENCODE_SHOW_TTFD}>
         <TimeToFirstDraw />
