@@ -67,6 +67,7 @@ export namespace SessionSummary {
 
   export interface Interface {
     readonly summarize: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<void>
+    readonly clearDiff: (sessionID: SessionID) => Effect.Effect<void>
     readonly diff: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Snapshot.FileDiff[]>
     readonly computeDiff: (input: { messages: MessageV2.WithParts[] }) => Effect.Effect<Snapshot.FileDiff[]>
   }
@@ -134,6 +135,11 @@ export namespace SessionSummary {
         yield* sessions.updateMessage(target.info)
       })
 
+      const clearDiff = Effect.fn("SessionSummary.clearDiff")(function* (sessionID: SessionID) {
+        yield* storage.write(["session_diff", sessionID], []).pipe(Effect.ignore)
+        yield* bus.publish(Session.Event.Diff, { sessionID, diff: [] })
+      })
+
       const diff = Effect.fn("SessionSummary.diff")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
         // Per-message diffs are stored separately to avoid bloating message.data
         if (input.messageID) {
@@ -155,7 +161,7 @@ export namespace SessionSummary {
         return next
       })
 
-      return Service.of({ summarize, diff, computeDiff })
+      return Service.of({ summarize, clearDiff, diff, computeDiff })
     }),
   )
 
@@ -172,6 +178,8 @@ export namespace SessionSummary {
 
   export const summarize = (input: { sessionID: SessionID; messageID: MessageID }) =>
     void runPromise((svc) => svc.summarize(input)).catch(() => {})
+
+  export const clearDiff = (sessionID: SessionID) => void runPromise((svc) => svc.clearDiff(sessionID)).catch(() => {})
 
   export const DiffInput = z.object({
     sessionID: SessionID.zod,

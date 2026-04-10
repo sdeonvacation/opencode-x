@@ -534,6 +534,7 @@ export const BashTool = Tool.define("bash", async () => {
       )
 
       if (isCommit(params.command, result.metadata.exit)) {
+        SessionSummary.clearDiff(ctx.sessionID)
         SessionSummary.summarize({
           sessionID: ctx.sessionID,
           messageID: ctx.messageID,
