@@ -189,6 +189,36 @@ export const SessionRoutes = lazy(() =>
         return c.json(todos)
       },
     )
+    .delete(
+      "/:sessionID/todo",
+      describeRoute({
+        summary: "Clear session todos",
+        description: "Clear all todos associated with a specific session.",
+        operationId: "session.clearTodo",
+        responses: {
+          200: {
+            description: "Todos cleared",
+            content: {
+              "application/json": {
+                schema: resolver(z.boolean()),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      async (c) => {
+        const sessionID = c.req.valid("param").sessionID
+        Todo.update({ sessionID, todos: [] })
+        return c.json(true)
+      },
+    )
     .post(
       "/",
       describeRoute({
@@ -835,6 +865,43 @@ export const SessionRoutes = lazy(() =>
           const msg = await SessionPrompt.prompt({ ...body, sessionID })
           stream.write(JSON.stringify(msg))
         })
+      },
+    )
+    .post(
+      "/:sessionID/complete",
+      describeRoute({
+        summary: "Complete message",
+        description: "Create and complete a message directly without agent loop overhead.",
+        operationId: "session.complete",
+        responses: {
+          200: {
+            description: "Created message",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    info: MessageV2.Assistant,
+                    parts: MessageV2.Part.array(),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      validator("json", SessionPrompt.CompleteInput.omit({ sessionID: true })),
+      async (c) => {
+        const sessionID = c.req.valid("param").sessionID
+        const body = c.req.valid("json")
+        const msg = await SessionPrompt.complete({ ...body, sessionID })
+        return c.json(msg)
       },
     )
     .post(

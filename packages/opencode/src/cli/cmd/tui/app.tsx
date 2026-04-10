@@ -46,6 +46,7 @@ import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
+import { DialogPrompt } from "./ui/dialog-prompt"
 import { ToastProvider, useToast } from "./ui/toast"
 import { ExitProvider, useExit } from "./context/exit"
 import { Session as SessionApi } from "@/session"
@@ -60,6 +61,7 @@ import { TuiConfigProvider, useTuiConfig } from "./context/tui-config"
 import { TuiConfig } from "@/config/tui"
 import { createTuiApi, TuiPluginRuntime, type RouteMap } from "./plugin"
 import { FormatError, FormatUnknownError } from "@/cli/error"
+import { Filesystem } from "@/util/filesystem"
 
 async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
   // can't set raw mode if not a TTY
@@ -123,6 +125,7 @@ async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
+import { DialogBtw } from "./component/dialog-btw"
 
 function rendererConfig(_config: TuiConfig.Info): CliRendererConfig {
   const mouseEnabled = !Flag.OPENCODE_DISABLE_MOUSE && (_config.mouse ?? true)
@@ -502,6 +505,159 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
     },
     {
+      title: "Clear conversation",
+      value: "session.clear",
+      category: "Session",
+      slash: {
+        name: "clear",
+      },
+      onSelect: async () => {
+        if (route.data.type !== "session") return
+
+        try {
+          const response = await sdk.client.session.messages({ sessionID: route.data.sessionID })
+          const messages = response.data || []
+
+          if (messages.length === 0) {
+            toast.show({
+              variant: "info",
+              message: "No messages to clear",
+            })
+            return
+          }
+
+          // Calculate and preserve the cost before clearing
+          const currentCost = messages.reduce(
+            (sum, msg) => sum + (msg.info.role === "assistant" ? msg.info.cost : 0),
+            0,
+          )
+          const existingClearedCost = kv.get(`cleared_cost_${route.data.sessionID}`, 0)
+          kv.set(`cleared_cost_${route.data.sessionID}`, existingClearedCost + currentCost)
+
+          for (const msg of messages) {
+            await sdk.client.session.deleteMessage({
+              sessionID: route.data.sessionID,
+              messageID: msg.info.id,
+            })
+          }
+
+          // Clear TODOs
+          await sdk.client.session.clearTodo({ sessionID: route.data.sessionID })
+
+          // Refresh the message list
+          await sync.session.sync(route.data.sessionID, { force: true })
+
+          toast.show({
+            variant: "info",
+            message: `Cleared ${messages.length} message(s)`,
+          })
+        } catch (error) {
+          toast.show({
+            variant: "error",
+            message: `Failed to clear conversation: ${error instanceof Error ? error.message : String(error)}`,
+          })
+        }
+      },
+    },
+    {
+      title: "Compact and clear conversation",
+      value: "session.compact_clear",
+      category: "Session",
+      slash: {
+        name: "clear-compact",
+      },
+      onSelect: async () => {
+        if (route.data.type !== "session") return
+
+        try {
+          const response = await sdk.client.session.messages({ sessionID: route.data.sessionID })
+          const messages = response.data || []
+
+          if (messages.length === 0) {
+            toast.show({
+              variant: "info",
+              message: "No messages to compact",
+            })
+            return
+          }
+
+          toast.show({
+            variant: "info",
+            message: "Creating summary...",
+            duration: 8000,
+          })
+
+          // Get current model for summarization
+          const currentModel = local.model.current()
+          if (!currentModel) {
+            toast.show({
+              variant: "error",
+              message: "No model selected. Please select a model first.",
+            })
+            return
+          }
+
+          // Create compaction summary
+          await sdk.client.session.summarize({
+            sessionID: route.data.sessionID,
+            providerID: currentModel.providerID,
+            modelID: currentModel.modelID,
+            auto: false,
+          })
+
+          // Get updated messages to find the summary (summarize waits for completion)
+          const updatedResponse = await sdk.client.session.messages({ sessionID: route.data.sessionID })
+          const updatedMessages = updatedResponse.data || []
+          const summaryMessage = updatedMessages.findLast(
+            (m: any) => m.info.role === "assistant" && m.info.summary === true,
+          )
+
+          if (!summaryMessage) {
+            toast.show({
+              variant: "error",
+              message: "Failed to create summary. Use /clear instead.",
+            })
+            return
+          }
+
+          // Delete all messages except the summary
+          let deletedCount = 0
+          let deletedCost = 0
+          for (const msg of messages) {
+            if (msg.info.id === summaryMessage.info.id) continue
+            if (msg.info.role === "assistant") {
+              deletedCost += msg.info.cost
+            }
+            await sdk.client.session.deleteMessage({
+              sessionID: route.data.sessionID,
+              messageID: msg.info.id,
+            })
+            deletedCount++
+          }
+
+          // Preserve the cost of deleted messages
+          const existingClearedCost = kv.get(`cleared_cost_${route.data.sessionID}`, 0)
+          kv.set(`cleared_cost_${route.data.sessionID}`, existingClearedCost + deletedCost)
+
+          // Clear TODOs
+          await sdk.client.session.clearTodo({ sessionID: route.data.sessionID })
+
+          // Refresh the message list
+          await sync.session.sync(route.data.sessionID, { force: true })
+
+          toast.show({
+            variant: "info",
+            message: `Compacted: created summary and cleared ${deletedCount} message(s)`,
+          })
+        } catch (error) {
+          toast.show({
+            variant: "error",
+            message: `Failed to compact: ${error instanceof Error ? error.message : String(error)}`,
+          })
+        }
+      },
+    },
+    {
       title: "Switch model",
       value: "model.list",
       keybind: "model_list",
@@ -703,11 +859,129 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       category: "System",
     },
     {
+      title: "By the way",
+      value: "btw.ask",
+      slash: {
+        name: "btw",
+      },
+      onSelect: async () => {
+        const q = await DialogPrompt.show(dialog, "btw", {
+          placeholder: "Ask a quick question...",
+        })
+        if (!q?.trim()) {
+          dialog.clear()
+          return
+        }
+
+        const model = local.model.current()
+        if (!model) {
+          toast.show({
+            variant: "warning",
+            message: "Connect a provider to send prompts",
+            duration: 3000,
+          })
+          if (sync.data.provider.length === 0) {
+            dialog.replace(() => <DialogProviderList />)
+            return
+          }
+          dialog.clear()
+          return
+        }
+
+        const contextSessionID = route.data.type === "session" ? route.data.sessionID : undefined
+        const res = contextSessionID
+          ? await sdk.client.session.fork({ sessionID: contextSessionID })
+          : await sdk.client.session.create()
+        const sessionID = res.data?.id
+        if (!sessionID) {
+          toast.show({
+            variant: "error",
+            message: "Failed to create session",
+          })
+          dialog.clear()
+          return
+        }
+
+        const api = sdk.client.session as typeof sdk.client.session & {
+          complete: (input: {
+            sessionID: string
+            contextSessionID?: string
+            parts: { type: "text"; text: string }[]
+            small?: boolean
+          }) => Promise<unknown>
+        }
+
+        api
+          .complete({
+            sessionID,
+            parts: [
+              {
+                type: "text",
+                text: `Answer the following question concisely, in plain text, without using any markdown formatting.\n\n${q}`,
+              },
+            ],
+            small: true,
+          })
+          .catch(() => {})
+
+        dialog.replace(
+          () => <DialogBtw sessionID={sessionID} question={q} />,
+          () => {
+            sdk.client.session.abort({ sessionID }).catch(() => {})
+            sdk.client.session.delete({ sessionID }).catch(() => {})
+          },
+        )
+      },
+      category: "Agent",
+    },
+    {
       title: "Open docs",
       value: "docs.open",
       onSelect: () => {
         open("https://opencode.ai/docs").catch(() => {})
         dialog.clear()
+      },
+      category: "System",
+    },
+    {
+      title: "Change directory",
+      value: "app.goto",
+      slash: {
+        name: "goto",
+        aliases: ["cd"],
+      },
+      onSelect: async () => {
+        const path = await DialogPrompt.show(dialog, "Change directory", {
+          placeholder: "Enter path...",
+          value: sync.data.path.directory || process.cwd(),
+        })
+        dialog.clear()
+        if (!path) return
+
+        const resolved = path.startsWith("~") ? path.replace("~", process.env.HOME || "") : path
+
+        const valid = await Filesystem.isDir(resolved)
+
+        if (!valid) {
+          toast.show({
+            variant: "error",
+            message: `Invalid directory: ${path}`,
+          })
+          return
+        }
+
+        try {
+          await sdk.changeDirectory(resolved)
+          toast.show({
+            variant: "info",
+            message: `Changed to ${path}`,
+          })
+        } catch (e) {
+          toast.show({
+            variant: "error",
+            message: `Failed: ${e instanceof Error ? e.message : e}`,
+          })
+        }
       },
       category: "System",
     },

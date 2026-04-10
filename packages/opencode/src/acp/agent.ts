@@ -57,6 +57,11 @@ const DEFAULT_VARIANT_VALUE = "default"
 export namespace ACP {
   const log = Log.create({ service: "acp-agent" })
 
+  function getUsedTokens(msg: AssistantMessage) {
+    if (msg.summary && msg.finish && !msg.error) return msg.tokens.output
+    return msg.tokens.input + (msg.tokens.cache?.read ?? 0)
+  }
+
   async function getContextLimit(
     sdk: OpencodeClient,
     providerID: ProviderID,
@@ -108,7 +113,7 @@ export namespace ACP {
       return
     }
 
-    const used = msg.tokens.input + (msg.tokens.cache?.read ?? 0)
+    const used = getUsedTokens(msg)
     const totalCost = assistantMessages.reduce((sum, m) => sum + m.info.cost, 0)
 
     await connection
