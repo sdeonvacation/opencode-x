@@ -51,10 +51,7 @@ export namespace ToolRegistry {
   type ReadDef = Tool.InferDef<typeof ReadTool>
 
   type State = {
-    custom: Tool.Def[]
-    builtin: Tool.Def[]
-    task: TaskDef
-    read: ReadDef
+    custom: Tool.Info[]
   }
 
   export interface Interface {
@@ -106,30 +103,32 @@ export namespace ToolRegistry {
 
       const state = yield* InstanceState.make<State>(
         Effect.fn("ToolRegistry.state")(function* (ctx) {
-          const custom: Tool.Def[] = []
+          const custom: Tool.Info[] = []
 
-          function fromPlugin(id: string, def: ToolDefinition): Tool.Def {
+          function fromPlugin(id: string, def: ToolDefinition): Tool.Info {
             return {
               id,
-              parameters: z.object(def.args),
-              description: def.description,
-              execute: async (args, toolCtx) => {
-                const pluginCtx: PluginToolContext = {
-                  ...toolCtx,
-                  directory: ctx.directory,
-                  worktree: ctx.worktree,
-                }
-                const result = await def.execute(args as any, pluginCtx)
-                const out = await Truncate.output(result, {}, await Agent.get(toolCtx.agent))
-                return {
-                  title: "",
-                  output: out.truncated ? out.content : result,
-                  metadata: {
-                    truncated: out.truncated,
-                    outputPath: out.truncated ? out.outputPath : undefined,
-                  },
-                }
-              },
+              init: async (initCtx) => ({
+                parameters: z.object(def.args),
+                description: def.description,
+                execute: async (args, toolCtx) => {
+                  const pluginCtx: PluginToolContext = {
+                    ...toolCtx,
+                    directory: ctx.directory,
+                    worktree: ctx.worktree,
+                  }
+                  const result = await def.execute(args as any, pluginCtx)
+                  const out = await Truncate.output(result, {}, initCtx?.agent)
+                  return {
+                    title: "",
+                    output: out.truncated ? out.content : result,
+                    metadata: {
+                      truncated: out.truncated,
+                      outputPath: out.truncated ? out.outputPath : undefined,
+                    },
+                  }
+                },
+              }),
             }
           }
 
@@ -155,54 +154,7 @@ export namespace ToolRegistry {
             }
           }
 
-          const cfg = yield* config.get()
-          const questionEnabled =
-            ["app", "cli", "desktop"].includes(Flag.OPENCODE_CLIENT) || Flag.OPENCODE_ENABLE_QUESTION_TOOL
-
-          const tool = yield* Effect.all({
-            invalid: Tool.init(InvalidTool),
-            bash: Tool.init(BashTool),
-            read: Tool.init(read),
-            glob: Tool.init(GlobTool),
-            grep: Tool.init(GrepTool),
-            edit: Tool.init(EditTool),
-            write: Tool.init(WriteTool),
-            task: Tool.init(task),
-            fetch: Tool.init(webfetch),
-            todo: Tool.init(todo),
-            search: Tool.init(websearch),
-            code: Tool.init(codesearch),
-            skill: Tool.init(SkillTool),
-            patch: Tool.init(ApplyPatchTool),
-            question: Tool.init(question),
-            lsp: Tool.init(lsptool),
-            plan: Tool.init(plan),
-          })
-
-          return {
-            custom,
-            builtin: [
-              tool.invalid,
-              ...(questionEnabled ? [tool.question] : []),
-              tool.bash,
-              tool.read,
-              tool.glob,
-              tool.grep,
-              tool.edit,
-              tool.write,
-              tool.task,
-              tool.fetch,
-              tool.todo,
-              tool.search,
-              tool.code,
-              tool.skill,
-              tool.patch,
-              ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
-              ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
-            ],
-            task: tool.task,
-            read: tool.read,
-          }
+          return { custom }
         }),
       )
 
@@ -236,11 +188,38 @@ export namespace ToolRegistry {
 
       const all: Interface["all"] = Effect.fn("ToolRegistry.all")(function* () {
         const s = yield* InstanceState.get(state)
-        return [...s.builtin, ...s.custom] as Tool.Def[]
+        const cfg = yield* config.get()
+        const questionEnabled =
+          ["app", "cli", "desktop"].includes(Flag.OPENCODE_CLIENT) || Flag.OPENCODE_ENABLE_QUESTION_TOOL
+
+        return [
+          InvalidTool,
+          ...(questionEnabled ? [question] : []),
+          BashTool,
+          read,
+          GlobTool,
+          GrepTool,
+          EditTool,
+          WriteTool,
+          task,
+          WebFetchTool,
+          todo,
+          WebSearchTool,
+          CodeSearchTool,
+          SkillTool,
+          ApplyPatchTool,
+          ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [lsptool] : []),
+          ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),
+          ...s.custom,
+        ]
+      })
+
+      const all: Interface["all"] = Effect.fn("ToolRegistry.all")(function* () {
+        return yield* Effect.forEach(yield* infos(), (tool) => Tool.init(tool), { concurrency: "unbounded" })
       })
 
       const ids: Interface["ids"] = Effect.fn("ToolRegistry.ids")(function* () {
-        return (yield* all()).map((tool) => tool.id)
+        return (yield* infos()).map((tool) => tool.id)
       })
 
       const describeSkill = Effect.fn("ToolRegistry.describeSkill")(function* (agent: Agent.Info) {
@@ -282,11 +261,12 @@ export namespace ToolRegistry {
 
         return yield* Effect.forEach(
           filtered,
-          Effect.fnUntraced(function* (tool: Tool.Def) {
+          Effect.fnUntraced(function* (tool: Tool.Info) {
             using _ = log.time(tool.id)
+            const next = yield* Tool.init(tool, { agent: input.agent })
             const output = {
-              description: tool.description,
-              parameters: tool.parameters,
+              description: next.description,
+              parameters: next.parameters,
               parallelSafe: tool.parallelSafe,
             }
             yield* plugin.trigger("tool.definition", { toolID: tool.id }, output)
@@ -301,8 +281,8 @@ export namespace ToolRegistry {
                 .join("\n"),
               parameters: output.parameters,
               parallelSafe: output.parallelSafe,
-              execute: tool.execute,
-              formatValidationError: tool.formatValidationError,
+              execute: next.execute,
+              formatValidationError: next.formatValidationError,
             }
           }),
           { concurrency: "unbounded" },
@@ -310,8 +290,10 @@ export namespace ToolRegistry {
       })
 
       const named: Interface["named"] = Effect.fn("ToolRegistry.named")(function* () {
-        const s = yield* InstanceState.get(state)
-        return { task: s.task, read: s.read }
+        return {
+          task: yield* Tool.init(task),
+          read: yield* Tool.init(read),
+        }
       })
 
       return Service.of({ ids, all, named, tools })
