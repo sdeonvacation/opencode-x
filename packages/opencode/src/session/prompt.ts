@@ -16,14 +16,11 @@ import { ProviderTransform } from "../provider/transform"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
-import PROMPT_PLAN from "../session/prompt/plan.txt"
-import BUILD_SWITCH from "../session/prompt/build-switch.txt"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
 import { ToolRegistry } from "../tool/registry"
 import { MCP } from "../mcp"
 import { LSP } from "../lsp"
 import { FileTime } from "../file/time"
-import { Flag } from "../flag/flag"
 import { ulid } from "ulid"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
@@ -44,11 +41,12 @@ import { Truncate } from "@/tool/truncate"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
-import { SessionRetry } from "./retry"
 import * as HistoryCache from "./history-cache"
+import { insertReminders } from "./prompt-reminders"
+import { handleSubtask } from "./subtask-handler"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
-import { TaskTool } from "@/tool/task"
+import { SessionRunState } from "./run-state"
 import { SessionRunState } from "./run-state"
 
 // @ts-ignore
@@ -204,149 +202,6 @@ export namespace SessionPrompt {
               Effect.sync(() => log.error("failed to generate title", { error: Cause.squash(cause) })),
             ),
           )
-      })
-
-      const insertReminders = Effect.fn("SessionPrompt.insertReminders")(function* (input: {
-        messages: MessageV2.WithParts[]
-        agent: Agent.Info
-        session: Session.Info
-      }) {
-        let changed = false
-        const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
-        if (!userMessage) return { messages: input.messages, changed }
-
-        if (!Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE) {
-          if (input.agent.name === "plan") {
-            userMessage.parts.push({
-              id: PartID.ascending(),
-              messageID: userMessage.info.id,
-              sessionID: userMessage.info.sessionID,
-              type: "text",
-              text: PROMPT_PLAN,
-              synthetic: true,
-            })
-            changed = true
-          }
-          const wasPlan = input.messages.some((msg) => msg.info.role === "assistant" && msg.info.agent === "plan")
-          if (wasPlan && input.agent.name === "build") {
-            userMessage.parts.push({
-              id: PartID.ascending(),
-              messageID: userMessage.info.id,
-              sessionID: userMessage.info.sessionID,
-              type: "text",
-              text: BUILD_SWITCH,
-              synthetic: true,
-            })
-            changed = true
-          }
-          return { messages: input.messages, changed }
-        }
-
-        const assistantMessage = input.messages.findLast((msg) => msg.info.role === "assistant")
-        if (input.agent.name !== "plan" && assistantMessage?.info.agent === "plan") {
-          const plan = Session.plan(input.session)
-          if (!(yield* fsys.existsSafe(plan))) return { messages: input.messages, changed }
-          const part = yield* sessions.updatePart({
-            id: PartID.ascending(),
-            messageID: userMessage.info.id,
-            sessionID: userMessage.info.sessionID,
-            type: "text",
-            text:
-              BUILD_SWITCH + "\n\n" + `A plan file exists at ${plan}. You should execute on the plan defined within it`,
-            synthetic: true,
-          })
-          userMessage.parts.push(part)
-          changed = true
-          return { messages: input.messages, changed }
-        }
-
-        if (input.agent.name !== "plan" || assistantMessage?.info.agent === "plan") {
-          return { messages: input.messages, changed }
-        }
-
-        const plan = Session.plan(input.session)
-        const exists = yield* fsys.existsSafe(plan)
-        if (!exists) yield* fsys.ensureDir(path.dirname(plan)).pipe(Effect.catch(Effect.die))
-        const part = yield* sessions.updatePart({
-          id: PartID.ascending(),
-          messageID: userMessage.info.id,
-          sessionID: userMessage.info.sessionID,
-          type: "text",
-          text: `<system-reminder>
-Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
-
-## Plan File Info:
-${exists ? `A plan file already exists at ${plan}. You can read it and make incremental edits using the edit tool.` : `No plan file exists yet. You should create your plan at ${plan} using the write tool.`}
-You should build your plan incrementally by writing to or editing this file. NOTE that this is the only file you are allowed to edit - other than this you are only allowed to take READ-ONLY actions.
-
-## Plan Workflow
-
-### Phase 1: Initial Understanding
-Goal: Gain a comprehensive understanding of the user's request by reading through code and asking them questions. Critical: In this phase you should only use the explore subagent type.
-
-1. Focus on understanding the user's request and the code associated with their request
-
-2. **Launch up to 3 explore agents IN PARALLEL** (single message, multiple tool calls) to efficiently explore the codebase.
-   - Use 1 agent when the task is isolated to known files, the user provided specific file paths, or you're making a small targeted change.
-   - Use multiple agents when: the scope is uncertain, multiple areas of the codebase are involved, or you need to understand existing patterns before planning.
-   - Quality over quantity - 3 agents maximum, but you should try to use the minimum number of agents necessary (usually just 1)
-   - If using multiple agents: Provide each agent with a specific search focus or area to explore. Example: One agent searches for existing implementations, another explores related components, a third investigates testing patterns
-
-3. After exploring the code, use the question tool to clarify ambiguities in the user request up front.
-
-### Phase 2: Design
-Goal: Design an implementation approach.
-
-Launch general agent(s) to design the implementation based on the user's intent and your exploration results from Phase 1.
-
-You can launch up to 1 agent(s) in parallel.
-
-**Guidelines:**
-- **Default**: Launch at least 1 Plan agent for most tasks - it helps validate your understanding and consider alternatives
-- **Skip agents**: Only for truly trivial tasks (typo fixes, single-line changes, simple renames)
-
-Examples of when to use multiple agents:
-- The task touches multiple parts of the codebase
-- It's a large refactor or architectural change
-- There are many edge cases to consider
-- You'd benefit from exploring different approaches
-
-Example perspectives by task type:
-- New feature: simplicity vs performance vs maintainability
-- Bug fix: root cause vs workaround vs prevention
-- Refactoring: minimal change vs clean architecture
-
-In the agent prompt:
-- Provide comprehensive background context from Phase 1 exploration including filenames and code path traces
-- Describe requirements and constraints
-- Request a detailed implementation plan
-
-### Phase 3: Review
-Goal: Review the plan(s) from Phase 2 and ensure alignment with the user's intentions.
-1. Read the critical files identified by agents to deepen your understanding
-2. Ensure that the plans align with the user's original request
-3. Use question tool to clarify any remaining questions with the user
-
-### Phase 4: Final Plan
-Goal: Write your final plan to the plan file (the only file you can edit).
-- Include only your recommended approach, not all alternatives
-- Ensure that the plan file is concise enough to scan quickly, but detailed enough to execute effectively
-- Include the paths of critical files to be modified
-- Include a verification section describing how to test the changes end-to-end (run the code, use MCP tools, run tests)
-
-### Phase 5: Call plan_exit tool
-At the very end of your turn, once you have asked the user questions and are happy with your final plan file - you should always call plan_exit to indicate to the user that you are done planning.
-This is critical - your turn should only end with either asking the user a question or calling plan_exit. Do not stop unless it's for these 2 reasons.
-
-**Important:** Use question tool to clarify requirements/approach, use plan_exit to request plan approval. Do NOT use question tool to ask "Is this plan okay?" - that's what plan_exit does.
-
-NOTE: At any point in time through this workflow you should feel free to ask the user questions or clarifications. Don't make large assumptions about user intent. The goal is to present a well researched plan to the user, and tie any loose ends before implementation begins.
-</system-reminder>`,
-          synthetic: true,
-        })
-        userMessage.parts.push(part)
-        changed = true
-        return { messages: input.messages, changed }
       })
 
       const resolveTools = Effect.fn("SessionPrompt.resolveTools")(function* (input: {
@@ -523,215 +378,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
 
         return { tools, toolMeta }
-      })
-
-      const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
-        task: MessageV2.SubtaskPart
-        model: Provider.Model
-        lastUser: MessageV2.User
-        sessionID: SessionID
-        session: Session.Info
-        msgs: MessageV2.WithParts[]
-      }) {
-        const { task, model, lastUser, sessionID, session, msgs } = input
-        const ctx = yield* InstanceState.context
-        const taskTool = yield* registry.named.task()
-        const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID) : model
-        const assistantMessage: MessageV2.Assistant = yield* sessions.updateMessage({
-          id: MessageID.ascending(),
-          role: "assistant",
-          parentID: lastUser.id,
-          sessionID,
-          mode: task.agent,
-          agent: task.agent,
-          variant: lastUser.model.variant,
-          path: { cwd: ctx.directory, root: ctx.worktree },
-          cost: 0,
-          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-          modelID: taskModel.id,
-          providerID: taskModel.providerID,
-          time: { created: Date.now() },
-        })
-        let part: MessageV2.ToolPart = yield* sessions.updatePart({
-          id: PartID.ascending(),
-          messageID: assistantMessage.id,
-          sessionID: assistantMessage.sessionID,
-          type: "tool",
-          callID: ulid(),
-          tool: TaskTool.id,
-          state: {
-            status: "running",
-            input: {
-              prompt: task.prompt,
-              description: task.description,
-              subagent_type: task.agent,
-              command: task.command,
-            },
-            time: { start: Date.now() },
-          },
-        })
-        const taskArgs = {
-          prompt: task.prompt,
-          description: task.description,
-          subagent_type: task.agent,
-          command: task.command,
-        }
-        yield* plugin.trigger(
-          "tool.execute.before",
-          { tool: TaskTool.id, sessionID, callID: part.id },
-          { args: taskArgs },
-        )
-
-        const taskAgent = yield* agents.get(task.agent)
-        if (!taskAgent) {
-          const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
-          const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
-          const error = new NamedError.Unknown({ message: `Agent not found: "${task.agent}".${hint}` })
-          yield* bus.publish(Session.Event.Error, { sessionID, error: error.toObject() })
-          throw error
-        }
-
-        type TaskResult = Awaited<ReturnType<typeof taskTool.execute>>
-
-        let error: Error | undefined
-        const result: TaskResult | undefined = yield* Effect.tryPromise({
-          try: (signal) =>
-            taskTool.execute(taskArgs, {
-              agent: task.agent,
-              messageID: assistantMessage.id,
-              sessionID,
-              abort: signal,
-              callID: part.callID,
-              extra: { bypassAgentCheck: true },
-              messages: msgs,
-              metadata(val: { title?: string; metadata?: Record<string, any> }) {
-                return Effect.runPromise(
-                  Effect.gen(function* () {
-                    part = yield* sessions.updatePart({
-                      ...part,
-                      type: "tool",
-                      state: { ...part.state, ...val },
-                    } satisfies MessageV2.ToolPart)
-                  }),
-                )
-              },
-              ask(req: any) {
-                return Effect.runPromise(
-                  permission.ask({
-                    ...req,
-                    sessionID,
-                    ruleset: Permission.merge(taskAgent.permission, session.permission ?? []),
-                  }),
-                )
-              },
-            }),
-          catch: (e) => e,
-        }).pipe(
-          Effect.retry(
-            SessionRetry.policy({
-              parse: (e) => MessageV2.fromError(e, { providerID: taskModel.providerID }),
-              set: (info) =>
-                status.set(sessionID, {
-                  type: "retry",
-                  attempt: info.attempt,
-                  message: info.message,
-                  next: info.next,
-                }),
-            }),
-          ),
-          Effect.catch((e) => {
-            error = e instanceof Error ? e : new Error(String(e))
-            log.error("subtask execution failed", { error, agent: task.agent, description: task.description })
-            return Effect.succeed(undefined as TaskResult | undefined)
-          }),
-          Effect.onInterrupt(() =>
-            Effect.gen(function* () {
-              assistantMessage.finish = "tool-calls"
-              assistantMessage.time.completed = Date.now()
-              yield* sessions.updateMessage(assistantMessage)
-              if (part.state.status === "running") {
-                yield* sessions.updatePart({
-                  ...part,
-                  state: {
-                    status: "error",
-                    error: "Cancelled",
-                    time: { start: part.state.time.start, end: Date.now() },
-                    metadata: part.state.metadata,
-                    input: part.state.input,
-                  },
-                } satisfies MessageV2.ToolPart)
-              }
-            }),
-          ),
-        )
-
-        const attachments = result?.attachments?.map((attachment) => ({
-          ...attachment,
-          id: PartID.ascending(),
-          sessionID,
-          messageID: assistantMessage.id,
-        }))
-
-        yield* plugin.trigger(
-          "tool.execute.after",
-          { tool: TaskTool.id, sessionID, callID: part.id, args: taskArgs },
-          result,
-        )
-
-        assistantMessage.finish = "tool-calls"
-        assistantMessage.time.completed = Date.now()
-        yield* sessions.updateMessage(assistantMessage)
-
-        if (result && part.state.status === "running") {
-          yield* sessions.updatePart({
-            ...part,
-            state: {
-              status: "completed",
-              input: part.state.input,
-              title: result.title,
-              metadata: result.metadata,
-              output: result.output,
-              attachments,
-              time: { ...part.state.time, end: Date.now() },
-            },
-          } satisfies MessageV2.ToolPart)
-        }
-
-        if (!result) {
-          yield* sessions.updatePart({
-            ...part,
-            state: {
-              status: "error",
-              error: error ? `Tool execution failed: ${error.message}` : "Tool execution failed",
-              time: {
-                start: part.state.status === "running" ? part.state.time.start : Date.now(),
-                end: Date.now(),
-              },
-              metadata: part.state.status === "pending" ? undefined : part.state.metadata,
-              input: part.state.input,
-            },
-          } satisfies MessageV2.ToolPart)
-        }
-
-        if (!task.command) return
-
-        const summaryUserMsg: MessageV2.User = {
-          id: MessageID.ascending(),
-          sessionID,
-          role: "user",
-          time: { created: Date.now() },
-          agent: lastUser.agent,
-          model: lastUser.model,
-        }
-        yield* sessions.updateMessage(summaryUserMsg)
-        yield* sessions.updatePart({
-          id: PartID.ascending(),
-          messageID: summaryUserMsg.id,
-          sessionID,
-          type: "text",
-          text: "Summarize the task tool output above and continue with your task.",
-          synthetic: true,
-        } satisfies MessageV2.TextPart)
       })
 
       const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput) {
@@ -1493,7 +1139,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const task = tasks.pop()
 
             if (task?.type === "subtask") {
-              yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs })
+              yield* handleSubtask(
+                { sessions, agents, registry, plugin, permission, bus, status, getModel },
+                { task, model, lastUser, sessionID, session, msgs },
+              )
               continue
             }
 
@@ -1532,7 +1181,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               log.info("exiting loop at max agent steps", { sessionID, step, maxSteps })
               break
             }
-            const reminderResult = yield* insertReminders({ messages: msgs, agent, session })
+            const reminderResult = yield* insertReminders({ sessions, fsys }, { messages: msgs, agent, session })
             msgs = reminderResult.messages
             let messagesChanged = reminderResult.changed
 
