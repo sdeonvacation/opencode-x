@@ -22,7 +22,7 @@ describe("createGotoCommand", () => {
       dialog,
       toast: { show },
       sdk: { changeDirectory },
-      sync: { data: { path: { directory: "/cwd" } } },
+      sync: { path: { directory: "/cwd" } },
     }
     const command = createGotoCommand(deps)
 
@@ -49,7 +49,7 @@ describe("createGotoCommand", () => {
       dialog,
       toast: { show },
       sdk: { changeDirectory },
-      sync: { data: { path: { directory: "/cwd" } } },
+      sync: { path: { directory: "/cwd" } },
     }
     const command = createGotoCommand(deps)
 

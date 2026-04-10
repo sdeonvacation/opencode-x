@@ -1,11 +1,11 @@
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
-import type { GlobalEvent, Event } from "@opencode-ai/sdk/v2"
+import type { GlobalEvent } from "@opencode-ai/sdk/v2"
 import { createSimpleContext } from "./helper"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { batch, onCleanup, onMount } from "solid-js"
 
 export type EventSource = {
-  subscribe: (directory: string | undefined, handler: (event: Event) => void) => Promise<() => void>
+  subscribe: (directory: string | undefined, handler: (event: GlobalEvent) => void) => Promise<() => void>
   setWorkspace?: (workspaceID?: string) => void
   changeDirectory?: (directory: string) => Promise<void>
 }
@@ -90,7 +90,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
 
     onMount(async () => {
       if (props.events) {
-        const unsub = await props.events.subscribe(handleEvent)
+        const unsub = await props.events.subscribe(currentDirectory, handleEvent)
         onCleanup(unsub)
       } else {
         startSSE()

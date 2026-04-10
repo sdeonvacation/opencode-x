@@ -43,7 +43,7 @@ function createWorkerFetch(client: RpcClient): typeof fetch {
 
 function createEventSource(client: RpcClient): EventSource {
   return {
-    subscribe: async (handler) => {
+    subscribe: async (directory, handler) => {
       return client.on<GlobalEvent>("global.event", (e) => {
         handler(e)
       })

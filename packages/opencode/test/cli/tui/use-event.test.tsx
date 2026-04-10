@@ -46,7 +46,7 @@ function createSource() {
 
   return {
     source: {
-      subscribe: async (handler: (event: GlobalEvent) => void) => {
+      subscribe: async (_directory: string | undefined, handler: (event: GlobalEvent) => void) => {
         fn = handler
         return () => {
           if (fn === handler) fn = undefined

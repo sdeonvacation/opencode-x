@@ -14,6 +14,7 @@ import {
   ErrorBoundary,
   createSignal,
   onMount,
+  onCleanup,
   batch,
   Show,
   on,
@@ -719,7 +720,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     },
   ])
 
-  const off = setupAppEventListeners({ sdk, route, command, toast, dialog, kv, exit })
+  const off = setupAppEventListeners({ sdk: { event, client: sdk.client }, route, command, toast, dialog, kv, exit })
   onCleanup(() => off.forEach((fn) => fn()))
 
   const plugin = createMemo(() => {

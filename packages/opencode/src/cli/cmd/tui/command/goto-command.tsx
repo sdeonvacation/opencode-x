@@ -11,10 +11,8 @@ export type GotoCommandDeps = {
   }
   toast: Pick<ToastContext, "show">
   sync: {
-    data: {
-      path: {
-        directory?: string
-      }
+    path: {
+      directory?: string
     }
   }
 }
@@ -30,7 +28,7 @@ export function createGotoCommand(deps: GotoCommandDeps): CommandOption {
     onSelect: async () => {
       const path = await DialogPrompt.show(deps.dialog, "Change directory", {
         placeholder: "Enter path...",
-        value: deps.sync.data.path.directory || process.cwd(),
+        value: deps.sync.path.directory || process.cwd(),
       })
       deps.dialog.clear()
       if (!path) return
