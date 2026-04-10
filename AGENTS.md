@@ -3,6 +3,77 @@
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 - Prefer automation: execute requested actions without confirmation unless blocked by missing info or safety/irreversibility.
+- **[CRITICAL]** All changes to source code must be upstream-rebase safe: surgical edits only, minimum required changes to upstream files, no broad refactors.
+
+## Commands
+
+```bash
+# Install dependencies (from repo root)
+bun install
+
+# Dev server (TUI/CLI)
+bun run dev                         # from repo root
+bun run --cwd packages/opencode dev # from any dir
+
+# Build
+bun --cwd packages/opencode run build
+
+# Run ALL tests (must be run from packages/opencode, NOT repo root)
+bun --cwd packages/opencode test --timeout 30000
+
+# Run a single test file
+bun --cwd packages/opencode test test/tool/task.test.ts
+
+# Type check (uses tsgo, NOT tsc)
+bun --cwd packages/opencode typecheck
+
+# Regenerate JS SDK
+./packages/sdk/js/script/build.ts
+
+# Database migrations
+bun --cwd packages/opencode db <drizzle-kit-cmd>
+```
+
+> ⚠️ `bun test` from repo root always fails (guard). Always run from `packages/opencode`.
+
+## Project Structure
+
+```
+packages/
+  opencode/
+    src/
+      tool/          # All tool definitions (bash, read, edit, task, registry…)
+      session/       # Session lifecycle, prompt, message processing
+      agent/         # Agent definitions and routing
+      orchestration/ # Task spawning, model resolver
+      cli/cmd/tui/   # TUI (Solid-based terminal UI via @opentui)
+        app.tsx      # Root app component
+        thread.ts    # SDK thread/EventSource impl
+        worker.ts    # Worker RPC (changeDirectory, etc.)
+        context/     # Solid contexts (sdk, sync, event…)
+        command/     # Slash commands (clear, goto, btw…)
+        effect/      # Side-effect helpers (app-event-listeners…)
+      provider/      # AI provider wrappers (Anthropic, OpenAI, etc.)
+      storage/       # SQLite via Drizzle (db.bun.ts / db.node.ts)
+      effect/        # Effect-ts infrastructure (InstanceState, run-service…)
+      config/        # Config loading
+      lsp/           # LSP integration
+      mcp/           # MCP protocol
+      skill/         # Skill loading
+    test/            # Mirror of src/ structure
+      fixture/       # tmpdir() fixture helper
+```
+
+## Tech Stack
+
+- **Runtime**: Bun (1.3.11)
+- **Language**: TypeScript 5.8, type-checked via `tsgo` (not `tsc`)
+- **Framework**: Effect-ts (`effect` 4.0.0-beta) for service/layer wiring
+- **TUI**: `@opentui/core` + `@opentui/solid` (Solid.js-based terminal UI)
+- **AI SDK**: Vercel AI SDK (`ai` 6.x) with per-provider packages
+- **Database**: SQLite via `drizzle-orm` + `bun:sqlite`
+- **Monorepo**: Turborepo + Bun workspaces
+- **Testing**: `bun test` (built-in)
 
 ## Style Guide
 
