@@ -1,6 +1,7 @@
-import { Deferred, Effect, Layer, Schema, ServiceMap } from "effect"
+import { Deferred, Duration, Effect, Layer, Option as Opt, Schema, ServiceMap } from "effect"
 import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
+import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { SessionID, MessageID } from "@/session/schema"
@@ -10,6 +11,7 @@ import { QuestionID } from "./schema"
 
 export namespace Question {
   const log = Log.create({ service: "question" })
+  const ASK_TIMEOUT = 900_000
 
   // Schemas
 
@@ -110,6 +112,7 @@ export namespace Question {
     Service,
     Effect.gen(function* () {
       const bus = yield* Bus.Service
+      const cfgSvc = yield* Config.Service
       const state = yield* InstanceState.make<State>(
         Effect.fn("Question.state")(function* () {
           const state = {
@@ -149,10 +152,18 @@ export namespace Question {
         yield* bus.publish(Event.Asked, info)
 
         return yield* Effect.ensuring(
-          Deferred.await(deferred),
-          Effect.sync(() => {
-            pending.delete(id)
+          Effect.gen(function* () {
+            const cfg = yield* cfgSvc.get()
+            const timeout = cfg.experimental?.question_ask_timeout ?? ASK_TIMEOUT
+            return yield* Deferred.await(deferred).pipe(
+              Effect.timeoutOption(Duration.millis(timeout)),
+              Effect.flatMap((opt) => {
+                if (Opt.isSome(opt)) return Effect.succeed(opt.value)
+                return Effect.fail(new RejectedError())
+              }),
+            )
           }),
+          Effect.sync(() => pending.delete(id)),
         )
       })
 
@@ -198,7 +209,7 @@ export namespace Question {
     }),
   )
 
-  export const defaultLayer = layer.pipe(Layer.provide(Bus.layer))
+  export const defaultLayer = layer.pipe(Layer.provide(Bus.layer), Layer.provide(Config.defaultLayer))
 
   const { runPromise } = makeRuntime(Service, defaultLayer)
 

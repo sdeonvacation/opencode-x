@@ -10,7 +10,7 @@ import { PermissionTable } from "@/session/session.sql"
 import { Database, eq } from "@/storage/db"
 import { Log } from "@/util/log"
 import { Wildcard } from "@/util/wildcard"
-import { Deferred, Effect, Layer, Schema, ServiceMap } from "effect"
+import { Deferred, Duration, Effect, Layer, Option, Schema, ServiceMap } from "effect"
 import os from "os"
 import z from "zod"
 import { evaluate as evalRule } from "./evaluate"
@@ -18,6 +18,7 @@ import { PermissionID } from "./schema"
 
 export namespace Permission {
   const log = Log.create({ service: "permission" })
+  const ASK_TIMEOUT = 300_000
 
   export const Action = z.enum(["allow", "deny", "ask"]).meta({
     ref: "PermissionAction",
@@ -141,6 +142,7 @@ export namespace Permission {
     Service,
     Effect.gen(function* () {
       const bus = yield* Bus.Service
+      const cfgSvc = yield* Config.Service
       const state = yield* InstanceState.make<State>(
         Effect.fn("Permission.state")(function* (ctx) {
           const row = Database.use((db) =>
@@ -194,10 +196,18 @@ export namespace Permission {
         pending.set(id, { info, deferred })
         yield* bus.publish(Event.Asked, info)
         return yield* Effect.ensuring(
-          Deferred.await(deferred),
-          Effect.sync(() => {
-            pending.delete(id)
+          Effect.gen(function* () {
+            const cfg = yield* cfgSvc.get()
+            const timeout = cfg.experimental?.permission_ask_timeout ?? ASK_TIMEOUT
+            return yield* Deferred.await(deferred).pipe(
+              Effect.timeoutOption(Duration.millis(timeout)),
+              Effect.flatMap((opt) => {
+                if (Option.isSome(opt)) return Effect.succeed(opt.value)
+                return Effect.fail(new RejectedError())
+              }),
+            )
           }),
+          Effect.sync(() => pending.delete(id)),
         )
       })
 
@@ -307,7 +317,10 @@ export namespace Permission {
     return result
   }
 
-  export const defaultLayer = layer.pipe(Layer.provide(Bus.layer))
+  export const defaultLayer: Layer.Layer<Service> = layer.pipe(
+    Layer.provide(Bus.layer),
+    Layer.provide(Config.defaultLayer),
+  )
 
   export const { runPromise } = makeRuntime(Service, defaultLayer)
 
