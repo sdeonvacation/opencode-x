@@ -9,7 +9,7 @@ import { Session } from "."
 import { Agent } from "../agent/agent"
 import { Provider } from "../provider/provider"
 import { ModelID, ProviderID } from "../provider/schema"
-import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
+import { type ModelMessage, type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
 import { SessionCompaction } from "./compaction"
 import { Bus } from "../bus"
 import { ProviderTransform } from "../provider/transform"
@@ -18,6 +18,7 @@ import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
 import { ToolRegistry } from "../tool/registry"
+import { Runner } from "@/effect/runner"
 import { MCP } from "../mcp"
 import { LSP } from "../lsp"
 import { FileTime } from "../file/time"
@@ -41,11 +42,11 @@ import { Truncate } from "@/tool/truncate"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
+import * as HistoryCache from "./history-cache"
+import { insertReminders } from "./prompt-reminders"
+import { handleSubtask } from "./subtask-handler"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
-import { insertReminders } from "./prompt-reminders"
-import { SessionRunState } from "./run-state"
-import { handleSubtask } from "./subtask-handler"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -64,8 +65,10 @@ export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
 
   export interface Interface {
+    readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
     readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
     readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
+    readonly complete: (input: CompleteInput) => Effect.Effect<MessageV2.WithParts>
     readonly loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>
     readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
     readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
@@ -96,12 +99,55 @@ export namespace SessionPrompt {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const scope = yield* Scope.Scope
       const instruction = yield* Instruction.Service
-      const state = yield* SessionRunState.Service
-      const revert = yield* SessionRevert.Service
+
+      const state = yield* InstanceState.make(
+        Effect.fn("SessionPrompt.state")(function* () {
+          const runners = new Map<string, Runner<MessageV2.WithParts>>()
+          yield* Effect.addFinalizer(
+            Effect.fnUntraced(function* () {
+              yield* Effect.forEach(runners.values(), (r) => r.cancel, { concurrency: "unbounded", discard: true })
+              runners.clear()
+            }),
+          )
+          return { runners }
+        }),
+      )
+
+      const getRunner = (runners: Map<string, Runner<MessageV2.WithParts>>, sessionID: SessionID) => {
+        const existing = runners.get(sessionID)
+        if (existing) return existing
+        const runner = Runner.make<MessageV2.WithParts>(scope, {
+          onIdle: Effect.gen(function* () {
+            runners.delete(sessionID)
+            yield* status.set(sessionID, { type: "idle" })
+          }),
+          onBusy: status.set(sessionID, { type: "busy" }),
+          onInterrupt: lastAssistant(sessionID),
+          busy: () => {
+            throw new Session.BusyError(sessionID)
+          },
+        })
+        runners.set(sessionID, runner)
+        return runner
+      }
+
+      const assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError> = Effect.fn(
+        "SessionPrompt.assertNotBusy",
+      )(function* (sessionID: SessionID) {
+        const s = yield* InstanceState.get(state)
+        const runner = s.runners.get(sessionID)
+        if (runner?.busy) throw new Session.BusyError(sessionID)
+      })
 
       const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
         log.info("cancel", { sessionID })
-        yield* state.cancel(sessionID)
+        const s = yield* InstanceState.get(state)
+        const runner = s.runners.get(sessionID)
+        if (!runner || !runner.busy) {
+          yield* status.set(sessionID, { type: "idle" })
+          return
+        }
+        yield* runner.cancel
       })
 
       const resolvePromptParts = Effect.fn("SessionPrompt.resolvePromptParts")(function* (template: string) {
@@ -206,12 +252,13 @@ export namespace SessionPrompt {
         model: Provider.Model
         session: Session.Info
         tools?: Record<string, boolean>
-        processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
+        processor: Pick<SessionProcessor.Handle, "message" | "partFromToolCall">
         bypassAgentCheck: boolean
         messages: MessageV2.WithParts[]
       }) {
         using _ = log.time("resolveTools")
         const tools: Record<string, AITool> = {}
+        const toolMeta = new Map<string, LLM.ToolMeta>()
 
         const context = (args: any, options: ToolExecutionOptions): Tool.Context => ({
           sessionID: input.session.id,
@@ -223,18 +270,20 @@ export namespace SessionPrompt {
           messages: input.messages,
           metadata: (val) =>
             Effect.runPromise(
-              input.processor.updateToolCall(options.toolCallId, (match) => {
-                if (!["running", "pending"].includes(match.state.status)) return match
-                return {
+              Effect.gen(function* () {
+                const match = input.processor.partFromToolCall(options.toolCallId)
+                if (!match || !["running", "pending"].includes(match.state.status)) return
+                const start = match.state.status === "running" ? match.state.time.start : Date.now()
+                yield* sessions.updatePart({
                   ...match,
                   state: {
                     title: val.title,
                     metadata: val.metadata,
                     status: "running",
                     input: args,
-                    time: { start: Date.now() },
+                    time: { start },
                   },
-                }
+                })
               }),
             ),
           ask: (req) =>
@@ -254,6 +303,7 @@ export namespace SessionPrompt {
           agent: input.agent,
         })) {
           const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
+          toolMeta.set(item.id, { parallelSafe: item.parallelSafe === true })
           tools[item.id] = tool({
             id: item.id as any,
             description: item.description,
@@ -282,9 +332,6 @@ export namespace SessionPrompt {
                     { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args },
                     output,
                   )
-                  if (options.abortSignal?.aborted) {
-                    yield* input.processor.completeToolCall(options.toolCallId, output)
-                  }
                   return output
                 }),
               )
@@ -349,7 +396,7 @@ export namespace SessionPrompt {
                   ...(truncated.truncated && { outputPath: truncated.outputPath }),
                 }
 
-                const output = {
+                return {
                   title: "",
                   metadata,
                   output: truncated.content,
@@ -361,23 +408,20 @@ export namespace SessionPrompt {
                   })),
                   content: result.content,
                 }
-                if (opts.abortSignal?.aborted) {
-                  yield* input.processor.completeToolCall(opts.toolCallId, output)
-                }
-                return output
               }),
             )
+          toolMeta.set(key, { parallelSafe: false })
           tools[key] = item
         }
 
-        return tools
+        return { tools, toolMeta }
       })
 
       const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput) {
         const ctx = yield* InstanceState.context
         const session = yield* sessions.get(input.sessionID)
         if (session.revert) {
-          yield* revert.cleanup(session)
+          yield* Effect.promise(() => SessionRevert.cleanup(session))
         }
         const agent = yield* agents.get(input.agent)
         if (!agent) {
@@ -579,7 +623,11 @@ export namespace SessionPrompt {
         return yield* provider.defaultModel()
       })
 
-      const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: PromptInput) {
+      const createUserMessage: (
+        input: PromptInput,
+      ) => Effect.Effect<{ info: MessageV2.User; parts: MessageV2.Part[] }> = Effect.fn(
+        "SessionPrompt.createUserMessage",
+      )(function* (input: PromptInput) {
         const agentName = input.agent || (yield* agents.defaultAgent())
         const ag = yield* agents.get(agentName)
         if (!ag) {
@@ -688,7 +736,7 @@ export namespace SessionPrompt {
                       sessionID: input.sessionID,
                       type: "text",
                       synthetic: true,
-                      text: `Called the Read tool with the following input: ${JSON.stringify({ filePath: part.filename })}`,
+                      text: `Read input: ${JSON.stringify({ filePath: part.filename })}`,
                     },
                     {
                       messageID: info.id,
@@ -706,9 +754,11 @@ export namespace SessionPrompt {
                 const filepath = fileURLToPath(part.url)
                 if (yield* fsys.isDir(filepath)) part.mime = "application/x-directory"
 
-                const { read } = yield* registry.named()
-                const execRead = (args: Parameters<typeof read.execute>[0], extra?: Tool.Context["extra"]) =>
-                  Effect.promise((signal: AbortSignal) =>
+                const read = yield* registry.named.read()
+                type ReadArgs = z.infer<typeof read.parameters>
+                type ReadResult = Awaited<ReturnType<typeof read.execute>>
+                const execRead = (args: ReadArgs, extra?: Tool.Context["extra"]) =>
+                  Effect.promise<ReadResult>((signal: AbortSignal) =>
                     read.execute(args, {
                       sessionID: input.sessionID,
                       abort: signal,
@@ -754,7 +804,7 @@ export namespace SessionPrompt {
                       sessionID: input.sessionID,
                       type: "text",
                       synthetic: true,
-                      text: `Called the Read tool with the following input: ${JSON.stringify(args)}`,
+                      text: `Read input: ${JSON.stringify(args)}`,
                     },
                   ]
                   const exit = yield* provider.getModel(info.model.providerID, info.model.modelID).pipe(
@@ -829,7 +879,7 @@ export namespace SessionPrompt {
                       sessionID: input.sessionID,
                       type: "text",
                       synthetic: true,
-                      text: `Called the Read tool with the following input: ${JSON.stringify(args)}`,
+                      text: `Read input: ${JSON.stringify(args)}`,
                     },
                     {
                       messageID: info.id,
@@ -849,7 +899,7 @@ export namespace SessionPrompt {
                     sessionID: input.sessionID,
                     type: "text",
                     synthetic: true,
-                    text: `Called the Read tool with the following input: {"filePath":"${filepath}"}`,
+                    text: `Read input: {"filePath":"${filepath}"}`,
                   },
                   {
                     id: part.id,
@@ -938,7 +988,7 @@ export namespace SessionPrompt {
       const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.prompt")(
         function* (input: PromptInput) {
           const session = yield* sessions.get(input.sessionID)
-          yield* revert.cleanup(session)
+          yield* Effect.promise(() => SessionRevert.cleanup(session))
           const message = yield* createUserMessage(input)
           yield* sessions.touch(input.sessionID)
 
@@ -956,6 +1006,92 @@ export namespace SessionPrompt {
         },
       )
 
+      const complete: (input: CompleteInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn(
+        "SessionPrompt.complete",
+      )(function* (input: CompleteInput) {
+        const s = yield* InstanceState.get(state)
+        const runner = getRunner(s.runners, input.sessionID)
+        return yield* runner.ensureRunning(
+          Effect.gen(function* () {
+            const session = yield* sessions.get(input.sessionID)
+            yield* Effect.promise(() => SessionRevert.cleanup(session))
+
+            const model = yield* Effect.gen(function* () {
+              if (input.model) return yield* getModel(input.model.providerID, input.model.modelID, input.sessionID)
+              const base = yield* lastModel(input.sessionID)
+              if (!(input.small ?? true)) return yield* getModel(base.providerID, base.modelID, input.sessionID)
+              const small = yield* Effect.promise(() => Provider.getSmallModel(base.providerID))
+              if (small) return small
+              return yield* getModel(base.providerID, base.modelID, input.sessionID)
+            })
+
+            const user = yield* createUserMessage({
+              sessionID: input.sessionID,
+              model: { providerID: model.providerID, modelID: model.id },
+              parts: input.parts,
+            })
+            yield* sessions.touch(input.sessionID)
+
+            const agent = yield* agents.get(user.info.agent)
+            if (!agent) {
+              const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
+              const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
+              const error = new NamedError.Unknown({ message: `Agent not found: "${user.info.agent}".${hint}` })
+              yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+              throw error
+            }
+
+            const ctx = yield* InstanceState.context
+            const msg: MessageV2.Assistant = {
+              id: MessageID.ascending(),
+              parentID: user.info.id,
+              role: "assistant",
+              mode: agent.name,
+              agent: agent.name,
+              variant: user.info.model.variant,
+              path: { cwd: ctx.directory, root: ctx.worktree },
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              modelID: model.id,
+              providerID: model.providerID,
+              time: { created: Date.now() },
+              sessionID: input.sessionID,
+            }
+            yield* sessions.updateMessage(msg)
+
+            const handle = yield* processor.create({
+              assistantMessage: msg,
+              sessionID: input.sessionID,
+              model,
+            })
+
+            const messages = MessageV2.filterCompacted(MessageV2.stream(input.sessionID))
+            const modelMessages = yield* Effect.promise(() => MessageV2.toModelMessages(messages, model))
+
+            yield* Effect.onExit(
+              handle.process({
+                user: user.info as MessageV2.User,
+                agent,
+                permission: session.permission,
+                sessionID: input.sessionID,
+                system: [],
+                messages: modelMessages,
+                tools: {},
+                model,
+                retries: 2,
+                small: input.small ?? true,
+              }),
+              () => instruction.clear(handle.message.id),
+            )
+
+            return {
+              info: handle.message,
+              parts: MessageV2.parts(handle.message.id),
+            }
+          }),
+        )
+      })
+
       const lastAssistant = (sessionID: SessionID) =>
         Effect.promise(async () => {
           let latest: MessageV2.WithParts | undefined
@@ -970,6 +1106,7 @@ export namespace SessionPrompt {
       const runLoop: (sessionID: SessionID) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(
         function* (sessionID: SessionID) {
           const ctx = yield* InstanceState.context
+          const historyCache = HistoryCache.create()
           let structured: unknown | undefined
           let step = 0
           const session = yield* sessions.get(sessionID)
@@ -978,7 +1115,18 @@ export namespace SessionPrompt {
             yield* status.set(sessionID, { type: "busy" })
             log.info("loop", { step, sessionID })
 
-            let msgs = yield* MessageV2.filterCompactedEffect(sessionID)
+            const didPrune = yield* compaction.prune({ sessionID }).pipe(Effect.orElseSucceed(() => false))
+            if (didPrune) historyCache.invalidate()
+
+            const modelRef = yield* lastModel(sessionID)
+            const model = yield* getModel(modelRef.providerID, modelRef.modelID, sessionID)
+            let msgs: MessageV2.WithParts[]
+            let cachedModelMessages: ModelMessage[]
+            {
+              const history = yield* historyCache.get({ sessionID, model })
+              msgs = history.messages
+              cachedModelMessages = history.modelMessages
+            }
 
             let lastUser: MessageV2.User | undefined
             let lastAssistant: MessageV2.Assistant | undefined
@@ -1025,7 +1173,6 @@ export namespace SessionPrompt {
                 history: msgs,
               }).pipe(Effect.ignore, Effect.forkIn(scope))
 
-            const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
             const task = tasks.pop()
 
             if (task?.type === "subtask") {
@@ -1067,7 +1214,13 @@ export namespace SessionPrompt {
             }
             const maxSteps = agent.steps ?? Infinity
             const isLastStep = step >= maxSteps
-            msgs = (yield* insertReminders({ sessions, fsys }, { messages: msgs, agent, session })).messages
+            if (isLastStep && lastAssistant?.parentID === lastUser.id && lastAssistant.id === lastFinished?.id) {
+              log.info("exiting loop at max agent steps", { sessionID, step, maxSteps })
+              break
+            }
+            const reminderResult = yield* insertReminders({ sessions, fsys }, { messages: msgs, agent, session })
+            msgs = reminderResult.messages
+            let messagesChanged = reminderResult.changed
 
             const msg: MessageV2.Assistant = {
               id: MessageID.ascending(),
@@ -1095,7 +1248,7 @@ export namespace SessionPrompt {
               const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
               const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
 
-              const tools = yield* resolveTools({
+              const resolvedTools = yield* resolveTools({
                 agent,
                 session,
                 model,
@@ -1104,6 +1257,7 @@ export namespace SessionPrompt {
                 bypassAgentCheck,
                 messages: msgs,
               })
+              const tools = { ...resolvedTools.tools }
 
               if (lastUser.format?.type === "json_schema") {
                 tools["StructuredOutput"] = createStructuredOutputTool({
@@ -1130,33 +1284,53 @@ export namespace SessionPrompt {
                       "Please address this message and continue with your tasks.",
                       "</system-reminder>",
                     ].join("\n")
+                    messagesChanged = true
                   }
                 }
               }
 
               yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+              const hooks = yield* plugin.list()
+              if (hooks.some((hook) => !!hook["experimental.chat.messages.transform"])) {
+                messagesChanged = true
+              }
 
-              const [skills, env, instructions, modelMsgs] = yield* Effect.all([
+              const [skills, env, instructions, initialModelMessages] = yield* Effect.all([
                 Effect.promise(() => SystemPrompt.skills(agent)),
                 Effect.promise(() => SystemPrompt.environment(model)),
                 instruction.system().pipe(Effect.orDie),
-                MessageV2.toModelMessagesEffect(msgs, model),
+                messagesChanged
+                  ? Effect.promise(() => MessageV2.toModelMessages(msgs, model))
+                  : Effect.succeed(cachedModelMessages),
               ])
+              let modelMsgs = initialModelMessages
+              cachedModelMessages = []
               const system = [...env, ...(skills ? [skills] : []), ...instructions]
               const format = lastUser.format ?? { type: "text" as const }
               if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
-              const result = yield* handle.process({
-                user: lastUser,
-                agent,
-                permission: session.permission,
-                sessionID,
-                parentSessionID: session.parentID,
-                system,
-                messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
-                tools,
-                model,
-                toolChoice: format.type === "json_schema" ? "required" : undefined,
-              })
+              const result = yield* handle
+                .process({
+                  user: lastUser,
+                  agent,
+                  permission: session.permission,
+                  sessionID,
+                  parentSessionID: session.parentID,
+                  system,
+                  messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
+                  tools,
+                  toolMeta: resolvedTools.toolMeta,
+                  model,
+                  toolChoice: format.type === "json_schema" ? "required" : undefined,
+                })
+                .pipe(
+                  Effect.ensuring(
+                    Effect.sync(() => {
+                      msgs = []
+                      modelMsgs = []
+                      cachedModelMessages = []
+                    }),
+                  ),
+                )
 
               if (structured !== undefined) {
                 handle.message.structured = structured
@@ -1192,8 +1366,6 @@ export namespace SessionPrompt {
             if (outcome === "break") break
             continue
           }
-
-          yield* compaction.prune({ sessionID }).pipe(Effect.ignore, Effect.forkIn(scope))
           return yield* lastAssistant(sessionID)
         },
       )
@@ -1201,12 +1373,16 @@ export namespace SessionPrompt {
       const loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts> = Effect.fn(
         "SessionPrompt.loop",
       )(function* (input: z.infer<typeof LoopInput>) {
-        return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
+        const s = yield* InstanceState.get(state)
+        const runner = getRunner(s.runners, input.sessionID)
+        return yield* runner.ensureRunning(runLoop(input.sessionID))
       })
 
       const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.shell")(
         function* (input: ShellInput) {
-          return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input))
+          const s = yield* InstanceState.get(state)
+          const runner = getRunner(s.runners, input.sessionID)
+          return yield* runner.startShell(shellImpl(input))
         },
       )
 
@@ -1327,8 +1503,10 @@ export namespace SessionPrompt {
       })
 
       return Service.of({
+        assertNotBusy,
         cancel,
         prompt,
+        complete,
         loop,
         shell,
         command,
@@ -1337,31 +1515,35 @@ export namespace SessionPrompt {
     }),
   )
 
-  const defaultLayer = Layer.suspend(() =>
-    layer.pipe(
-      Layer.provide(SessionRunState.defaultLayer),
-      Layer.provide(SessionStatus.defaultLayer),
-      Layer.provide(SessionCompaction.defaultLayer),
-      Layer.provide(SessionProcessor.defaultLayer),
-      Layer.provide(Command.defaultLayer),
-      Layer.provide(Permission.defaultLayer),
-      Layer.provide(MCP.defaultLayer),
-      Layer.provide(LSP.defaultLayer),
-      Layer.provide(FileTime.defaultLayer),
-      Layer.provide(ToolRegistry.defaultLayer),
-      Layer.provide(Truncate.defaultLayer),
-      Layer.provide(Provider.defaultLayer),
-      Layer.provide(Instruction.defaultLayer),
-      Layer.provide(AppFileSystem.defaultLayer),
-      Layer.provide(Plugin.defaultLayer),
-      Layer.provide(Session.defaultLayer),
-      Layer.provide(SessionRevert.defaultLayer),
-      Layer.provide(Agent.defaultLayer),
-      Layer.provide(Bus.layer),
-      Layer.provide(CrossSpawnSpawner.defaultLayer),
+  export const defaultLayer: Layer.Layer<Service> = Layer.unwrap(
+    Effect.sync(() =>
+      layer.pipe(
+        Layer.provide(SessionStatus.layer),
+        Layer.provide(SessionCompaction.defaultLayer),
+        Layer.provide(SessionProcessor.defaultLayer),
+        Layer.provide(Command.defaultLayer),
+        Layer.provide(Permission.defaultLayer),
+        Layer.provide(MCP.defaultLayer),
+        Layer.provide(LSP.defaultLayer),
+        Layer.provide(FileTime.defaultLayer),
+        Layer.provide(ToolRegistry.defaultLayer),
+        Layer.provide(Truncate.layer),
+        Layer.provide(Provider.defaultLayer),
+        Layer.provide(Instruction.defaultLayer),
+        Layer.provide(AppFileSystem.defaultLayer),
+        Layer.provide(Plugin.defaultLayer),
+        Layer.provide(Session.defaultLayer),
+        Layer.provide(Agent.defaultLayer),
+        Layer.provide(Bus.layer),
+        Layer.provide(CrossSpawnSpawner.defaultLayer),
+      ),
     ),
   )
   const { runPromise } = makeRuntime(Service, defaultLayer)
+
+  export async function assertNotBusy(sessionID: SessionID) {
+    return runPromise((svc) => svc.assertNotBusy(SessionID.zod.parse(sessionID)))
+  }
 
   export const PromptInput = z.object({
     sessionID: SessionID.zod,
@@ -1430,8 +1612,25 @@ export namespace SessionPrompt {
   })
   export type PromptInput = z.infer<typeof PromptInput>
 
+  export const CompleteInput = z.object({
+    sessionID: SessionID.zod,
+    model: z
+      .object({
+        providerID: ProviderID.zod,
+        modelID: ModelID.zod,
+      })
+      .optional(),
+    small: z.boolean().optional(),
+    parts: PromptInput.shape.parts,
+  })
+  export type CompleteInput = z.infer<typeof CompleteInput>
+
   export async function prompt(input: PromptInput) {
     return runPromise((svc) => svc.prompt(PromptInput.parse(input)))
+  }
+
+  export async function complete(input: CompleteInput) {
+    return runPromise((svc) => svc.complete(CompleteInput.parse(input)))
   }
 
   export async function resolvePromptParts(template: string) {

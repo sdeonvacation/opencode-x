@@ -25,7 +25,7 @@ describe("createBtwCommand", () => {
           session: {
             create: async () => ({ data: { id: "unused" } }),
             fork: async () => ({ data: { id: "unused" } }),
-            complete: async () => undefined,
+            promptAsync: async () => undefined,
             abort: async () => undefined,
             delete: async () => undefined,
           },
@@ -52,7 +52,7 @@ describe("createBtwCommand", () => {
     const replace = mock((_view?: unknown, _onClose?: unknown) => {})
     const create = mock(async () => ({ data: { id: "ses_btw" } }))
     const fork = mock(async (_input: { sessionID: string }) => ({ data: { id: "ses_btw" } }))
-    const complete = mock(
+    const promptAsync = mock(
       async (_input: {
         sessionID: string
         contextSessionID?: string
@@ -66,7 +66,7 @@ describe("createBtwCommand", () => {
     const session: BtwCommandDeps["sdk"]["client"]["session"] = {
       create,
       fork,
-      complete,
+      promptAsync,
       abort,
       delete: del,
     }
@@ -85,7 +85,7 @@ describe("createBtwCommand", () => {
     await command.onSelect!(dialog)
 
     expect(create).toHaveBeenCalledTimes(1)
-    expect(complete).toHaveBeenCalledWith({
+    expect(promptAsync).toHaveBeenCalledWith({
       sessionID: "ses_btw",
       parts: [
         {

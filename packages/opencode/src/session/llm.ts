@@ -25,6 +25,9 @@ import { Installation } from "@/installation"
 export namespace LLM {
   const log = Log.create({ service: "llm" })
   export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
+  export type ToolMeta = {
+    parallelSafe: boolean
+  }
 
   export type StreamInput = {
     user: MessageV2.User
@@ -37,6 +40,7 @@ export namespace LLM {
     messages: ModelMessage[]
     small?: boolean
     tools: Record<string, Tool>
+    toolMeta?: Map<string, ToolMeta>
     retries?: number
     toolChoice?: "auto" | "required" | "none"
   }
@@ -80,6 +84,34 @@ export namespace LLM {
   )
 
   export const defaultLayer = layer
+
+  export function parallelGate(input: {
+    agent: Agent.Info
+    permission?: Permission.Ruleset
+    cfg: Config.Info
+    toolMeta?: Map<string, ToolMeta>
+  }) {
+    const enabled = input.cfg.experimental?.parallel_tool_calls ?? input.agent.mode === "subagent"
+    if (enabled !== true) return false
+    if (!input.toolMeta || input.toolMeta.size === 0) return false
+
+    const permission = Permission.merge(input.agent.permission, input.permission ?? [])
+    for (const [toolName, meta] of input.toolMeta) {
+      if (toolName === "invalid") continue
+      if (toolName === "read" && input.cfg.experimental?.parallel_read !== true) return false
+      if (!meta.parallelSafe) return false
+      if (Permission.evaluate(toolName, "*", permission).action !== "allow") return false
+      if (
+        permission.some(
+          (rule) => rule.pattern !== "*" && rule.action !== "allow" && Wildcard.match(toolName, rule.permission),
+        )
+      ) {
+        return false
+      }
+    }
+
+    return true
+  }
 
   export async function stream(input: StreamRequest) {
     const l = log
@@ -201,6 +233,24 @@ export namespace LLM {
     )
 
     const tools = await resolveTools(input)
+    const toolMeta = resolveToolMeta(input, tools)
+    const parallelToolCalls = parallelGate({
+      agent: input.agent,
+      permission: input.permission,
+      cfg,
+      toolMeta,
+    })
+    const providerOptions = ProviderTransform.providerOptions(
+      input.model,
+      mergeDeep(
+        params.options,
+        ProviderTransform.parallelToolCallOptions({
+          model: input.model,
+          enabled: parallelToolCalls,
+          provider: cfg.provider?.[input.model.providerID],
+        }),
+      ),
+    )
 
     // LiteLLM and some Anthropic proxies require the tools parameter to be present
     // when message history contains tool calls, even if no tools are being used.
@@ -345,7 +395,7 @@ export namespace LLM {
       temperature: params.temperature,
       topP: params.topP,
       topK: params.topK,
-      providerOptions: ProviderTransform.providerOptions(input.model, params.options),
+      providerOptions,
       activeTools: Object.keys(tools).filter((x) => x !== "invalid"),
       tools,
       toolChoice: input.toolChoice,
@@ -400,6 +450,18 @@ export namespace LLM {
       Permission.merge(input.agent.permission, input.permission ?? []),
     )
     return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
+  }
+
+  function resolveToolMeta(
+    input: Pick<StreamInput, "tools" | "toolMeta" | "agent" | "permission" | "user">,
+    tools: Record<string, Tool>,
+  ) {
+    const result = new Map<string, ToolMeta>()
+    for (const key of Object.keys(tools)) {
+      const meta = input.toolMeta?.get(key)
+      result.set(key, { parallelSafe: meta?.parallelSafe === true })
+    }
+    return result
   }
 
   // Check if messages contain any tool-call content

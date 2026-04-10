@@ -156,6 +156,7 @@ function createHarness(overrides?: {
     registry: {
       named: {
         task: () => Effect.succeed(taskDef),
+        read: () => Effect.die("unused"),
       },
     },
     plugin: {

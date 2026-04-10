@@ -35,7 +35,6 @@ describe("createClearCommands", () => {
     const api: ClearCommandsDeps["sdk"]["client"]["session"] = {
       messages: mock(async (_input: { sessionID: string }) => ({ data: messages })),
       deleteMessage: mock(async (_input: { sessionID: string; messageID: string }) => undefined),
-      clearTodo: mock(async (_input: { sessionID: string }) => undefined),
       summarize: mock(
         async (_input: { sessionID: string; providerID: string; modelID: string; auto: boolean }) => undefined,
       ),
@@ -55,7 +54,6 @@ describe("createClearCommands", () => {
 
     expect(setCalls).toContainEqual(["cleared_cost_ses_1", 9])
     expect(api.deleteMessage).toHaveBeenCalledTimes(3)
-    expect(api.clearTodo).toHaveBeenCalledWith({ sessionID: "ses_1" })
     expect(syncSession).toHaveBeenCalledWith("ses_1", { force: true })
     expect(show).toHaveBeenCalledWith({ variant: "info", message: "Cleared 3 message(s)" })
   })
@@ -67,7 +65,6 @@ describe("createClearCommands", () => {
         data: [{ info: { id: "m1", role: "user", cost: 0 } }],
       })),
       deleteMessage: mock(async (_input: { sessionID: string; messageID: string }) => undefined),
-      clearTodo: mock(async (_input: { sessionID: string }) => undefined),
       summarize: mock(
         async (_input: { sessionID: string; providerID: string; modelID: string; auto: boolean }) => undefined,
       ),

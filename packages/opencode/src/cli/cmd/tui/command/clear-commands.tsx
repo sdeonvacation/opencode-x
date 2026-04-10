@@ -17,7 +17,6 @@ export type ClearCommandsDeps = {
       session: {
         messages: (input: { sessionID: string }) => Promise<{ data?: Array<{ info: Message["info"] }> }>
         deleteMessage: (input: { sessionID: string; messageID: string }) => Promise<unknown>
-        clearTodo: (input: { sessionID: string }) => Promise<unknown>
         summarize: (input: {
           sessionID: string
           providerID: string
@@ -83,7 +82,6 @@ export function createClearCommands(deps: ClearCommandsDeps): CommandOption[] {
             })
           }
 
-          await deps.sdk.client.session.clearTodo({ sessionID })
           await deps.sync.session.sync(sessionID, { force: true })
 
           deps.toast.show({
@@ -172,7 +170,6 @@ export function createClearCommands(deps: ClearCommandsDeps): CommandOption[] {
           const existingClearedCost = deps.kv.get<number>(`cleared_cost_${sessionID}`, 0)
           deps.kv.set(`cleared_cost_${sessionID}`, existingClearedCost + deletedCost)
 
-          await deps.sdk.client.session.clearTodo({ sessionID })
           await deps.sync.session.sync(sessionID, { force: true })
 
           deps.toast.show({

@@ -7,6 +7,7 @@ import {
   For,
   Match,
   on,
+  onCleanup,
   onMount,
   Show,
   Switch,
@@ -37,7 +38,6 @@ import type { ReadTool } from "@/tool/read"
 import type { WriteTool } from "@/tool/write"
 import { BashTool } from "@/tool/bash"
 import type { GlobTool } from "@/tool/glob"
-import { TodoWriteTool } from "@/tool/todo"
 import type { GrepTool } from "@/tool/grep"
 import type { ListTool } from "@/tool/ls"
 import type { EditTool } from "@/tool/edit"
@@ -53,7 +53,6 @@ import type { DialogContext } from "@tui/ui/dialog"
 import { useKeybind } from "@tui/context/keybind"
 import { parsePatch } from "diff"
 import { useDialog } from "../../ui/dialog"
-import { TodoItem } from "../../component/todo-item"
 import { DialogMessage } from "./dialog-message"
 import type { PromptInfo } from "../../component/prompt/history"
 import { DialogConfirm } from "@tui/ui/dialog-confirm"
@@ -66,6 +65,7 @@ import { Flag } from "@/flag/flag"
 import { LANGUAGE_EXTENSIONS } from "@/lsp/language"
 import parsers from "../../../../../../parsers-config.ts"
 import { Clipboard } from "../../util/clipboard"
+import { SpinnerVerbs } from "../../util/spinner-verbs"
 import { Toast, useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv.tsx"
 import { Editor } from "../../util/editor"
@@ -83,6 +83,7 @@ import { UI } from "@/cli/ui.ts"
 import { useTuiConfig } from "../../context/tui-config"
 import { getScrollAcceleration } from "../../util/scroll"
 import { TuiPluginRuntime } from "../../plugin"
+import { within } from "../../util/selection-boundary"
 import { DialogGoUpsell } from "../../component/dialog-go-upsell"
 import { SessionRetry } from "@/session/retry"
 
@@ -155,7 +156,7 @@ export function Session() {
   const [timestamps, setTimestamps] = kv.signal<"hide" | "show">("timestamps", "hide")
   const [showDetails, setShowDetails] = kv.signal("tool_details_visibility", true)
   const [showAssistantMetadata, setShowAssistantMetadata] = kv.signal("assistant_metadata_visibility", true)
-  const [showScrollbar, setShowScrollbar] = kv.signal("scrollbar_visible", false)
+  const [showScrollbar, setShowScrollbar] = kv.signal("scrollbar_visible", true)
   const [diffWrapMode] = kv.signal<"word" | "none">("diff_wrap_mode", "word")
   const [animationsEnabled, setAnimationsEnabled] = kv.signal("animations_enabled", true)
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
@@ -195,7 +196,7 @@ export function Session() {
   // Handle initial prompt from fork
   let seeded = false
   let lastSwitch: string | undefined = undefined
-  sdk.event.on("message.part.updated", (evt) => {
+  const offMessagePartUpdated = sdk.event.on("message.part.updated", (evt) => {
     const part = evt.properties.part
     if (part.type !== "tool") return
     if (part.sessionID !== route.sessionID) return
@@ -211,6 +212,10 @@ export function Session() {
     }
   })
 
+  onCleanup(() => {
+    offMessagePartUpdated()
+  })
+
   let scroll: ScrollBoxRenderable
   let prompt: PromptRef | undefined
   const bind = (r: PromptRef | undefined) => {
@@ -220,11 +225,50 @@ export function Session() {
     seeded = true
     r.set(route.initialPrompt)
   }
+  let main: BoxRenderable | undefined
+  let side: BoxRenderable | undefined
   const keybind = useKeybind()
   const dialog = useDialog()
   const renderer = useRenderer()
 
-  sdk.event.on("session.status", (evt) => {
+  onMount(() => {
+    const start = renderer.startSelection.bind(renderer)
+    const update = renderer.updateSelection.bind(renderer)
+    const clear = renderer.clearSelection.bind(renderer)
+    let pane: "main" | "side" | undefined
+
+    renderer.startSelection = (node, x, y) => {
+      if (within(node, side)) pane = "side"
+      else if (within(node, main)) pane = "main"
+      else pane = undefined
+      start(node, x, y)
+    }
+
+    renderer.updateSelection = (node, x, y, opts) => {
+      if (pane === "main" && main && !within(node, main)) {
+        update(main, x, y, opts)
+        return
+      }
+      if (pane === "side" && side && !within(node, side)) {
+        update(side, x, y, opts)
+        return
+      }
+      update(node, x, y, opts)
+    }
+
+    renderer.clearSelection = () => {
+      pane = undefined
+      clear()
+    }
+
+    onCleanup(() => {
+      renderer.startSelection = start
+      renderer.updateSelection = update
+      renderer.clearSelection = clear
+    })
+  })
+
+  const offSessionStatus = sdk.event.on("session.status", (evt) => {
     if (evt.properties.sessionID !== route.sessionID) return
     if (evt.properties.status.type !== "retry") return
     if (evt.properties.status.message !== SessionRetry.GO_UPSELL_MESSAGE) return
@@ -239,6 +283,10 @@ export function Session() {
       if (dontShowAgain) kv.set(GO_UPSELL_DONT_SHOW, true)
       kv.set(GO_UPSELL_LAST_SEEN_AT, Date.now())
     })
+  })
+
+  onCleanup(() => {
+    offSessionStatus()
   })
 
   // Allow exit when in child session (prompt is hidden)
@@ -317,10 +365,20 @@ export function Session() {
   }
 
   function toBottom() {
-    setTimeout(() => {
-      if (!scroll || scroll.isDestroyed) return
+    let attempts = 0
+    const max = 20
+    const tryScroll = () => {
+      if (!scroll || scroll.isDestroyed) {
+        // scroll ref not yet assigned — retry until it is
+        if (attempts < max) {
+          attempts++
+          setTimeout(tryScroll, 50)
+        }
+        return
+      }
       scroll.scrollTo(scroll.scrollHeight)
-    }, 50)
+    }
+    setTimeout(tryScroll, 50)
   }
 
   const local = useLocal()
@@ -1049,7 +1107,15 @@ export function Session() {
       }}
     >
       <box flexDirection="row">
-        <box flexGrow={1} paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1}>
+        <box
+          ref={(r) => (main = r)}
+          flexGrow={1}
+          flexShrink={1}
+          paddingBottom={1}
+          paddingLeft={2}
+          paddingRight={2}
+          gap={1}
+        >
           <Show when={session()}>
             <scrollbox
               ref={(r) => (scroll = r)}
@@ -1205,10 +1271,13 @@ export function Session() {
         <Show when={sidebarVisible()}>
           <Switch>
             <Match when={wide()}>
-              <Sidebar sessionID={route.sessionID} />
+              <box ref={(r) => (side = r)} width={42} flexShrink={0} height="100%">
+                <Sidebar sessionID={route.sessionID} />
+              </box>
             </Match>
             <Match when={!wide()}>
               <box
+                ref={(r) => (side = r)}
                 position="absolute"
                 top={0}
                 left={0}
@@ -1505,6 +1574,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
 
   // Hide tool if showDetails is false and tool completed successfully
   const shouldHide = createMemo(() => {
+    if (props.part.tool === "todowrite") return true
     if (ctx.showDetails()) return false
     if (props.part.state.status !== "completed") return false
     return true
@@ -1572,9 +1642,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "apply_patch"}>
           <ApplyPatch {...toolprops} />
         </Match>
-        <Match when={props.part.tool === "todowrite"}>
-          <TodoWrite {...toolprops} />
-        </Match>
+        <Match when={props.part.tool === "todowrite"}>{null}</Match>
         <Match when={props.part.tool === "question"}>
           <Question {...toolprops} />
         </Match>
@@ -1614,7 +1682,7 @@ function GenericTool(props: ToolProps<any>) {
     <Show
       when={props.output && ctx.showGenericToolOutput()}
       fallback={
-        <InlineTool icon="⚙" pending="Writing command..." complete={true} part={props.part}>
+        <InlineTool icon="⚙" pending={SpinnerVerbs.forTool("bash")} complete={true} part={props.part}>
           {props.tool} {input(props.input)}
         </InlineTool>
       }
@@ -1833,7 +1901,7 @@ function Bash(props: ToolProps<typeof BashTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="$" pending="Writing command..." complete={props.input.command} part={props.part}>
+        <InlineTool icon="$" pending={SpinnerVerbs.forTool("bash")} complete={props.input.command} part={props.part}>
           {props.input.command}
         </InlineTool>
       </Match>
@@ -1842,6 +1910,25 @@ function Bash(props: ToolProps<typeof BashTool>) {
 }
 
 function Write(props: ToolProps<typeof WriteTool>) {
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const pending = createMemo(() => {
+    if (props.part.state.status === "pending") {
+      const meta = props.part.metadata?.pending as { bytes?: number } | undefined
+      const bytes = meta?.bytes ?? Buffer.byteLength(props.part.state.raw)
+      if (!bytes) return "Preparing write..."
+      return `Preparing write... ${size(bytes)} received`
+    }
+    if (props.part.state.status !== "running") return "Preparing write..."
+    const title = props.part.state.title
+    if (!title) return "Preparing write..."
+    return title
+  })
+  const line = createMemo(() => {
+    if (isRunning()) return pending()
+    if (!props.input.filePath) return "Write"
+    return "Write " + normalizePath(props.input.filePath)
+  })
+
   const { theme, syntax } = useTheme()
   const code = createMemo(() => {
     if (!props.input.content) return ""
@@ -1865,17 +1952,29 @@ function Write(props: ToolProps<typeof WriteTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="←" pending="Preparing write..." complete={props.input.filePath} part={props.part}>
-          Write {normalizePath(props.input.filePath!)}
+        <InlineTool
+          icon="←"
+          pending={pending()}
+          complete={isRunning() ? false : props.input.filePath}
+          spinner={isRunning()}
+          part={props.part}
+        >
+          {line()}
         </InlineTool>
       </Match>
     </Switch>
   )
 }
 
+function size(input: number) {
+  if (input < 1024) return `${input}B`
+  if (input < 1024 * 1024) return `${(input / 1024).toFixed(0)}KB`
+  return `${(input / (1024 * 1024)).toFixed(1)}MB`
+}
+
 function Glob(props: ToolProps<typeof GlobTool>) {
   return (
-    <InlineTool icon="✱" pending="Finding files..." complete={props.input.pattern} part={props.part}>
+    <InlineTool icon="✱" pending={SpinnerVerbs.forTool("glob")} complete={props.input.pattern} part={props.part}>
       Glob "{props.input.pattern}" <Show when={props.input.path}>in {normalizePath(props.input.path)} </Show>
       <Show when={props.metadata.count}>
         ({props.metadata.count} {props.metadata.count === 1 ? "match" : "matches"})
@@ -1898,7 +1997,7 @@ function Read(props: ToolProps<typeof ReadTool>) {
     <>
       <InlineTool
         icon="→"
-        pending="Reading file..."
+        pending={SpinnerVerbs.forTool("read")}
         complete={props.input.filePath}
         spinner={isRunning()}
         part={props.part}
@@ -1920,7 +2019,7 @@ function Read(props: ToolProps<typeof ReadTool>) {
 
 function Grep(props: ToolProps<typeof GrepTool>) {
   return (
-    <InlineTool icon="✱" pending="Searching content..." complete={props.input.pattern} part={props.part}>
+    <InlineTool icon="✱" pending={SpinnerVerbs.forTool("grep")} complete={props.input.pattern} part={props.part}>
       Grep "{props.input.pattern}" <Show when={props.input.path}>in {normalizePath(props.input.path)} </Show>
       <Show when={props.metadata.matches}>
         ({props.metadata.matches} {props.metadata.matches === 1 ? "match" : "matches"})
@@ -1937,7 +2036,12 @@ function List(props: ToolProps<typeof ListTool>) {
     return ""
   })
   return (
-    <InlineTool icon="→" pending="Listing directory..." complete={props.input.path !== undefined} part={props.part}>
+    <InlineTool
+      icon="→"
+      pending={SpinnerVerbs.forTool("list")}
+      complete={props.input.path !== undefined}
+      part={props.part}
+    >
       List {dir()}
     </InlineTool>
   )
@@ -1945,7 +2049,12 @@ function List(props: ToolProps<typeof ListTool>) {
 
 function WebFetch(props: ToolProps<typeof WebFetchTool>) {
   return (
-    <InlineTool icon="%" pending="Fetching from the web..." complete={(props.input as any).url} part={props.part}>
+    <InlineTool
+      icon="%"
+      pending={SpinnerVerbs.forTool("webfetch")}
+      complete={(props.input as any).url}
+      part={props.part}
+    >
       WebFetch {(props.input as any).url}
     </InlineTool>
   )
@@ -1955,7 +2064,7 @@ function CodeSearch(props: ToolProps<any>) {
   const input = props.input as any
   const metadata = props.metadata as any
   return (
-    <InlineTool icon="◇" pending="Searching code..." complete={input.query} part={props.part}>
+    <InlineTool icon="◇" pending={SpinnerVerbs.forTool("codesearch")} complete={input.query} part={props.part}>
       Exa Code Search "{input.query}" <Show when={metadata.results}>({metadata.results} results)</Show>
     </InlineTool>
   )
@@ -1965,22 +2074,62 @@ function WebSearch(props: ToolProps<any>) {
   const input = props.input as any
   const metadata = props.metadata as any
   return (
-    <InlineTool icon="◈" pending="Searching web..." complete={input.query} part={props.part}>
+    <InlineTool icon="◈" pending={SpinnerVerbs.forTool("websearch")} complete={input.query} part={props.part}>
       Exa Web Search "{input.query}" <Show when={metadata.numResults}>({metadata.numResults} results)</Show>
     </InlineTool>
   )
 }
 
+// Persists task part → subagent session ID across component unmount/remount cycles.
+// Keyed by part ID (unique per task tool call).
+const taskSessionIdCache = new Map<string, string>()
+
 function Task(props: ToolProps<typeof TaskTool>) {
   const { navigate } = useRoute()
   const sync = useSync()
+  const ctx = use()
 
-  onMount(() => {
-    if (props.metadata.sessionId && !sync.data.message[props.metadata.sessionId]?.length)
-      sync.session.sync(props.metadata.sessionId)
+  // Resolve session ID — prefer metadata (authoritative), fall back to creation-order
+  // index matching (handles cancelled tasks where metadata may not have arrived).
+  // Result is cached in module-level Map so it survives component unmount/remount.
+  const sessionId = createMemo<string | undefined>(() => {
+    const fromMeta = props.metadata.sessionId as string | undefined
+    if (fromMeta) {
+      taskSessionIdCache.set(props.part.id, fromMeta)
+      return fromMeta
+    }
+
+    const cached = taskSessionIdCache.get(props.part.id)
+    if (cached) return cached
+
+    // Last resort: match by start-time rank among task parts vs child session creation order
+    const startTime = (props.part.state as any).time?.start as number | undefined
+    if (!startTime) return undefined
+
+    const childSessions = sync.data.session
+      .filter((x) => x.parentID === ctx.sessionID)
+      .sort((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))
+    if (!childSessions.length) return undefined
+
+    const taskParts = Object.values(sync.data.part)
+      .flat()
+      .filter((p): p is ToolPart => p.type === "tool" && p.tool === "task" && p.sessionID === ctx.sessionID)
+      .sort((a, b) => ((a.state as any).time?.start ?? 0) - ((b.state as any).time?.start ?? 0))
+
+    const myIndex = taskParts.findIndex((p) => p.id === props.part.id)
+    if (myIndex === -1 || myIndex >= childSessions.length) return undefined
+
+    const id = childSessions[myIndex].id
+    taskSessionIdCache.set(props.part.id, id)
+    return id
   })
 
-  const messages = createMemo(() => sync.data.message[props.metadata.sessionId ?? ""] ?? [])
+  onMount(() => {
+    const id = sessionId()
+    if (id && !sync.data.message[id]?.length) sync.session.sync(id)
+  })
+
+  const messages = createMemo(() => sync.data.message[sessionId() ?? ""] ?? [])
 
   const tools = createMemo(() => {
     return messages().flatMap((msg) =>
@@ -2023,12 +2172,11 @@ function Task(props: ToolProps<typeof TaskTool>) {
       icon="│"
       spinner={isRunning()}
       complete={props.input.description}
-      pending="Delegating..."
+      pending={SpinnerVerbs.forTool("task")}
       part={props.part}
       onClick={() => {
-        if (props.metadata.sessionId) {
-          navigate({ type: "session", sessionID: props.metadata.sessionId })
-        }
+        const id = sessionId()
+        if (id) navigate({ type: "session", sessionID: id })
       }}
     >
       {content()}
@@ -2080,7 +2228,7 @@ function Edit(props: ToolProps<typeof EditTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="←" pending="Preparing edit..." complete={props.input.filePath} part={props.part}>
+        <InlineTool icon="←" pending={SpinnerVerbs.forTool("edit")} complete={props.input.filePath} part={props.part}>
           Edit {normalizePath(props.input.filePath!)} {input({ replaceAll: props.input.replaceAll })}
         </InlineTool>
       </Match>
@@ -2155,29 +2303,8 @@ function ApplyPatch(props: ToolProps<typeof ApplyPatchTool>) {
         </For>
       </Match>
       <Match when={true}>
-        <InlineTool icon="%" pending="Preparing patch..." complete={false} part={props.part}>
+        <InlineTool icon="%" pending={SpinnerVerbs.forTool("apply_patch")} complete={false} part={props.part}>
           Patch
-        </InlineTool>
-      </Match>
-    </Switch>
-  )
-}
-
-function TodoWrite(props: ToolProps<typeof TodoWriteTool>) {
-  return (
-    <Switch>
-      <Match when={props.metadata.todos?.length}>
-        <BlockTool title="# Todos" part={props.part}>
-          <box>
-            <For each={props.input.todos ?? []}>
-              {(todo) => <TodoItem status={todo.status} content={todo.content} />}
-            </For>
-          </box>
-        </BlockTool>
-      </Match>
-      <Match when={true}>
-        <InlineTool icon="⚙" pending="Updating todos..." complete={false} part={props.part}>
-          Updating todos...
         </InlineTool>
       </Match>
     </Switch>
@@ -2210,7 +2337,7 @@ function Question(props: ToolProps<typeof QuestionTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="→" pending="Asking questions..." complete={count()} part={props.part}>
+        <InlineTool icon="→" pending={SpinnerVerbs.forTool("question")} complete={count()} part={props.part}>
           Asked {count()} question{count() !== 1 ? "s" : ""}
         </InlineTool>
       </Match>
@@ -2220,7 +2347,7 @@ function Question(props: ToolProps<typeof QuestionTool>) {
 
 function Skill(props: ToolProps<typeof SkillTool>) {
   return (
-    <InlineTool icon="→" pending="Loading skill..." complete={props.input.name} part={props.part}>
+    <InlineTool icon="→" pending={SpinnerVerbs.forTool("skill")} complete={props.input.name} part={props.part}>
       Skill "{props.input.name}"
     </InlineTool>
   )

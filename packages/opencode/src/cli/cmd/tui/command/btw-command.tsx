@@ -27,7 +27,7 @@ export type BtwCommandDeps = {
       session: {
         create: () => Promise<{ data?: { id?: string } }>
         fork: (input: { sessionID: string }) => Promise<{ data?: { id?: string } }>
-        complete: (input: {
+        promptAsync: (input: {
           sessionID: string
           contextSessionID?: string
           parts: { type: "text"; text: string }[]
@@ -89,7 +89,7 @@ export function createBtwCommand(deps: BtwCommandDeps): CommandOption {
       }
 
       deps.sdk.client.session
-        .complete({
+        .promptAsync({
           sessionID,
           parts: [
             {

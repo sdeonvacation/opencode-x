@@ -13,22 +13,30 @@ export function getUsedTokens(msg: AssistantMessage) {
   if (msg.summary && msg.finish && !msg.error) return msg.tokens.output
   return msg.tokens.input + (msg.tokens.cache?.read ?? 0)
 }
+
 function View(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
   const msg = createMemo(() => props.api.state.session.messages(props.session_id))
-  const cost = createMemo(() => msg().reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0))
+  const messageCost = createMemo(() =>
+    msg().reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0),
+  )
+  const clearedCost = createMemo(() => props.api.kv.get(`cleared_cost_${props.session_id}`, 0))
+  const cost = createMemo(() => messageCost() + clearedCost())
 
   const state = createMemo(() => {
-    const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
-    if (!last) {
+    const completed = msg().filter(
+      (item): item is AssistantMessage => item.role === "assistant" && item.finish != null && !item.summary,
+    )
+    if (completed.length === 0) {
       return {
         tokens: 0,
         percent: null,
       }
     }
 
-    const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
+    // Use the high-water mark so the display never drops within a compaction window
+    const tokens = Math.max(...completed.map(getUsedTokens))
+    const last = completed[completed.length - 1]
     const model = props.api.state.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     return {
       tokens,

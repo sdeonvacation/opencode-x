@@ -691,6 +691,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       onSelect: () => {
         process.once("SIGCONT", () => {
           renderer.resume()
+          refreshFocus()
         })
 
         renderer.suspend()

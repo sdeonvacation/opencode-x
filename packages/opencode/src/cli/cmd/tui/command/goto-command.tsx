@@ -7,6 +7,7 @@ import { Filesystem } from "@/util/filesystem"
 export type GotoCommandDeps = {
   dialog: Pick<DialogContext, "clear" | "replace">
   sdk: {
+    directory?: string
     changeDirectory: (path: string) => Promise<void>
   }
   toast: Pick<ToastContext, "show">

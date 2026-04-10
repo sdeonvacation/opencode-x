@@ -35,9 +35,7 @@ export type HandleSubtaskDeps = {
     get: (agent: string) => Effect.Effect<Agent.Info | undefined>
     list: () => Effect.Effect<Agent.Info[]>
   }
-  registry: {
-    named: Pick<ToolRegistry.Interface["named"], "task">
-  }
+  registry: Pick<ToolRegistry.Interface, "named">
   plugin: Pick<Plugin.Interface, "trigger">
   permission: Pick<Permission.Interface, "ask">
   bus: Pick<Bus.Interface, "publish">

@@ -139,8 +139,17 @@ function fake(
     get message() {
       return msg
     },
-    updateToolCall: Effect.fn("TestSessionProcessor.updateToolCall")(() => Effect.succeed(undefined)),
-    completeToolCall: Effect.fn("TestSessionProcessor.completeToolCall")(() => Effect.void),
+    partFromToolCall() {
+      return {
+        id: PartID.ascending(),
+        messageID: msg.id,
+        sessionID: msg.sessionID,
+        type: "tool",
+        callID: "fake",
+        tool: "fake",
+        state: { status: "pending", input: {}, raw: "" },
+      }
+    },
     process: Effect.fn("TestSessionProcessor.process")(() => Effect.succeed(result)),
   } satisfies SessionProcessorModule.SessionProcessor.Handle
 }

@@ -1,7 +1,7 @@
-import z from "zod"
-import { Effect } from "effect"
 import { Tool } from "./tool"
 import DESCRIPTION from "./task.txt"
+import z from "zod"
+import { Effect } from "effect"
 import { Session } from "../session"
 import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
@@ -13,14 +13,13 @@ import { Config } from "../config/config"
 import { acquire, release } from "../orchestration/concurrency"
 import { OrchestrationEvent } from "../orchestration/events"
 import { create as createGuard } from "../orchestration/tool-guard"
-import { spawnSubagent } from "../orchestration/task-spawn"
-import { resolveTaskModel } from "../orchestration/task-model-resolver"
 import { Permission } from "@/permission"
 import { withTimeout } from "@/util/timeout"
+import { spawnSubagent } from "../orchestration/task-spawn"
+import { resolveTaskModel } from "../orchestration/task-model-resolver"
 
 const SUBAGENT_TIMEOUT = 900_000
 const id = "task"
-
 const parameters = z.object({
   description: z.string().describe("A short (3-5 words) description of the task"),
   prompt: z.string().describe("The task for the agent to perform"),
@@ -96,8 +95,8 @@ async function executeTask(params: z.infer<typeof parameters>, ctx: Tool.Context
     ultraworkModel: cfg.experimental?.ultrawork_model,
     fallback: model,
   })
-  const key = `${finalModel.providerID}:${finalModel.modelID}`
-  const limit = cfg.experimental?.model_concurrency?.[key] ?? 5
+  const concurrencyKey = `${finalModel.providerID}:${finalModel.modelID}`
+  const concurrencyLimit = cfg.experimental?.model_concurrency?.[concurrencyKey] ?? 5
   const guard = createGuard({
     sessionID: String(ctx.sessionID),
     threshold: cfg.experimental?.loop_detector_threshold ?? 5,
@@ -131,7 +130,7 @@ async function executeTask(params: z.infer<typeof parameters>, ctx: Tool.Context
         command: params.command,
       },
     })
-    await acquire(key, limit, ctx.abort)
+    await acquire(concurrencyKey, concurrencyLimit, ctx.abort)
     acquired = true
 
     const result = await withTimeout(
@@ -188,12 +187,12 @@ async function executeTask(params: z.infer<typeof parameters>, ctx: Tool.Context
     throw cause
   } finally {
     ctx.abort.removeEventListener("abort", cancel)
-    if (acquired) release(key)
+    if (acquired) release(concurrencyKey)
     if (subagent.spawned) subagent.spawnInfo.release()
   }
 }
 
-export const TaskTool = Tool.defineEffect(
+const taskTool = Tool.defineEffect(
   id,
   Effect.succeed({
     description: [
@@ -207,6 +206,10 @@ export const TaskTool = Tool.defineEffect(
     execute: executeTask,
   }),
 )
+
+export const TaskTool = Object.assign(taskTool, {
+  init: async () => Effect.runPromise(Effect.flatMap(taskTool, (tool) => Effect.promise(() => tool.init()))),
+})
 
 export const TaskDescription: Tool.DynamicDescription = (agent) =>
   Effect.gen(function* () {

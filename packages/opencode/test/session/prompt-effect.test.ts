@@ -726,7 +726,7 @@ it.live(
           const ready = defer<void>()
           const aborted = defer<void>()
           const registry = yield* ToolRegistry.Service
-          const { task } = yield* registry.named()
+          const task = yield* registry.named.task()
           const original = task.execute
           task.execute = async (_args, ctx) => {
             ready.resolve()
@@ -1403,7 +1403,7 @@ it.live(
       (dir) =>
         Effect.gen(function* () {
           const registry = yield* ToolRegistry.Service
-          const { read } = yield* registry.named()
+          const read = yield* registry.named.read()
           const { ready, aborted, restore } = hangUntilAborted(read)
           yield* restore
 
@@ -1449,7 +1449,7 @@ it.live(
       (dir) =>
         Effect.gen(function* () {
           const registry = yield* ToolRegistry.Service
-          const { read } = yield* registry.named()
+          const read = yield* registry.named.read()
           const { ready, aborted, restore } = hangUntilAborted(read)
           yield* restore
 
