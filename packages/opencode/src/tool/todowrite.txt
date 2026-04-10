@@ -157,6 +157,7 @@ The assistant did not use the todo list because this is a single command executi
    - Only have ONE task in_progress at any time
    - Complete current tasks before starting new ones
    - Cancel tasks that become irrelevant
+   - Before giving your FINAL response, ensure ALL todos are in a terminal state (completed or cancelled). No todo should be left as pending or in_progress when you finish.
 
 3. **Task Breakdown**:
    - Create specific, actionable items

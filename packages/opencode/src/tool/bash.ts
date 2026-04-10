@@ -17,6 +17,7 @@ import { Shell } from "@/shell/shell"
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncate"
 import { Plugin } from "@/plugin"
+import { SessionSummary } from "@/session/summary"
 import { Cause, Effect, Exit, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
@@ -63,7 +64,8 @@ const Parameters = z.object({
     .string()
     .describe(
       "Clear, concise description of what this command does in 5-10 words. Examples:\nInput: ls\nOutput: Lists files in current directory\n\nInput: git status\nOutput: Shows working tree status\n\nInput: npm install\nOutput: Installs package dependencies\n\nInput: mkdir foo\nOutput: Creates directory 'foo'",
-    ),
+    )
+    .optional(),
 })
 
 type Part = {
@@ -274,6 +276,20 @@ function preview(text: string) {
   return text.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
 }
 
+function noncwd(root: Node, ps: boolean) {
+  for (const node of commands(root)) {
+    const tokens = parts(node).map((item) => item.text)
+    const cmd = ps ? tokens[0]?.toLowerCase() : tokens[0]
+    if (!cmd || !CWD.has(cmd)) return true
+  }
+  return false
+}
+
+export function isCommit(command: string, exit: number | null) {
+  if (exit !== 0) return false
+  return command.split(/&&|\|\||;|\|/).some((x) => /^\s*git\s+commit(?:\s|$)/i.test(x))
+}
+
 async function parse(command: string, ps: boolean) {
   const tree = await parser().then((p) => (ps ? p.ps : p.bash).parse(command))
   if (!tree) throw new Error("Failed to parse command")
@@ -372,7 +388,10 @@ async function run(
       )
 
       const abort = Effect.callback<void>((resume) => {
-        if (ctx.abort.aborted) return resume(Effect.void)
+        if (ctx.abort.aborted) {
+          resume(Effect.void)
+          return Effect.void
+        }
         const handler = () => resume(Effect.void)
         ctx.abort.addEventListener("abort", handler, { once: true })
         return Effect.sync(() => ctx.abort.removeEventListener("abort", handler))
@@ -469,6 +488,9 @@ export const BashTool = Tool.define("bash", async () => {
       .replaceAll("${maxLines}", String(Truncate.MAX_LINES))
       .replaceAll("${maxBytes}", String(Truncate.MAX_BYTES)),
     parameters: Parameters,
+    formatValidationError(_error: z.ZodError): string {
+      return "The bash tool requires a 'command' string argument. Provide the shell command to execute as the 'command' field."
+    },
     async execute(params, ctx) {
       const cwd = params.workdir ? await resolvePath(params.workdir, Instance.directory, shell) : Instance.directory
       if (params.timeout !== undefined && params.timeout < 0) {
@@ -477,11 +499,21 @@ export const BashTool = Tool.define("bash", async () => {
       const timeout = params.timeout ?? DEFAULT_TIMEOUT
       const ps = PS.has(name)
       const root = await parse(params.command, ps)
+      if (params.command.trim() && commands(root).length === 0) {
+        throw new Error(
+          "Unable to analyze this shell command safely for permission checks. Rewrite as a single-line command.",
+        )
+      }
       const scan = await collect(root, cwd, ps, shell)
+      if (params.command.trim() && noncwd(root, ps) && scan.patterns.size === 0) {
+        throw new Error(
+          "Unable to derive permission patterns from this shell command. Rewrite as a single-line command.",
+        )
+      }
       if (!Instance.containsPath(cwd)) scan.dirs.add(cwd)
       await ask(ctx, scan)
 
-      return run(
+      const result = await run(
         {
           shell,
           name,
@@ -489,10 +521,19 @@ export const BashTool = Tool.define("bash", async () => {
           cwd,
           env: await shellEnv(ctx, cwd),
           timeout,
-          description: params.description,
+          description: params.description ?? "",
         },
         ctx,
       )
+
+      if (isCommit(params.command, result.metadata.exit)) {
+        SessionSummary.summarize({
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+        })
+      }
+
+      return result
     },
   }
 })
