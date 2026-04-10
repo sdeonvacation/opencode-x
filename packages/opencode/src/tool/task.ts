@@ -11,14 +11,12 @@ import { SessionPrompt } from "../session/prompt"
 import { Config } from "../config/config"
 import { Effect } from "effect"
 import { acquire, release } from "../orchestration/concurrency"
-import { resolve as resolveCategory } from "../orchestration/category-routing"
-import { OrchestrationEvent } from "../orchestration/events"
-import { reserveSpawn, SpawnLimitError } from "../orchestration/spawn-limits"
-import { create as createGuard } from "../orchestration/tool-guard"
-import { detect as detectUltrawork } from "../orchestration/ultrawork"
-import { resolveModel as resolveUltrawork } from "../orchestration/ultrawork-hook"
-import { withTimeout } from "@/util/timeout"
 import { Permission } from "@/permission"
+import { withTimeout } from "@/util/timeout"
+import { OrchestrationEvent } from "../orchestration/events"
+import { create as createGuard } from "../orchestration/tool-guard"
+import { spawnSubagent } from "../orchestration/task-spawn"
+import { resolveTaskModel } from "../orchestration/task-model-resolver"
 
 const id = "task"
 const SUBAGENT_TIMEOUT = 900_000
@@ -64,77 +62,17 @@ async function executeTask(params: z.infer<typeof parameters>, ctx: Tool.Context
 
   const existing = params.task_id ? await Session.get(SessionID.make(params.task_id)).catch(() => undefined) : undefined
 
-  const subagent = existing
-    ? { session: existing, spawned: false as const }
-    : await (async () => {
-        const maxDepth = cfg.experimental?.max_subagent_depth ?? 3
-        const maxDescendants = cfg.experimental?.max_subagent_descendants ?? 50
-        const spawnInfo = await reserveSpawn({
-          sessionID: ctx.sessionID,
-          parentID: ctx.sessionID,
-          maxDepth,
-          maxDescendants,
-        }).catch(async (err) => {
-          if (err instanceof SpawnLimitError) {
-            await Bus.publish(OrchestrationEvent.SpawnRejected, {
-              sessionID: ctx.sessionID,
-              agent: next.name,
-              reason: err.reason,
-              limit: err.limit,
-              current: err.current,
-            })
-          }
-          throw err
-        })
-
-        try {
-          const session = await Session.create({
-            parentID: ctx.sessionID,
-            title: params.description + ` (@${next.name} subagent)`,
-            permission: [
-              ...(canTodo
-                ? []
-                : [
-                    {
-                      permission: "todowrite" as const,
-                      pattern: "*" as const,
-                      action: "deny" as const,
-                    },
-                  ]),
-              ...(canTask
-                ? []
-                : [
-                    {
-                      permission: id,
-                      pattern: "*" as const,
-                      action: "deny" as const,
-                    },
-                  ]),
-              ...(cfg.experimental?.primary_tools?.map((item) => ({
-                pattern: "*",
-                action: "allow" as const,
-                permission: item,
-              })) ?? []),
-            ],
-          })
-
-          await Bus.publish(OrchestrationEvent.Spawn, {
-            sessionID: session.id,
-            parentSessionID: ctx.sessionID,
-            agent: next.name,
-            depth: spawnInfo.depth,
-          })
-
-          return {
-            session,
-            spawnInfo,
-            spawned: true as const,
-          }
-        } catch (err) {
-          spawnInfo.release()
-          throw err
-        }
-      })()
+  const subagent = await spawnSubagent(existing, {
+    parentSessionID: ctx.sessionID,
+    agent: next,
+    description: params.description,
+    canTask,
+    canTodo,
+    taskPermissionID: id,
+    primaryTools: cfg.experimental?.primary_tools,
+    maxDepth: cfg.experimental?.max_subagent_depth ?? 3,
+    maxDescendants: cfg.experimental?.max_subagent_descendants ?? 50,
+  })
 
   const msg = MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID })
   if (msg.info.role !== "assistant") throw new Error("Not an assistant message")
@@ -146,18 +84,15 @@ async function executeTask(params: z.infer<typeof parameters>, ctx: Tool.Context
 
   const messageID = MessageID.ascending()
   const promptParts = await SessionPrompt.resolvePromptParts(params.prompt)
-  const categoryModel = resolveCategory({
-    category: params.task_category ?? params.subagent_type,
+  const finalModel = resolveTaskModel({
+    prompt: params.prompt,
+    subagentType: params.subagent_type,
+    taskCategory: params.task_category,
+    useUltrawork: params.use_ultrawork,
     categories: cfg.experimental?.task_categories ?? {},
+    ultraworkModel: cfg.experimental?.ultrawork_model,
     fallback: model,
   })
-  const ultraworkModel =
-    detectUltrawork(params.prompt, cfg.experimental?.ultrawork_model) ??
-    resolveUltrawork({
-      enabled: params.use_ultrawork === true,
-      ultraworkModel: cfg.experimental?.ultrawork_model,
-    })
-  const finalModel = ultraworkModel ?? categoryModel
   const concurrencyKey = `${finalModel.providerID}:${finalModel.modelID}`
   const concurrencyLimit = cfg.experimental?.model_concurrency?.[concurrencyKey] ?? 5
   const guard = createGuard({
