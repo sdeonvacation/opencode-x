@@ -1,7 +1,10 @@
-import { render, TimeToFirstDraw, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { onFocus, render, TimeToFirstDraw, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { Clipboard } from "@tui/util/clipboard"
-import { Selection } from "@tui/util/selection"
-import { createCliRenderer, MouseButton, type CliRendererConfig } from "@opentui/core"
+import { createCliRenderer, type CliRendererConfig } from "@opentui/core"
+import { createBtwCommand } from "@tui/command/btw-command"
+import { createClearCommands } from "@tui/command/clear-commands"
+import { createGotoCommand } from "@tui/command/goto-command"
+import { useTerminalTitle } from "@tui/component/terminal-title"
 import { RouteProvider, useRoute } from "@tui/context/route"
 import {
   Switch,
@@ -18,8 +21,7 @@ import {
 } from "solid-js"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { Flag } from "@/flag/flag"
-import semver from "semver"
-import { DialogProvider, useDialog } from "@tui/ui/dialog"
+import { DialogProvider, useDialog, type DialogContext } from "@tui/ui/dialog"
 import { DialogProvider as DialogProviderList } from "@tui/component/dialog-provider"
 import { ErrorComponent } from "@tui/component/error-component"
 import { PluginRouteMissing } from "@tui/component/plugin-route-missing"
@@ -44,12 +46,11 @@ import { Session } from "@tui/routes/session"
 import { PromptHistoryProvider } from "./component/prompt/history"
 import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
-import { DialogAlert } from "./ui/dialog-alert"
-import { DialogConfirm } from "./ui/dialog-confirm"
+import { setupAppEventListeners } from "@tui/effect/app-event-listeners"
+import { setupConsoleCopyHandler, setupCopySelectionHandlers } from "@tui/util/copy-handler"
+import { restoreRenderableFocus } from "./ui/dialog"
 import { ToastProvider, useToast } from "./ui/toast"
 import { ExitProvider, useExit } from "./context/exit"
-import { Session as SessionApi } from "@/session"
-import { TuiEvent } from "./event"
 import { KVProvider, useKV } from "./context/kv"
 import { Provider } from "@/provider/provider"
 import { ArgsProvider, useArgs, type Args } from "./context/args"
@@ -59,7 +60,6 @@ import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { TuiConfigProvider, useTuiConfig } from "./context/tui-config"
 import { TuiConfig } from "@/config/tui"
 import { createTuiApi, TuiPluginRuntime, type RouteMap } from "./plugin"
-import { FormatError, FormatUnknownError } from "@/cli/error"
 
 async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
   // can't set raw mode if not a TTY
@@ -145,23 +145,6 @@ function rendererConfig(_config: TuiConfig.Info): CliRendererConfig {
       },
     },
   }
-}
-
-function errorMessage(error: unknown) {
-  const formatted = FormatError(error)
-  if (formatted !== undefined) return formatted
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "data" in error &&
-    typeof error.data === "object" &&
-    error.data !== null &&
-    "message" in error.data &&
-    typeof error.data.message === "string"
-  ) {
-    return error.data.message
-  }
-  return FormatUnknownError(error)
 }
 
 export function tui(input: {
@@ -298,78 +281,21 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       setReady(true)
     })
 
-  useKeyboard((evt) => {
-    if (!Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) return
-    const sel = renderer.getSelection()
-    if (!sel) return
-
-    // Windows Terminal-like behavior:
-    // - Ctrl+C copies and dismisses selection
-    // - Esc dismisses selection
-    // - Most other key input dismisses selection and is passed through
-    if (evt.ctrl && evt.name === "c") {
-      if (!Selection.copy(renderer, toast)) {
-        renderer.clearSelection()
-        return
-      }
-
-      evt.preventDefault()
-      evt.stopPropagation()
-      return
-    }
-
-    if (evt.name === "escape") {
-      renderer.clearSelection()
-      evt.preventDefault()
-      evt.stopPropagation()
-      return
-    }
-
-    const focus = renderer.currentFocusedRenderable
-    if (focus?.hasSelection() && sel.selectedRenderables.includes(focus)) {
-      return
-    }
-
-    renderer.clearSelection()
-  })
-
-  // Wire up console copy-to-clipboard via opentui's onCopySelection callback
-  renderer.console.onCopySelection = async (text: string) => {
-    if (!text || text.length === 0) return
-
-    await Clipboard.copy(text)
-      .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
-      .catch(toast.error)
-
-    renderer.clearSelection()
-  }
+  const copySelection = setupCopySelectionHandlers({ renderer, toast }, useKeyboard)
+  setupConsoleCopyHandler({ renderer, toast })
   const [terminalTitleEnabled, setTerminalTitleEnabled] = createSignal(kv.get("terminal_title_enabled", true))
 
-  // Update terminal window title based on current route and session
-  createEffect(() => {
-    if (!terminalTitleEnabled() || Flag.OPENCODE_DISABLE_TERMINAL_TITLE) return
+  const refreshFocus = () => {
+    queueMicrotask(() => {
+      restoreRenderableFocus(renderer.currentFocusedRenderable)
+    })
+  }
 
-    if (route.data.type === "home") {
-      renderer.setTerminalTitle("OpenCode")
-      return
-    }
-
-    if (route.data.type === "session") {
-      const session = sync.session.get(route.data.sessionID)
-      if (!session || SessionApi.isDefaultTitle(session.title)) {
-        renderer.setTerminalTitle("OpenCode")
-        return
-      }
-
-      const title = session.title.length > 40 ? session.title.slice(0, 37) + "..." : session.title
-      renderer.setTerminalTitle(`OC | ${title}`)
-      return
-    }
-
-    if (route.data.type === "plugin") {
-      renderer.setTerminalTitle(`OC | ${route.data.id}`)
-    }
+  onFocus(() => {
+    refreshFocus()
   })
+
+  useTerminalTitle({ terminalTitleEnabled, route, sync, renderer })
 
   const args = useArgs()
   onMount(() => {
@@ -485,7 +411,6 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       category: "Session",
       slash: {
         name: "new",
-        aliases: ["clear"],
       },
       onSelect: () => {
         const current = promptRef.current
@@ -501,6 +426,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         dialog.clear()
       },
     },
+    ...createClearCommands({ sdk, sync, kv, toast, route, local }),
     {
       title: "Switch model",
       value: "model.list",
@@ -675,7 +601,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     {
       title: "Toggle theme mode",
       value: "theme.switch_mode",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         setMode(mode() === "dark" ? "light" : "dark")
         dialog.clear()
       },
@@ -684,7 +610,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     {
       title: locked() ? "Unlock theme mode" : "Lock theme mode",
       value: "theme.mode.lock",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         if (locked()) unlock()
         else lock()
         dialog.clear()
@@ -702,6 +628,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       category: "System",
     },
+    createBtwCommand({ dialog, local, toast, sync, sdk, route }),
     {
       title: "Open docs",
       value: "docs.open",
@@ -711,6 +638,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       category: "System",
     },
+    createGotoCommand({ dialog, sdk, toast, sync }),
     {
       title: "Exit the app",
       value: "app.exit",
@@ -725,7 +653,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       title: "Toggle debug panel",
       category: "System",
       value: "app.debug",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         renderer.toggleDebugOverlay()
         dialog.clear()
       },
@@ -734,7 +662,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       title: "Toggle console",
       category: "System",
       value: "app.console",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         renderer.console.toggle()
         dialog.clear()
       },
@@ -743,7 +671,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       title: "Write heap snapshot",
       category: "System",
       value: "app.heap_snapshot",
-      onSelect: async (dialog) => {
+      onSelect: async (dialog: DialogContext) => {
         const files = await props.onSnapshot?.()
         toast.show({
           variant: "info",
@@ -775,7 +703,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       value: "terminal.title.toggle",
       keybind: "terminal_title_toggle",
       category: "System",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         setTerminalTitleEnabled((prev) => {
           const next = !prev
           kv.set("terminal_title_enabled", next)
@@ -789,7 +717,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       title: kv.get("animations_enabled", true) ? "Disable animations" : "Enable animations",
       value: "app.toggle.animations",
       category: "System",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         kv.set("animations_enabled", !kv.get("animations_enabled", true))
         dialog.clear()
       },
@@ -798,7 +726,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       title: kv.get("diff_wrap_mode", "word") === "word" ? "Disable diff wrapping" : "Enable diff wrapping",
       value: "app.toggle.diffwrap",
       category: "System",
-      onSelect: (dialog) => {
+      onSelect: (dialog: DialogContext) => {
         const current = kv.get("diff_wrap_mode", "word")
         kv.set("diff_wrap_mode", current === "word" ? "none" : "word")
         dialog.clear()
@@ -806,93 +734,10 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     },
   ])
 
-  sdk.event.on(TuiEvent.CommandExecute.type, (evt) => {
-    command.trigger(evt.properties.command)
-  })
+  const off = setupAppEventListeners({ sdk, route, command, toast, dialog, kv, exit })
 
-  sdk.event.on(TuiEvent.ToastShow.type, (evt) => {
-    toast.show({
-      title: evt.properties.title,
-      message: evt.properties.message,
-      variant: evt.properties.variant,
-      duration: evt.properties.duration,
-    })
-  })
-
-  sdk.event.on(TuiEvent.SessionSelect.type, (evt) => {
-    route.navigate({
-      type: "session",
-      sessionID: evt.properties.sessionID,
-    })
-  })
-
-  sdk.event.on("session.deleted", (evt) => {
-    if (route.data.type === "session" && route.data.sessionID === evt.properties.info.id) {
-      route.navigate({ type: "home" })
-      toast.show({
-        variant: "info",
-        message: "The current session was deleted",
-      })
-    }
-  })
-
-  sdk.event.on("session.error", (evt) => {
-    const error = evt.properties.error
-    if (error && typeof error === "object" && error.name === "MessageAbortedError") return
-    const message = errorMessage(error)
-
-    toast.show({
-      variant: "error",
-      message,
-      duration: 5000,
-    })
-  })
-
-  sdk.event.on("installation.update-available", async (evt) => {
-    const version = evt.properties.version
-
-    const skipped = kv.get("skipped_version")
-    if (skipped && !semver.gt(version, skipped)) return
-
-    const choice = await DialogConfirm.show(
-      dialog,
-      `Update Available`,
-      `A new release v${version} is available. Would you like to update now?`,
-      "skip",
-    )
-
-    if (choice === false) {
-      kv.set("skipped_version", version)
-      return
-    }
-
-    if (choice !== true) return
-
-    toast.show({
-      variant: "info",
-      message: `Updating to v${version}...`,
-      duration: 30000,
-    })
-
-    const result = await sdk.client.global.upgrade({ target: version })
-
-    if (result.error || !result.data?.success) {
-      toast.show({
-        variant: "error",
-        title: "Update Failed",
-        message: "Update failed",
-        duration: 10000,
-      })
-      return
-    }
-
-    await DialogAlert.show(
-      dialog,
-      "Update Complete",
-      `Successfully updated to OpenCode v${result.data.version}. Please restart the application.`,
-    )
-
-    exit()
+  onCleanup(() => {
+    off.forEach((fn) => fn())
   })
 
   const plugin = createMemo(() => {
@@ -908,15 +753,8 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       width={dimensions().width}
       height={dimensions().height}
       backgroundColor={theme.background}
-      onMouseDown={(evt) => {
-        if (!Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) return
-        if (evt.button !== MouseButton.RIGHT) return
-
-        if (!Selection.copy(renderer, toast)) return
-        evt.preventDefault()
-        evt.stopPropagation()
-      }}
-      onMouseUp={Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT ? undefined : () => Selection.copy(renderer, toast)}
+      onMouseDown={copySelection.onMouseDown}
+      onMouseUp={copySelection.onMouseUp}
     >
       <Show when={Flag.OPENCODE_SHOW_TTFD}>
         <TimeToFirstDraw />

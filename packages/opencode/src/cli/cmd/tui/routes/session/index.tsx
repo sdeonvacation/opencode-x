@@ -125,7 +125,7 @@ export function Session() {
     const parentID = session()?.parentID ?? session()?.id
     return sync.data.session
       .filter((x) => x.parentID === parentID || x.id === parentID)
-      .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .toSorted((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))
   })
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
   const permissions = createMemo(() => {
