@@ -20,6 +20,8 @@ import type { Provider } from "@/provider/provider"
 import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
 import { isRecord } from "@/util/record"
+import * as PartCoalescer from "./part-coalescer"
+import * as DoomLoopDetector from "./doom-loop"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -73,6 +75,7 @@ export namespace SessionProcessor {
     needsCompaction: boolean
     currentText: MessageV2.TextPart | undefined
     reasoningMap: Record<string, MessageV2.ReasoningPart>
+    doomLoop: DoomLoopDetector.DoomLoopDetector
   }
 
   type StreamEvent = Event
@@ -121,7 +124,11 @@ export namespace SessionProcessor {
           needsCompaction: false,
           currentText: undefined,
           reasoningMap: {},
+          doomLoop: DoomLoopDetector.create({ threshold: DOOM_LOOP_THRESHOLD }),
         }
+        const coalescer = PartCoalescer.create({
+          flush: (part) => session.updatePart(part).pipe(Effect.asVoid),
+        })
         let aborted = false
 
         const parse = (e: unknown) =>
@@ -234,7 +241,7 @@ export namespace SessionProcessor {
                 time: { start: Date.now() },
                 metadata: value.providerMetadata,
               }
-              yield* session.updatePart(ctx.reasoningMap[value.id])
+              yield* coalescer.update(ctx.reasoningMap[value.id])
               return
 
             case "reasoning-delta":
@@ -255,7 +262,7 @@ export namespace SessionProcessor {
               ctx.reasoningMap[value.id].text = ctx.reasoningMap[value.id].text.trimEnd()
               ctx.reasoningMap[value.id].time = { ...ctx.reasoningMap[value.id].time, end: Date.now() }
               if (value.providerMetadata) ctx.reasoningMap[value.id].metadata = value.providerMetadata
-              yield* session.updatePart(ctx.reasoningMap[value.id])
+              yield* coalescer.update(ctx.reasoningMap[value.id])
               delete ctx.reasoningMap[value.id]
               return
 
@@ -325,21 +332,10 @@ export namespace SessionProcessor {
               }))
               delete ctx.toolemit[value.toolCallId]
 
-              const parts = MessageV2.parts(ctx.assistantMessage.id)
-              const recentParts = parts.slice(-DOOM_LOOP_THRESHOLD)
-
-              if (
-                recentParts.length !== DOOM_LOOP_THRESHOLD ||
-                !recentParts.every(
-                  (part) =>
-                    part.type === "tool" &&
-                    part.tool === value.toolName &&
-                    part.state.status !== "pending" &&
-                    JSON.stringify(part.state.input) === JSON.stringify(value.input),
-                )
-              ) {
-                return
-              }
+              const entry = { toolName: value.toolName, input: value.input }
+              ctx.doomLoop.record(entry)
+              const shouldAsk = ctx.doomLoop.detect(entry)
+              if (!shouldAsk) return
 
               const agent = yield* agents.get(ctx.assistantMessage.agent)
               yield* permission.ask({
@@ -368,7 +364,7 @@ export namespace SessionProcessor {
 
             case "start-step":
               if (!ctx.snapshot) ctx.snapshot = yield* snapshot.track()
-              yield* session.updatePart({
+              yield* coalescer.update({
                 id: PartID.ascending(),
                 messageID: ctx.assistantMessage.id,
                 sessionID: ctx.sessionID,
@@ -386,7 +382,7 @@ export namespace SessionProcessor {
               ctx.assistantMessage.finish = value.finishReason
               ctx.assistantMessage.cost += usage.cost
               ctx.assistantMessage.tokens = usage.tokens
-              yield* session.updatePart({
+              yield* coalescer.update({
                 id: PartID.ascending(),
                 reason: value.finishReason,
                 snapshot: yield* snapshot.track(),
@@ -400,7 +396,7 @@ export namespace SessionProcessor {
               if (ctx.snapshot) {
                 const patch = yield* snapshot.patch(ctx.snapshot)
                 if (patch.files.length) {
-                  yield* session.updatePart({
+                  yield* coalescer.update({
                     id: PartID.ascending(),
                     messageID: ctx.assistantMessage.id,
                     sessionID: ctx.sessionID,
@@ -434,7 +430,7 @@ export namespace SessionProcessor {
                 time: { start: Date.now() },
                 metadata: value.providerMetadata,
               }
-              yield* session.updatePart(ctx.currentText)
+              yield* coalescer.update(ctx.currentText)
               return
 
             case "text-delta":
@@ -467,7 +463,7 @@ export namespace SessionProcessor {
                 ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
               }
               if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
-              yield* session.updatePart(ctx.currentText)
+              yield* coalescer.update(ctx.currentText)
               ctx.currentText = undefined
               return
 
@@ -484,7 +480,7 @@ export namespace SessionProcessor {
           if (ctx.snapshot) {
             const patch = yield* snapshot.patch(ctx.snapshot)
             if (patch.files.length) {
-              yield* session.updatePart({
+              yield* coalescer.update({
                 id: PartID.ascending(),
                 messageID: ctx.assistantMessage.id,
                 sessionID: ctx.sessionID,
@@ -499,13 +495,13 @@ export namespace SessionProcessor {
           if (ctx.currentText) {
             const end = Date.now()
             ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
-            yield* session.updatePart(ctx.currentText)
+            yield* coalescer.update(ctx.currentText)
             ctx.currentText = undefined
           }
 
           for (const part of Object.values(ctx.reasoningMap)) {
             const end = Date.now()
-            yield* session.updatePart({
+            yield* coalescer.update({
               ...part,
               time: { start: part.time.start ?? end, end },
             })
@@ -539,6 +535,7 @@ export namespace SessionProcessor {
           ctx.toolcalls = {}
           ctx.assistantMessage.time.completed = Date.now()
           yield* session.updateMessage(ctx.assistantMessage)
+          yield* coalescer.dispose()
         })
 
         const halt = Effect.fn("SessionProcessor.halt")(function* (e: unknown) {
