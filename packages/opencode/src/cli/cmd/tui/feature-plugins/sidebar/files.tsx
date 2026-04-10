@@ -23,7 +23,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
           <For each={list()}>
             {(item) => (
               <box flexDirection="row" gap={1} justifyContent="space-between">
-                <text fg={theme().textMuted} wrapMode="none">
+                <text fg={theme().textMuted} wrapMode="word" flexGrow={1}>
                   {item.file}
                 </text>
                 <box flexDirection="row" gap={1} flexShrink={0}>

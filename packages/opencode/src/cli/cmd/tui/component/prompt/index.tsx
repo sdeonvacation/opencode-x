@@ -1,11 +1,21 @@
-import { BoxRenderable, TextareaRenderable, MouseEvent, PasteEvent, decodePasteBytes, t, dim, fg } from "@opentui/core"
+import {
+  BoxRenderable,
+  TextareaRenderable,
+  MouseEvent,
+  PasteEvent,
+  decodePasteBytes,
+  t,
+  dim,
+  fg,
+  RGBA,
+} from "@opentui/core"
 import { createEffect, createMemo, onMount, createSignal, onCleanup, on, Show, Switch, Match } from "solid-js"
 import "opentui-spinner/solid"
 import path from "path"
 import { fileURLToPath } from "url"
 import { Filesystem } from "@/util/filesystem"
 import { useLocal } from "@tui/context/local"
-import { useTheme } from "@tui/context/theme"
+import { useTheme, tint } from "@tui/context/theme"
 import { EmptyBorder, SplitBorder } from "@tui/component/border"
 import { useSDK } from "@tui/context/sdk"
 import { useRoute } from "@tui/context/route"
@@ -23,6 +33,8 @@ import { useRenderer, type JSX } from "@opentui/solid"
 import { Editor } from "@tui/util/editor"
 import { useExit } from "../../context/exit"
 import { Clipboard } from "../../util/clipboard"
+import { ClipboardImageHelper } from "../../util/clipboard-image"
+import { SpinnerVerbs, type SpinnerColorSpec } from "../../util/spinner-verbs"
 import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
 import { TuiEvent } from "../../event"
 import { iife } from "@/util/iife"
@@ -70,6 +82,10 @@ const money = new Intl.NumberFormat("en-US", {
   currency: "USD",
 })
 
+function getUsedTokens(msg: AssistantMessage) {
+  return msg.tokens.input + (msg.tokens.cache?.read ?? 0)
+}
+
 function randomIndex(count: number) {
   if (count <= 0) return 0
   return Math.floor(Math.random() * count)
@@ -88,12 +104,54 @@ export function Prompt(props: PromptProps) {
   const dialog = useDialog()
   const toast = useToast()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
+  const [spinnerVerb, setSpinnerVerb] = createSignal(SpinnerVerbs.next())
+  const [spinnerColorSpec, setSpinnerColorSpec] = createSignal<SpinnerColorSpec>(
+    SpinnerVerbs.colorSpecFor(SpinnerVerbs.next()),
+  )
+  // Rotate the global spinner label and color every 5 s while busy; stop when idle or unmounted.
+  createEffect(
+    on(
+      () => status().type !== "idle",
+      (busy) => {
+        if (!busy) return
+        // Pick a fresh verb and derive its mood-based color spec immediately when busy starts.
+        setSpinnerVerb((prev) => {
+          const next = SpinnerVerbs.next(prev)
+          setSpinnerColorSpec(SpinnerVerbs.colorSpecFor(next))
+          return next
+        })
+        const timer = setInterval(() => {
+          setSpinnerVerb((prev) => {
+            const next = SpinnerVerbs.next(prev)
+            setSpinnerColorSpec(SpinnerVerbs.colorSpecFor(next))
+            return next
+          })
+        }, 5000)
+        onCleanup(() => clearInterval(timer))
+      },
+    ),
+  )
   const history = usePromptHistory()
   const stash = usePromptStash()
   const command = useCommandDialog()
   const renderer = useRenderer()
   const { theme, syntax } = useTheme()
   const kv = useKV()
+
+  /**
+   * Derives the actual RGBA for the global spinner text from the current
+   * mood-based color spec. tintStep 0 = base theme color, 1 = lighter blend
+   * toward white, 2 = darker blend toward black. This ensures visible color
+   * variety even when multiple theme keys resolve to the same hue.
+   */
+  const spinnerColor = createMemo(() => {
+    const spec = spinnerColorSpec()
+    const base = theme[spec.key]
+    if (spec.tintStep === 0) return base
+    // tintStep 1: blend 35% toward white; tintStep 2: blend 35% toward black
+    const overlay = spec.tintStep === 1 ? RGBA.fromInts(255, 255, 255) : RGBA.fromInts(0, 0, 0)
+    return tint(base, overlay, 0.35)
+  })
   const list = createMemo(() => props.placeholders?.normal ?? [])
   const shell = createMemo(() => props.placeholders?.shell ?? [])
   const [auto, setAuto] = createSignal<AutocompleteRef>()
@@ -118,7 +176,7 @@ export function Prompt(props: PromptProps) {
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
   let promptPartTypeId = 0
 
-  sdk.event.on(TuiEvent.PromptAppend.type, (evt) => {
+  const offPromptAppend = sdk.event.on(TuiEvent.PromptAppend.type, (evt) => {
     if (!input || input.isDestroyed) return
     input.insertText(evt.properties.text)
     setTimeout(() => {
@@ -145,13 +203,16 @@ export function Prompt(props: PromptProps) {
   const usage = createMemo(() => {
     if (!props.sessionID) return
     const msg = sync.data.message[props.sessionID] ?? []
-    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
-    if (!last) return
+    const completed = msg.filter(
+      (item): item is AssistantMessage => item.role === "assistant" && item.finish != null && !item.summary,
+    )
+    if (completed.length === 0) return
 
-    const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
+    // Use the high-water mark so the display never drops within a compaction window
+    const tokens = Math.max(...completed.map(getUsedTokens))
     if (tokens <= 0) return
 
+    const last = completed[completed.length - 1]
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
     const cost = msg.reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0)
@@ -431,6 +492,7 @@ export function Prompt(props: PromptProps) {
   }
 
   onCleanup(() => {
+    offPromptAppend()
     props.ref?.(undefined)
   })
 
@@ -925,17 +987,17 @@ export function Prompt(props: PromptProps) {
                 // This helps terminals that forward Ctrl+V to the app; Windows
                 // Terminal 1.25+ usually handles Ctrl+V before this path.
                 if (keybind.match("input_paste", e)) {
-                  const content = await Clipboard.read()
-                  if (content?.mime.startsWith("image/")) {
+                  const result = await ClipboardImageHelper.fromClipboard()
+                  if (result.kind === "image") {
                     e.preventDefault()
                     await pasteAttachment({
                       filename: "clipboard",
-                      mime: content.mime,
-                      content: content.data,
+                      mime: result.mime!,
+                      content: result.content!,
                     })
                     return
                   }
-                  // If no image, let the default paste behavior continue
+                  // kind === "text" | "empty" → let default paste behaviour continue
                 }
                 if (keybind.match("input_clear", e) && store.prompt.input !== "") {
                   input.clear()
@@ -1156,7 +1218,9 @@ export function Prompt(props: PromptProps) {
               <box flexShrink={0} flexDirection="row" gap={1}>
                 <box marginLeft={1}>
                   <Show when={kv.get("animations_enabled", true)} fallback={<text fg={theme.textMuted}>[⋯]</text>}>
-                    <Spinner color={spinnerDef().color} />
+                    <Spinner color={spinnerDef().color}>
+                      <span style={{ fg: spinnerColor() }}>{spinnerVerb()}</span>
+                    </Spinner>
                   </Show>
                 </box>
                 <box flexDirection="row" gap={1} flexShrink={0}>
