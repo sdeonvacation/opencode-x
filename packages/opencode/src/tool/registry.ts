@@ -187,34 +187,6 @@ export namespace ToolRegistry {
       })
 
       const all: Interface["all"] = Effect.fn("ToolRegistry.all")(function* () {
-        const s = yield* InstanceState.get(state)
-        const cfg = yield* config.get()
-        const questionEnabled =
-          ["app", "cli", "desktop"].includes(Flag.OPENCODE_CLIENT) || Flag.OPENCODE_ENABLE_QUESTION_TOOL
-
-        return [
-          InvalidTool,
-          ...(questionEnabled ? [question] : []),
-          BashTool,
-          read,
-          GlobTool,
-          GrepTool,
-          EditTool,
-          WriteTool,
-          task,
-          WebFetchTool,
-          todo,
-          WebSearchTool,
-          CodeSearchTool,
-          SkillTool,
-          ApplyPatchTool,
-          ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [lsptool] : []),
-          ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),
-          ...s.custom,
-        ]
-      })
-
-      const all: Interface["all"] = Effect.fn("ToolRegistry.all")(function* () {
         return yield* Effect.forEach(yield* infos(), (tool) => Tool.init(tool), { concurrency: "unbounded" })
       })
 
@@ -289,11 +261,12 @@ export namespace ToolRegistry {
         )
       })
 
+      const namedDefs = {
+        task: yield* Tool.init(task),
+        read: yield* Tool.init(read),
+      }
       const named: Interface["named"] = Effect.fn("ToolRegistry.named")(function* () {
-        return {
-          task: yield* Tool.init(task),
-          read: yield* Tool.init(read),
-        }
+        return namedDefs
       })
 
       return Service.of({ ids, all, named, tools })

@@ -41,15 +41,14 @@ const parameters = z.object({
 export const TaskTool = Tool.defineEffect(
   id,
   Effect.gen(function* () {
-    const agent = yield* Agent.Service
-    const config = yield* Config.Service
+    return {
+      description: DESCRIPTION,
+      parameters,
+      async execute(params: z.infer<typeof parameters>, ctx: Tool.Context) {
+        const cfg = await Config.get()
 
-    const run = Effect.fn("TaskTool.execute")(function* (params: z.infer<typeof parameters>, ctx: Tool.Context) {
-      const cfg = yield* config.get()
-
-      if (!ctx.extra?.bypassAgentCheck) {
-        yield* Effect.promise(() =>
-          ctx.ask({
+        if (!ctx.extra?.bypassAgentCheck) {
+          await ctx.ask({
             permission: id,
             patterns: [params.subagent_type],
             always: ["*"],
@@ -59,26 +58,22 @@ export const TaskTool = Tool.defineEffect(
               task_category: params.task_category,
               use_ultrawork: params.use_ultrawork,
             },
-          }),
-        )
-      }
+          })
+        }
 
-      const next = yield* agent.get(params.subagent_type)
-      if (!next) {
-        return yield* Effect.fail(new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`))
-      }
+        const next = await Agent.get(params.subagent_type)
+        if (!next) {
+          throw new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`)
+        }
 
-      const canTask = next.permission.some((rule) => rule.permission === id)
-      const canTodo = next.permission.some((rule) => rule.permission === "todowrite")
+        const canTask = next.permission.some((rule) => rule.permission === id)
+        const canTodo = next.permission.some((rule) => rule.permission === "todowrite")
 
-      const existing = yield* Effect.promise(() =>
-        params.task_id
-          ? Session.get(SessionID.make(params.task_id)).catch(() => undefined)
-          : Promise.resolve(undefined),
-      )
+        const existing = params.task_id
+          ? await Session.get(SessionID.make(params.task_id)).catch(() => undefined)
+          : undefined
 
-      const subagent = yield* Effect.promise(() =>
-        spawnSubagent(existing, {
+        const subagent = await spawnSubagent(existing, {
           parentSessionID: ctx.sessionID,
           agent: next,
           description: params.description,
@@ -88,138 +83,118 @@ export const TaskTool = Tool.defineEffect(
           primaryTools: cfg.experimental?.primary_tools,
           maxDepth: cfg.experimental?.max_subagent_depth ?? 3,
           maxDescendants: cfg.experimental?.max_subagent_descendants ?? 50,
-        }),
-      )
+        })
 
-      const nextSession = subagent.session
+        const nextSession = subagent.session
 
-      const msg = yield* Effect.sync(() => MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }))
-      if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
+        const msg = MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID })
+        if (msg.info.role !== "assistant") throw new Error("Not an assistant message")
 
-      const model = next.model ?? {
-        modelID: msg.info.modelID,
-        providerID: msg.info.providerID,
-      }
+        const model = next.model ?? {
+          modelID: msg.info.modelID,
+          providerID: msg.info.providerID,
+        }
 
-      const messageID = MessageID.ascending()
-      const promptParts = yield* Effect.promise(() => SessionPrompt.resolvePromptParts(params.prompt))
-      const finalModel = resolveTaskModel({
-        prompt: params.prompt,
-        subagentType: params.subagent_type,
-        taskCategory: params.task_category,
-        useUltrawork: params.use_ultrawork,
-        categories: cfg.experimental?.task_categories ?? {},
-        ultraworkModel: cfg.experimental?.ultrawork_model,
-        fallback: model,
-      })
-      const concurrencyKey = `${finalModel.providerID}:${finalModel.modelID}`
-      const concurrencyLimit = cfg.experimental?.model_concurrency?.[concurrencyKey] ?? 5
-      const guard = createGuard({
-        sessionID: String(ctx.sessionID),
-        threshold: cfg.experimental?.loop_detector_threshold ?? 5,
-      })
+        const messageID = MessageID.ascending()
+        const promptParts = await SessionPrompt.resolvePromptParts(params.prompt)
+        const finalModel = resolveTaskModel({
+          prompt: params.prompt,
+          subagentType: params.subagent_type,
+          taskCategory: params.task_category,
+          useUltrawork: params.use_ultrawork,
+          categories: cfg.experimental?.task_categories ?? {},
+          ultraworkModel: cfg.experimental?.ultrawork_model,
+          fallback: model,
+        })
+        const concurrencyKey = `${finalModel.providerID}:${finalModel.modelID}`
+        const concurrencyLimit = cfg.experimental?.model_concurrency?.[concurrencyKey] ?? 5
+        const guard = createGuard({
+          sessionID: String(ctx.sessionID),
+          threshold: cfg.experimental?.loop_detector_threshold ?? 5,
+        })
 
-      ctx.metadata({
-        title: params.description,
-        metadata: {
-          sessionId: nextSession.id,
-          model: finalModel,
-        },
-      })
+        ctx.metadata({
+          title: params.description,
+          metadata: {
+            sessionId: nextSession.id,
+            model: finalModel,
+          },
+        })
 
-      function cancel() {
-        SessionPrompt.cancel(nextSession.id)
-      }
+        function cancel() {
+          SessionPrompt.cancel(nextSession.id)
+        }
 
-      return yield* Effect.acquireUseRelease(
-        Effect.sync(() => {
-          ctx.abort.addEventListener("abort", cancel)
-        }),
-        () =>
-          Effect.gen(function* () {
-            yield* Effect.promise(() =>
-              guard.before({
-                toolName: "task",
-                input: {
-                  prompt: params.prompt,
-                  subagent_type: params.subagent_type,
-                  task_category: params.task_category,
-                  use_ultrawork: params.use_ultrawork,
-                  task_id: params.task_id,
-                  command: params.command,
-                },
-              }),
-            )
-            yield* Effect.promise(() => acquire(concurrencyKey, concurrencyLimit, ctx.abort))
-            const timeout = cfg.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT
-            const result = yield* Effect.acquireUseRelease(
-              Effect.void,
-              () =>
-                Effect.promise(() =>
-                  withTimeout(
-                    SessionPrompt.prompt({
-                      messageID,
-                      sessionID: nextSession.id,
-                      model: {
-                        modelID: ModelID.make(finalModel.modelID),
-                        providerID: ProviderID.make(finalModel.providerID),
-                      },
-                      agent: next.name,
-                      tools: {
-                        ...(canTodo ? {} : { todowrite: false }),
-                        ...(canTask ? {} : { task: false }),
-                        ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
-                      },
-                      parts: promptParts,
-                    }),
-                    timeout,
-                  ).catch((err) => {
-                    if (err instanceof Error && err.message.includes("Operation timed out")) {
-                      throw new Error(`Subagent timed out after ${timeout}ms`)
-                    }
-                    throw err
-                  }),
-                ),
-              () => Effect.sync(() => release(concurrencyKey)),
-            )
+        ctx.abort.addEventListener("abort", cancel)
+        try {
+          await guard.before({
+            toolName: "task",
+            input: {
+              prompt: params.prompt,
+              subagent_type: params.subagent_type,
+              task_category: params.task_category,
+              use_ultrawork: params.use_ultrawork,
+              task_id: params.task_id,
+              command: params.command,
+            },
+          })
 
-            yield* Effect.promise(() =>
-              Bus.publish(OrchestrationEvent.Complete, {
+          await acquire(concurrencyKey, concurrencyLimit, ctx.abort)
+          const timeout = cfg.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT
+          let result: Awaited<ReturnType<typeof SessionPrompt.prompt>>
+          try {
+            result = await withTimeout(
+              SessionPrompt.prompt({
+                messageID,
                 sessionID: nextSession.id,
-                parentSessionID: ctx.sessionID,
+                model: {
+                  modelID: ModelID.make(finalModel.modelID),
+                  providerID: ProviderID.make(finalModel.providerID),
+                },
                 agent: next.name,
-                durationMs: 0,
+                tools: {
+                  ...(canTodo ? {} : { todowrite: false }),
+                  ...(canTask ? {} : { task: false }),
+                  ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
+                },
+                parts: promptParts,
               }),
-            )
+              timeout,
+            ).catch((err) => {
+              if (err instanceof Error && err.message.includes("Operation timed out")) {
+                throw new Error(`Subagent timed out after ${timeout}ms`)
+              }
+              throw err
+            })
+          } finally {
+            release(concurrencyKey)
+          }
 
-            return {
-              title: params.description,
-              metadata: {
-                sessionId: nextSession.id,
-                model: finalModel,
-              },
-              output: [
-                `task_id: ${nextSession.id} (for resuming to continue this task if needed)`,
-                "",
-                "<task_result>",
-                result.parts.findLast((item) => item.type === "text")?.text ?? "",
-                "</task_result>",
-              ].join("\n"),
-            }
-          }),
-        () =>
-          Effect.gen(function* () {
-            ctx.abort.removeEventListener("abort", cancel)
-            if (subagent.spawned) subagent.spawnInfo.release()
-          }),
-      )
-    })
+          await Bus.publish(OrchestrationEvent.Complete, {
+            sessionID: nextSession.id,
+            parentSessionID: ctx.sessionID,
+            agent: next.name,
+            durationMs: 0,
+          })
 
-    return {
-      description: DESCRIPTION,
-      parameters,
-      async execute(params: z.infer<typeof parameters>, ctx) {
-        return Effect.runPromise(run(params, ctx))
+          return {
+            title: params.description,
+            metadata: {
+              sessionId: nextSession.id,
+              model: finalModel,
+            },
+            output: [
+              `task_id: ${nextSession.id} (for resuming to continue this task if needed)`,
+              "",
+              "<task_result>",
+              result.parts.findLast((item) => item.type === "text")?.text ?? "",
+              "</task_result>",
+            ].join("\n"),
+          }
+        } finally {
+          ctx.abort.removeEventListener("abort", cancel)
+          if (subagent.spawned) subagent.spawnInfo.release()
+        }
       },
     }
   }),
