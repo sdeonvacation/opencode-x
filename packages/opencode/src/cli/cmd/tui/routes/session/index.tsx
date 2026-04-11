@@ -1110,6 +1110,8 @@ export function Session() {
           ref={(r) => (main = r)}
           flexGrow={1}
           flexShrink={1}
+          maxWidth={contentWidth()}
+          overflow="hidden"
           paddingBottom={1}
           paddingLeft={2}
           paddingRight={2}
