@@ -17,6 +17,7 @@ import type {
   ProviderListResponse,
   ProviderAuthMethod,
   VcsInfo,
+  VcsFileDiff,
 } from "@opencode-ai/sdk/v2"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useProject } from "@tui/context/project"
@@ -75,6 +76,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       }
       formatter: FormatterStatus[]
       vcs: VcsInfo | undefined
+      vcs_diff: VcsFileDiff[]
     }>({
       provider_next: {
         all: [],
@@ -102,6 +104,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       mcp_resource: {},
       formatter: [],
       vcs: undefined,
+      vcs_diff: [],
     })
 
     const event = useEvent()
@@ -192,6 +195,9 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
         case "session.diff":
           setStore("session_diff", event.properties.sessionID, event.properties.diff)
+          sdk.client.vcs.diff({ mode: "git", workspace: project.workspace.current() }).then((x) => {
+            setStore("vcs_diff", reconcile(x.data ?? []))
+          })
           break
 
         case "session.deleted": {
@@ -437,6 +443,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             }),
             sdk.client.provider.auth({ workspace }).then((x) => setStore("provider_auth", reconcile(x.data ?? {}))),
             sdk.client.vcs.get({ workspace }).then((x) => setStore("vcs", reconcile(x.data))),
+            sdk.client.vcs.diff({ mode: "git", workspace }).then((x) => setStore("vcs_diff", reconcile(x.data ?? []))),
             project.workspace.sync(),
           ]).then(() => {
             setStore("status", "complete")

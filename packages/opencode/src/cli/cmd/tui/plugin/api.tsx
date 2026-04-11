@@ -144,6 +144,7 @@ function stateApi(sync: ReturnType<typeof useSync>): TuiPluginApi["state"] {
       if (!sync.data.vcs) return
       return {
         branch: sync.data.vcs.branch,
+        files: sync.data.vcs_diff,
       }
     },
     session: {

@@ -6,7 +6,30 @@ const id = "internal:sidebar-files"
 function View(props: { api: TuiPluginApi; session_id: string }) {
   const [open, setOpen] = createSignal(true)
   const theme = () => props.api.theme.current
-  const list = createMemo(() => props.api.state.session.diff(props.session_id))
+  const files = createMemo(() => {
+    const seen = new Set<string>()
+    return props.api.state.session
+      .messages(props.session_id)
+      .flatMap((msg) => props.api.state.part(msg.id))
+      .filter((part) => part.type === "patch")
+      .flatMap((part) => part.files)
+      .filter((file) => {
+        if (seen.has(file)) return false
+        seen.add(file)
+        return true
+      })
+      .map((file) => ({
+        file,
+        additions: 0,
+        deletions: 0,
+      }))
+  })
+  const list = createMemo(() => {
+    const vcs = props.api.state.vcs?.files
+    if (!vcs) return files()
+    const modified = new Set(vcs.map((f) => f.file))
+    return files().filter((f) => modified.has(f.file))
+  })
 
   return (
     <Show when={list().length > 0}>
