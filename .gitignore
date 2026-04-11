@@ -30,3 +30,7 @@ logs/
 *.bun-build
 tsconfig.tsbuildinfo
 packages/opencode/src/provider/models-snapshot.js
+/specs
+/packages/opencode/src/graphify-out
+/graphify-out
+.graphify_uncached.txt
