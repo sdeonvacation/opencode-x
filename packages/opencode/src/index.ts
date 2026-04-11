@@ -37,6 +37,7 @@ import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { Heap } from "./cli/heap"
 import { drizzle } from "drizzle-orm/bun-sqlite"
+import { Instance } from "./project/instance"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -237,5 +238,6 @@ try {
   // Most notably, some docker-container-based MCP servers don't handle such signals unless
   // run using `docker run --init`.
   // Explicitly exit to avoid any hanging subprocesses.
+  await Instance.disposeAll()
   process.exit()
 }
