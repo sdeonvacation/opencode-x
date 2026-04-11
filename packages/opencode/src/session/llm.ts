@@ -353,7 +353,7 @@ export namespace LLM {
             patterns: uniquePatterns,
             metadata: { tools: approvalTools },
             always: uniquePatterns,
-            ruleset: [],
+            ruleset,
           })
           for (const name of uniqueNames) approvedToolsForSession.add(name)
           workflowModel.sessionPreapprovedTools = [...(workflowModel.sessionPreapprovedTools ?? []), ...uniqueNames]
