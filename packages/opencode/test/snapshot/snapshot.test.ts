@@ -612,6 +612,41 @@ test("files tracked in snapshot but now gitignored are filtered out", async () =
   })
 })
 
+test("gitignore updated between track calls filters from diff", async () => {
+  await using tmp = await bootstrap()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      // a.txt is already committed from bootstrap - track it in snapshot
+      const before = await Snapshot.track()
+      expect(before).toBeTruthy()
+
+      // Modify a.txt (so it appears in diff-files)
+      await Filesystem.write(`${tmp.path}/a.txt`, "modified content")
+
+      // Now add gitignore that would exclude a.txt
+      await Filesystem.write(`${tmp.path}/.gitignore`, "a.txt\n")
+
+      // Also modify b.txt which is not gitignored
+      await Filesystem.write(`${tmp.path}/b.txt`, "also modified")
+
+      // Second track - should not include a.txt even though it changed
+      const after = await Snapshot.track()
+      expect(after).toBeTruthy()
+
+      // Verify a.txt is NOT in the diff between snapshots
+      const diffs = await Snapshot.diffFull(before!, after!)
+      expect(diffs.some((x) => x.file === "a.txt")).toBe(false)
+
+      // But .gitignore should be in the diff
+      expect(diffs.some((x) => x.file === ".gitignore")).toBe(true)
+
+      // b.txt should be in the diff (not gitignored)
+      expect(diffs.some((x) => x.file === "b.txt")).toBe(true)
+    },
+  })
+})
+
 test("git info exclude changes", async () => {
   await using tmp = await bootstrap()
   await Instance.provide({
