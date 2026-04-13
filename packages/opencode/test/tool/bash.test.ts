@@ -113,6 +113,15 @@ const mustTruncate = (result: {
   )
 }
 
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 describe("tool.bash", () => {
   each("basic", async () => {
     await Instance.provide({
@@ -1112,6 +1121,38 @@ describe("tool.bash abort", () => {
       },
     })
   }, 15_000)
+
+  test.skipIf(process.platform === "win32")(
+    "reaps background subprocesses after shell exits",
+    async () => {
+      await Instance.provide({
+        directory: projectRoot,
+        fn: async () => {
+          const bash = await BashTool.init()
+          const code = "setInterval(() => {}, 1000)"
+          const result = await bash.execute(
+            {
+              command: `${bin} -e ${evalarg(code)} >/dev/null 2>&1 & echo $!`,
+              description: "Background cleanup test",
+            },
+            ctx,
+          )
+          expect(result.metadata.exit).toBe(0)
+          const pid = Number(result.output.trim())
+          expect(Number.isFinite(pid)).toBe(true)
+
+          for (let i = 0; i < 50; i++) {
+            if (!alive(pid)) return
+            await Bun.sleep(20)
+          }
+
+          process.kill(pid, "SIGKILL")
+          throw new Error(`background process still alive: ${pid}`)
+        },
+      })
+    },
+    15_000,
+  )
 
   test.skipIf(process.platform === "win32")("captures stderr in output", async () => {
     await Instance.provide({
