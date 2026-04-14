@@ -433,6 +433,24 @@ describe("tool.apply_patch freeform", () => {
     })
   })
 
+  test("matches when chunk repeats @@ context line", async () => {
+    await using fixture = await tmpdir()
+    const { ctx } = makeCtx()
+
+    await Instance.provide({
+      directory: fixture.path,
+      fn: async () => {
+        const target = path.join(fixture.path, "repeat_ctx.txt")
+        await fs.writeFile(target, "ctx\na\nb\n", "utf-8")
+
+        const patchText = "*** Begin Patch\n*** Update File: repeat_ctx.txt\n@@ ctx\n ctx\n-a\n+A\n*** End Patch"
+
+        await execute({ patchText }, ctx)
+        expect(await fs.readFile(target, "utf-8")).toBe("ctx\nA\nb\n")
+      },
+    })
+  })
+
   test("EOF anchor matches from end of file first", async () => {
     await using fixture = await tmpdir()
     const { ctx } = makeCtx()

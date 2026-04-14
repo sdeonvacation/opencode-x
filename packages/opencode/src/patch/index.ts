@@ -358,7 +358,7 @@ export namespace Patch {
         if (contextIdx === -1) {
           throw new Error(`Failed to find context '${chunk.change_context}' in ${filePath}`)
         }
-        lineIndex = contextIdx + 1
+        lineIndex = contextIdx
       }
 
       // Handle pure addition (no old lines)
