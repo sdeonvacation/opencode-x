@@ -460,6 +460,41 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     }
 
     const fullSyncedSessions = new Set<string>()
+    type Load = {
+      session: Session
+      messages: { info: Message; parts: Part[] }[]
+      todo: Todo[]
+      diff: Snapshot.FileDiff[]
+    }
+
+    async function load(
+      sessionID: string,
+      workspace: string | undefined,
+      force?: boolean,
+      seen = new Set<string>(),
+    ): Promise<Load[]> {
+      if (seen.has(sessionID)) return []
+      seen.add(sessionID)
+      if (fullSyncedSessions.has(sessionID) && !force) return []
+      const [session, messages, todo, diff, kids] = await Promise.all([
+        sdk.client.session.get({ sessionID, workspace }, { throwOnError: true }),
+        sdk.client.session.messages({ sessionID, limit: 100, workspace }),
+        sdk.client.session.todo({ sessionID, workspace }),
+        sdk.client.session.diff({ sessionID, workspace }),
+        sdk.client.session.children({ sessionID, workspace }),
+      ])
+      const child = await Promise.all((kids.data ?? []).map((item) => load(item.id, workspace, force, seen)))
+      return [
+        {
+          session: session.data!,
+          messages: messages.data!,
+          todo: todo.data ?? [],
+          diff: diff.data ?? [],
+        },
+        ...child.flat(),
+      ]
+    }
+
     createEffect(
       on(
         () => project.workspace.current(),
@@ -501,26 +536,23 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         async sync(sessionID: string, opts?: { force?: boolean }) {
           if (fullSyncedSessions.has(sessionID) && !opts?.force) return
           const workspace = project.workspace.current()
-          const [session, messages, todo, diff] = await Promise.all([
-            sdk.client.session.get({ sessionID, workspace }, { throwOnError: true }),
-            sdk.client.session.messages({ sessionID, limit: 100, workspace }),
-            sdk.client.session.todo({ sessionID, workspace }),
-            sdk.client.session.diff({ sessionID, workspace }),
-          ])
+          const list = await load(sessionID, workspace, opts?.force)
           setStore(
             produce((draft) => {
-              const match = Binary.search(draft.session, sessionID, (s) => s.id)
-              if (match.found) draft.session[match.index] = session.data!
-              if (!match.found) draft.session.splice(match.index, 0, session.data!)
-              draft.todo[sessionID] = todo.data ?? []
-              draft.message[sessionID] = messages.data!.map((x) => x.info)
-              for (const message of messages.data!) {
-                draft.part[message.info.id] = message.parts
+              for (const item of list) {
+                const match = Binary.search(draft.session, item.session.id, (s) => s.id)
+                if (match.found) draft.session[match.index] = item.session
+                if (!match.found) draft.session.splice(match.index, 0, item.session)
+                draft.todo[item.session.id] = item.todo
+                draft.message[item.session.id] = item.messages.map((msg: { info: Message }) => msg.info)
+                for (const message of item.messages) {
+                  draft.part[message.info.id] = message.parts
+                }
+                draft.session_diff[item.session.id] = item.diff
               }
-              draft.session_diff[sessionID] = diff.data ?? []
             }),
           )
-          fullSyncedSessions.add(sessionID)
+          for (const item of list) fullSyncedSessions.add(item.session.id)
         },
       },
       bootstrap,

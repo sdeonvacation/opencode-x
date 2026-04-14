@@ -3,13 +3,23 @@ import { createMemo, For, Show, createSignal } from "solid-js"
 
 const id = "internal:sidebar-files"
 
+function sessions(api: TuiPluginApi, sessionID: string) {
+  const seen = new Set<string>()
+  const walk = (id: string): string[] => {
+    if (seen.has(id)) return []
+    seen.add(id)
+    return [id, ...api.state.session.children(id).flatMap((item) => walk(item.id))]
+  }
+  return walk(sessionID)
+}
+
 function View(props: { api: TuiPluginApi; session_id: string }) {
   const [open, setOpen] = createSignal(true)
   const theme = () => props.api.theme.current
   const files = createMemo(() => {
     const seen = new Set<string>()
-    return props.api.state.session
-      .messages(props.session_id)
+    return sessions(props.api, props.session_id)
+      .flatMap((id) => props.api.state.session.messages(id))
       .flatMap((msg) => props.api.state.part(msg.id))
       .filter((part) => part.type === "patch")
       .flatMap((part) => part.files)

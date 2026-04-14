@@ -8,6 +8,7 @@ import type {
   Todo,
   Message,
   Part,
+  Session,
   Provider,
   PermissionRequest,
   QuestionRequest,
@@ -274,6 +275,7 @@ export type TuiState = {
   readonly vcs: { branch?: string; files?: ReadonlyArray<TuiSidebarFileItem> } | undefined
   session: {
     count: () => number
+    children: (sessionID: string) => ReadonlyArray<Session>
     diff: (sessionID: string) => ReadonlyArray<TuiSidebarFileItem>
     todo: (sessionID: string) => ReadonlyArray<TuiSidebarTodoItem>
     messages: (sessionID: string) => ReadonlyArray<Message>

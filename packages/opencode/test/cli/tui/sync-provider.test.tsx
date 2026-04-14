@@ -82,6 +82,92 @@ function data(workspace?: string | null) {
   }
 }
 
+function tree(workspace?: string | null) {
+  const tag = workspace ?? "root"
+  return {
+    ses_1: {
+      session: {
+        id: "ses_1",
+        title: `session-${tag}`,
+        workspaceID: workspace ?? undefined,
+        time: { updated: 1 },
+      },
+      message: {
+        info: {
+          id: `msg_1_${tag}`,
+          sessionID: "ses_1",
+          role: "assistant",
+          time: { created: 1, completed: 1 },
+        },
+        parts: [
+          { id: `part_1_${tag}`, messageID: `msg_1_${tag}`, sessionID: "ses_1", type: "text", text: `part-${tag}` },
+        ],
+      },
+      todo: [{ id: `todo_1_${tag}`, content: `todo-1-${tag}`, status: "pending", priority: "medium" }],
+      diff: [{ file: `${tag}-1.ts`, patch: "", additions: 0, deletions: 0 }],
+      children: ["ses_2"],
+    },
+    ses_2: {
+      session: {
+        id: "ses_2",
+        title: `child-${tag}`,
+        parentID: "ses_1",
+        workspaceID: workspace ?? undefined,
+        time: { updated: 2 },
+      },
+      message: {
+        info: {
+          id: `msg_2_${tag}`,
+          sessionID: "ses_2",
+          role: "assistant",
+          time: { created: 2, completed: 2 },
+        },
+        parts: [
+          {
+            id: `part_2_${tag}`,
+            messageID: `msg_2_${tag}`,
+            sessionID: "ses_2",
+            type: "patch",
+            files: [`child-${tag}.ts`],
+          },
+        ],
+      },
+      todo: [{ id: `todo_2_${tag}`, content: `todo-2-${tag}`, status: "pending", priority: "medium" }],
+      diff: [{ file: `${tag}-2.ts`, patch: "", additions: 0, deletions: 0 }],
+      children: ["ses_3"],
+    },
+    ses_3: {
+      session: {
+        id: "ses_3",
+        title: `grandchild-${tag}`,
+        parentID: "ses_2",
+        workspaceID: workspace ?? undefined,
+        time: { updated: 3 },
+      },
+      message: {
+        info: {
+          id: `msg_3_${tag}`,
+          sessionID: "ses_3",
+          role: "assistant",
+          time: { created: 3, completed: 3 },
+        },
+        parts: [
+          {
+            id: `part_3_${tag}`,
+            messageID: `msg_3_${tag}`,
+            sessionID: "ses_3",
+            type: "patch",
+            files: [`grandchild-${tag}.ts`],
+          },
+        ],
+      },
+      todo: [{ id: `todo_3_${tag}`, content: `todo-3-${tag}`, status: "pending", priority: "medium" }],
+      diff: [{ file: `${tag}-3.ts`, patch: "", additions: 0, deletions: 0 }],
+      children: [],
+    },
+  }
+}
+
 type Hit = {
   path: string
   workspace?: string
@@ -157,14 +243,51 @@ function createFetch(log: Hit[]) {
       if (url.pathname === "/session/ses_1") {
         return json(data(workspace).session)
       }
+      if (url.pathname === "/session/ses_2") {
+        return json(tree(workspace).ses_2.session)
+      }
+      if (url.pathname === "/session/ses_3") {
+        return json(tree(workspace).ses_3.session)
+      }
       if (url.pathname === "/session/ses_1/message") {
         return json([data(workspace).message])
+      }
+      if (url.pathname === "/session/ses_2/message") {
+        return json([tree(workspace).ses_2.message])
+      }
+      if (url.pathname === "/session/ses_3/message") {
+        return json([tree(workspace).ses_3.message])
       }
       if (url.pathname === "/session/ses_1/todo") {
         return json(data(workspace).todo)
       }
+      if (url.pathname === "/session/ses_2/todo") {
+        return json(tree(workspace).ses_2.todo)
+      }
+      if (url.pathname === "/session/ses_3/todo") {
+        return json(tree(workspace).ses_3.todo)
+      }
       if (url.pathname === "/session/ses_1/diff") {
         return json(data(workspace).diff)
+      }
+      if (url.pathname === "/session/ses_2/diff") {
+        return json(tree(workspace).ses_2.diff)
+      }
+      if (url.pathname === "/session/ses_3/diff") {
+        return json(tree(workspace).ses_3.diff)
+      }
+      if (url.pathname === "/session/ses_1/children") {
+        return json(
+          tree(workspace).ses_1.children.map((id) => tree(workspace)[id as keyof ReturnType<typeof tree>].session),
+        )
+      }
+      if (url.pathname === "/session/ses_2/children") {
+        return json(
+          tree(workspace).ses_2.children.map((id) => tree(workspace)[id as keyof ReturnType<typeof tree>].session),
+        )
+      }
+      if (url.pathname === "/session/ses_3/children") {
+        return json([])
       }
 
       throw new Error(`unexpected request: ${req.method} ${url.pathname}`)
@@ -285,6 +408,33 @@ describe("SyncProvider", () => {
       expect(sync.data.message.ses_1[0]?.id).toBe("msg_1")
       expect(sync.data.part.msg_1[0]).toMatchObject({ type: "text", text: "part-ws_b" })
       expect(sync.data.session_diff.ses_1[0]?.file).toBe("ws_b.ts")
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("syncs descendant sessions with the root session", async () => {
+    const log: Hit[] = []
+    const { app, sync } = await mount(log)
+
+    try {
+      await waitBoot(log)
+
+      log.length = 0
+      await sync.session.sync("ses_1")
+
+      expect(sync.data.message.ses_2?.[0]?.id).toBe("msg_2_root")
+      expect(sync.data.message.ses_3?.[0]?.id).toBe("msg_3_root")
+      expect(sync.data.part.msg_2_root?.[0]).toEqual(
+        expect.objectContaining({ type: "patch", files: ["child-root.ts"] }),
+      )
+      expect(sync.data.part.msg_3_root?.[0]).toEqual(
+        expect.objectContaining({ type: "patch", files: ["grandchild-root.ts"] }),
+      )
+      expect(sync.data.session.find((item) => item.id === "ses_2")?.parentID).toBe("ses_1")
+      expect(sync.data.session.find((item) => item.id === "ses_3")?.parentID).toBe("ses_2")
+      expect(log.filter((item) => item.path === "/session/ses_1/children")).toHaveLength(1)
+      expect(log.filter((item) => item.path === "/session/ses_2/children")).toHaveLength(1)
     } finally {
       app.renderer.destroy()
     }
