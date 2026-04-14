@@ -1,7 +1,33 @@
+import path from "path"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 import { createMemo, For, Show, createSignal } from "solid-js"
 
 const id = "internal:sidebar-files"
+
+export function rel(api: TuiPluginApi, file: string) {
+  const next = file.replaceAll("\\", "/")
+  if (!path.isAbsolute(file)) return next
+  const root = api.state.path.worktree || api.state.path.directory
+  if (!root) return next
+  return path.relative(root, file).replaceAll("\\", "/")
+}
+
+export function merge(api: TuiPluginApi, files: string[]) {
+  const seen = new Set<string>()
+  const vcs = new Map((api.state.vcs?.files ?? []).map((item) => [rel(api, item.file), item] as const))
+  return files
+    .map((file) => rel(api, file))
+    .filter((file) => {
+      if (seen.has(file)) return false
+      seen.add(file)
+      return true
+    })
+    .map((file) => ({
+      file,
+      additions: vcs.get(file)?.additions ?? 0,
+      deletions: vcs.get(file)?.deletions ?? 0,
+    }))
+}
 
 function sessions(api: TuiPluginApi, sessionID: string) {
   const seen = new Set<string>()
@@ -17,27 +43,19 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const [open, setOpen] = createSignal(true)
   const theme = () => props.api.theme.current
   const files = createMemo(() => {
-    const seen = new Set<string>()
-    return sessions(props.api, props.session_id)
-      .flatMap((id) => props.api.state.session.messages(id))
-      .flatMap((msg) => props.api.state.part(msg.id))
-      .filter((part) => part.type === "patch")
-      .flatMap((part) => part.files)
-      .filter((file) => {
-        if (seen.has(file)) return false
-        seen.add(file)
-        return true
-      })
-      .map((file) => ({
-        file,
-        additions: 0,
-        deletions: 0,
-      }))
+    return merge(
+      props.api,
+      sessions(props.api, props.session_id)
+        .flatMap((id) => props.api.state.session.messages(id))
+        .flatMap((msg) => props.api.state.part(msg.id))
+        .filter((part) => part.type === "patch")
+        .flatMap((part) => part.files),
+    )
   })
   const list = createMemo(() => {
     const vcs = props.api.state.vcs?.files
     if (!vcs) return files()
-    const modified = new Set(vcs.map((f) => f.file))
+    const modified = new Set(vcs.map((f) => rel(props.api, f.file)))
     return files().filter((f) => modified.has(f.file))
   })
 

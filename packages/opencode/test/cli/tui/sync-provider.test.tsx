@@ -1,12 +1,23 @@
 /** @jsxImportSource @opentui/solid */
 import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
+import type { Event, GlobalEvent } from "@opencode-ai/sdk/v2"
 import { onMount } from "solid-js"
 import { ArgsProvider } from "../../../src/cli/cmd/tui/context/args"
 import { ExitProvider } from "../../../src/cli/cmd/tui/context/exit"
 import { ProjectProvider, useProject } from "../../../src/cli/cmd/tui/context/project"
 import { SDKProvider } from "../../../src/cli/cmd/tui/context/sdk"
 import { SyncProvider, useSync } from "../../../src/cli/cmd/tui/context/sync"
+
+type Complete = {
+  type: "orchestration.complete"
+  properties: {
+    sessionID: string
+    parentSessionID: string
+    agent: string
+    durationMs: number
+  }
+}
 
 const sighup = new Set(process.listeners("SIGHUP"))
 
@@ -79,6 +90,26 @@ function data(workspace?: string | null) {
         deletions: 0,
       },
     ],
+  }
+}
+
+function evt(payload: Event | Complete, input: { directory: string; workspace?: string }): GlobalEvent {
+  return {
+    directory: input.directory,
+    workspace: input.workspace,
+    payload: payload as Event,
+  }
+}
+
+function complete(sessionID: string, parentSessionID: string): Complete {
+  return {
+    type: "orchestration.complete",
+    properties: {
+      sessionID,
+      parentSessionID,
+      agent: "coder",
+      durationMs: 1,
+    },
   }
 }
 
@@ -173,12 +204,20 @@ type Hit = {
   workspace?: string
 }
 
-function createFetch(log: Hit[]) {
+function createFetch(
+  log: Hit[],
+  input?: {
+    data?: typeof data
+    tree?: typeof tree
+  },
+) {
   return Object.assign(
-    async (input: RequestInfo | URL, init?: RequestInit) => {
-      const req = new Request(input, init)
+    async (reqinput: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(reqinput, init)
       const url = new URL(req.url)
       const workspace = url.searchParams.get("workspace") ?? req.headers.get("x-opencode-workspace") ?? undefined
+      const root = input?.data?.(workspace) ?? data(workspace)
+      const map = input?.tree?.(workspace) ?? tree(workspace)
       log.push({
         path: url.pathname,
         workspace,
@@ -241,50 +280,46 @@ function createFetch(log: Hit[]) {
         return json([{ id: "ws_a" }, { id: "ws_b" }])
       }
       if (url.pathname === "/session/ses_1") {
-        return json(data(workspace).session)
+        return json(root.session)
       }
       if (url.pathname === "/session/ses_2") {
-        return json(tree(workspace).ses_2.session)
+        return json(map.ses_2.session)
       }
       if (url.pathname === "/session/ses_3") {
-        return json(tree(workspace).ses_3.session)
+        return json(map.ses_3.session)
       }
       if (url.pathname === "/session/ses_1/message") {
-        return json([data(workspace).message])
+        return json([root.message])
       }
       if (url.pathname === "/session/ses_2/message") {
-        return json([tree(workspace).ses_2.message])
+        return json([map.ses_2.message])
       }
       if (url.pathname === "/session/ses_3/message") {
-        return json([tree(workspace).ses_3.message])
+        return json([map.ses_3.message])
       }
       if (url.pathname === "/session/ses_1/todo") {
-        return json(data(workspace).todo)
+        return json(root.todo)
       }
       if (url.pathname === "/session/ses_2/todo") {
-        return json(tree(workspace).ses_2.todo)
+        return json(map.ses_2.todo)
       }
       if (url.pathname === "/session/ses_3/todo") {
-        return json(tree(workspace).ses_3.todo)
+        return json(map.ses_3.todo)
       }
       if (url.pathname === "/session/ses_1/diff") {
-        return json(data(workspace).diff)
+        return json(root.diff)
       }
       if (url.pathname === "/session/ses_2/diff") {
-        return json(tree(workspace).ses_2.diff)
+        return json(map.ses_2.diff)
       }
       if (url.pathname === "/session/ses_3/diff") {
-        return json(tree(workspace).ses_3.diff)
+        return json(map.ses_3.diff)
       }
       if (url.pathname === "/session/ses_1/children") {
-        return json(
-          tree(workspace).ses_1.children.map((id) => tree(workspace)[id as keyof ReturnType<typeof tree>].session),
-        )
+        return json(map.ses_1.children.map((id) => map[id as keyof ReturnType<typeof tree>].session))
       }
       if (url.pathname === "/session/ses_2/children") {
-        return json(
-          tree(workspace).ses_2.children.map((id) => tree(workspace)[id as keyof ReturnType<typeof tree>].session),
-        )
+        return json(map.ses_2.children.map((id) => map[id as keyof ReturnType<typeof tree>].session))
       }
       if (url.pathname === "/session/ses_3/children") {
         return json([])
@@ -296,7 +331,34 @@ function createFetch(log: Hit[]) {
   ) satisfies typeof fetch
 }
 
-async function mount(log: Hit[]) {
+function createSource() {
+  let fn: ((event: GlobalEvent) => void) | undefined
+
+  return {
+    source: {
+      subscribe: async (_directory: string | undefined, handler: (event: GlobalEvent) => void) => {
+        fn = handler
+        return () => {
+          if (fn === handler) fn = undefined
+        }
+      },
+    },
+    emit(event: GlobalEvent) {
+      if (!fn) throw new Error("event source not ready")
+      fn(event)
+    },
+  }
+}
+
+async function mount(
+  log: Hit[],
+  input?: {
+    fetch?: typeof fetch
+    events?: {
+      subscribe: (directory: string | undefined, handler: (event: GlobalEvent) => void) => Promise<() => void>
+    }
+  },
+) {
   let project!: ReturnType<typeof useProject>
   let sync!: ReturnType<typeof useSync>
   let done!: () => void
@@ -308,8 +370,8 @@ async function mount(log: Hit[]) {
     <SDKProvider
       url="http://test"
       directory="/tmp/root"
-      fetch={createFetch(log)}
-      events={{ subscribe: async () => () => {} }}
+      fetch={input?.fetch ?? createFetch(log)}
+      events={input?.events ?? { subscribe: async () => () => {} }}
     >
       <ArgsProvider continue={false}>
         <ExitProvider>
@@ -435,6 +497,45 @@ describe("SyncProvider", () => {
       expect(sync.data.session.find((item) => item.id === "ses_3")?.parentID).toBe("ses_2")
       expect(log.filter((item) => item.path === "/session/ses_1/children")).toHaveLength(1)
       expect(log.filter((item) => item.path === "/session/ses_2/children")).toHaveLength(1)
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("force-syncs parent tree on orchestration completion", async () => {
+    const log: Hit[] = []
+    const source = createSource()
+    const live = tree()
+    live.ses_2.message.parts = [
+      { id: "part_2_root", messageID: "msg_2_root", sessionID: "ses_2", type: "patch", files: ["working.txt"] },
+    ]
+    const { app, sync } = await mount(log, {
+      fetch: createFetch(log, { tree: () => live }),
+      events: source.source,
+    })
+
+    try {
+      await waitBoot(log)
+
+      log.length = 0
+      await sync.session.sync("ses_1")
+      expect(sync.data.part.msg_2_root?.[0]).toEqual(expect.objectContaining({ type: "patch", files: ["working.txt"] }))
+
+      live.ses_2.message.parts = [
+        { id: "part_2_root", messageID: "msg_2_root", sessionID: "ses_2", type: "patch", files: ["dummy.txt"] },
+      ]
+      log.length = 0
+      source.emit(evt(complete("ses_2", "ses_1"), { directory: "/tmp/root" }))
+
+      await wait(
+        () =>
+          sync.data.part.msg_2_root?.[0]?.type === "patch" &&
+          sync.data.part.msg_2_root?.[0]?.files?.[0] === "dummy.txt",
+      )
+
+      expect(sync.data.part.msg_2_root?.[0]).toEqual(expect.objectContaining({ type: "patch", files: ["dummy.txt"] }))
+      expect(log.filter((item) => item.path === "/session/ses_1")).toHaveLength(1)
+      expect(log.filter((item) => item.path === "/session/ses_2/message")).toHaveLength(1)
     } finally {
       app.renderer.destroy()
     }

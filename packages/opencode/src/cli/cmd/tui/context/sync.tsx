@@ -1,4 +1,5 @@
 import type {
+  Event,
   Message,
   Agent,
   Provider,
@@ -31,6 +32,17 @@ import { useArgs } from "./args"
 import { batch, createEffect, on } from "solid-js"
 import { Log } from "@/util/log"
 import { ConsoleState, emptyConsoleState, type ConsoleState as ConsoleStateType } from "@/config/console-state"
+
+type Complete = {
+  type: "orchestration.complete"
+  properties: {
+    parentSessionID: string
+  }
+}
+
+function complete(event: Event | Complete): event is Complete {
+  return event.type === "orchestration.complete"
+}
 
 export const { use: useSync, provider: SyncProvider } = createSimpleContext({
   name: "Sync",
@@ -112,6 +124,12 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     const sdk = useSDK()
 
     event.subscribe((event) => {
+      const input = event as Event | Complete
+      if (complete(input)) {
+        void result.session.sync(input.properties.parentSessionID, { force: true })
+        return
+      }
+
       switch (event.type) {
         case "server.instance.disposed":
           bootstrap()
