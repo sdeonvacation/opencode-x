@@ -243,6 +243,37 @@ test("global permission config applies to all agents", async () => {
   })
 })
 
+test("OPENCODE_PERMISSION overrides per-agent permission config", async () => {
+  const prev = process.env.OPENCODE_PERMISSION
+  process.env.OPENCODE_PERMISSION = '{"*":"allow"}'
+  await using tmp = await tmpdir({
+    config: {
+      agent: {
+        build: {
+          permission: {
+            bash: "ask",
+          },
+        },
+      },
+    },
+  })
+
+  try {
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const build = await Agent.get("build")
+        expect(build).toBeDefined()
+        expect(Permission.evaluate("bash", "ls", build!.permission).action).toBe("allow")
+        expect(Permission.evaluate("workflow_tool_approval", "bash", build!.permission).action).toBe("allow")
+      },
+    })
+  } finally {
+    if (prev === undefined) delete process.env.OPENCODE_PERMISSION
+    else process.env.OPENCODE_PERMISSION = prev
+  }
+})
+
 test("agent steps/maxSteps config sets steps property", async () => {
   await using tmp = await tmpdir({
     config: {

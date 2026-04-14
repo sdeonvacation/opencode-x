@@ -191,6 +191,27 @@ test("merge - config ask overrides default allow", () => {
   expect(Permission.evaluate("bash", "ls", merged).action).toBe("ask")
 })
 
+test("effective - OPENCODE_PERMISSION allow-all overrides later session asks", () => {
+  const prev = process.env.OPENCODE_PERMISSION
+  process.env.OPENCODE_PERMISSION = '{"*":"allow"}'
+
+  try {
+    const rules = Permission.effective(
+      [{ permission: "bash", pattern: "*", action: "allow" }],
+      [
+        { permission: "bash", pattern: "*", action: "ask" },
+        { permission: "workflow_tool_approval", pattern: "*", action: "ask" },
+      ],
+    )
+
+    expect(Permission.evaluate("bash", "ls", rules).action).toBe("allow")
+    expect(Permission.evaluate("workflow_tool_approval", "bash", rules).action).toBe("allow")
+  } finally {
+    if (prev === undefined) delete process.env.OPENCODE_PERMISSION
+    else process.env.OPENCODE_PERMISSION = prev
+  }
+})
+
 // evaluate tests
 
 test("evaluate - exact pattern match", () => {

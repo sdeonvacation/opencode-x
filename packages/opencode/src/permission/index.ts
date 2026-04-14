@@ -10,6 +10,7 @@ import { PermissionTable } from "@/session/session.sql"
 import { Database, eq } from "@/storage/db"
 import { Log } from "@/util/log"
 import { Wildcard } from "@/util/wildcard"
+import { Flag } from "@/flag/flag"
 import { Deferred, Duration, Effect, Layer, Option, Schema, ServiceMap } from "effect"
 import os from "os"
 import z from "zod"
@@ -302,6 +303,11 @@ export namespace Permission {
 
   export function merge(...rulesets: Ruleset[]): Ruleset {
     return rulesets.flat()
+  }
+
+  export function effective(...rulesets: Ruleset[]): Ruleset {
+    const env = Flag.OPENCODE_PERMISSION ? fromConfig(JSON.parse(Flag.OPENCODE_PERMISSION)) : []
+    return merge(...rulesets, env)
   }
 
   const EDIT_TOOLS = ["edit", "write", "apply_patch", "multiedit"]

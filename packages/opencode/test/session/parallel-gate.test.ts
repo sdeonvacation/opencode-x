@@ -66,6 +66,25 @@ describe("session.llm.parallelGate", () => {
     ).toBe(false)
   })
 
+  test("returns true when OPENCODE_PERMISSION allow-all overrides session ask", () => {
+    const prev = process.env.OPENCODE_PERMISSION
+    process.env.OPENCODE_PERMISSION = '{"*":"allow"}'
+
+    try {
+      expect(
+        LLM.parallelGate({
+          agent: agent("subagent"),
+          permission: [{ permission: "grep", pattern: "*", action: "ask" }],
+          cfg: cfg(),
+          toolMeta: meta([["grep", true]]),
+        }),
+      ).toBe(true)
+    } finally {
+      if (prev === undefined) delete process.env.OPENCODE_PERMISSION
+      else process.env.OPENCODE_PERMISSION = prev
+    }
+  })
+
   test("returns false when permission resolves to deny", () => {
     expect(
       LLM.parallelGate({

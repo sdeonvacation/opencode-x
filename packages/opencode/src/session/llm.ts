@@ -96,7 +96,7 @@ export namespace LLM {
     if (enabled !== true) return false
     if (!input.toolMeta || input.toolMeta.size === 0) return false
 
-    const permission = Permission.merge(input.agent.permission, input.permission ?? [])
+    const permission = Permission.effective(input.agent.permission, input.permission ?? [])
     for (const [toolName, meta] of input.toolMeta) {
       if (toolName === "invalid") continue
       if (toolName === "read" && input.cfg.experimental?.parallel_read !== true) return false
@@ -314,7 +314,7 @@ export namespace LLM {
         }
       }
 
-      const ruleset = Permission.merge(input.agent.permission ?? [], input.permission ?? [])
+      const ruleset = Permission.effective(input.agent.permission ?? [], input.permission ?? [])
       workflowModel.sessionPreapprovedTools = Object.keys(tools).filter((name) => {
         const match = ruleset.findLast((rule) => Wildcard.match(name, rule.permission))
         return !match || match.action !== "ask"
@@ -448,7 +448,7 @@ export namespace LLM {
   function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "permission" | "user">) {
     const disabled = Permission.disabled(
       Object.keys(input.tools),
-      Permission.merge(input.agent.permission, input.permission ?? []),
+      Permission.effective(input.agent.permission, input.permission ?? []),
     )
     return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
   }
