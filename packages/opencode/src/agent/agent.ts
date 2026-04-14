@@ -22,7 +22,6 @@ import { Skill } from "../skill"
 import { Effect, ServiceMap, Layer } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
-import { Flag } from "@/flag/flag"
 
 export namespace Agent {
   export const Info = z
@@ -83,7 +82,7 @@ export namespace Agent {
         Effect.fn("Agent.state")(function* (ctx) {
           const cfg = yield* config.get()
           const skillDirs = yield* skill.dirs()
-          const env = Flag.OPENCODE_PERMISSION ? Permission.fromConfig(JSON.parse(Flag.OPENCODE_PERMISSION)) : []
+          const env = Permission.envRuleset()
           const whitelistedDirs = [Truncate.GLOB, ...skillDirs.map((dir) => path.join(dir, "*"))]
 
           const defaults = Permission.fromConfig({

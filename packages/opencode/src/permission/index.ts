@@ -170,10 +170,11 @@ export namespace Permission {
       const ask = Effect.fn("Permission.ask")(function* (input: z.infer<typeof AskInput>) {
         const { approved, pending } = yield* InstanceState.get(state)
         const { ruleset, ...request } = input
+        const env = envRuleset()
         let needsAsk = false
 
         for (const pattern of request.patterns) {
-          const rule = evaluate(request.permission, pattern, ruleset, approved)
+          const rule = evaluate(request.permission, pattern, ruleset, approved, env)
           log.info("evaluated", { permission: request.permission, pattern, action: rule })
           if (rule.action === "deny") {
             return yield* new DeniedError({
@@ -305,9 +306,18 @@ export namespace Permission {
     return rulesets.flat()
   }
 
+  export function envRuleset(): Ruleset {
+    if (!Flag.OPENCODE_PERMISSION) return []
+    try {
+      return fromConfig(JSON.parse(Flag.OPENCODE_PERMISSION))
+    } catch {
+      log.warn("OPENCODE_PERMISSION is not valid JSON, ignoring", { value: Flag.OPENCODE_PERMISSION })
+      return []
+    }
+  }
+
   export function effective(...rulesets: Ruleset[]): Ruleset {
-    const env = Flag.OPENCODE_PERMISSION ? fromConfig(JSON.parse(Flag.OPENCODE_PERMISSION)) : []
-    return merge(...rulesets, env)
+    return merge(...rulesets, envRuleset())
   }
 
   const EDIT_TOOLS = ["edit", "write", "apply_patch", "multiedit"]

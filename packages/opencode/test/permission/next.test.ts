@@ -212,6 +212,39 @@ test("effective - OPENCODE_PERMISSION allow-all overrides later session asks", (
   }
 })
 
+test("envRuleset - env allow-all wins over DB-approved ask entries (old session bug)", () => {
+  const prev = process.env.OPENCODE_PERMISSION
+  process.env.OPENCODE_PERMISSION = '{"*":"allow"}'
+
+  try {
+    const base = [{ permission: "bash", pattern: "*", action: "allow" as const }]
+    const approved = [
+      // simulates DB-persisted "ask" approval from a previous session
+      { permission: "bash", pattern: "rm -rf /", action: "ask" as const },
+      { permission: "workflow_tool_approval", pattern: "*", action: "ask" as const },
+    ]
+    const env = Permission.envRuleset()
+    // env must come after approved so findLast picks env rule
+    expect(Permission.evaluate("bash", "rm -rf /", base, approved, env).action).toBe("allow")
+    expect(Permission.evaluate("workflow_tool_approval", "bash", base, approved, env).action).toBe("allow")
+  } finally {
+    if (prev === undefined) delete process.env.OPENCODE_PERMISSION
+    else process.env.OPENCODE_PERMISSION = prev
+  }
+})
+
+test("envRuleset - invalid JSON returns empty ruleset and does not throw", () => {
+  const prev = process.env.OPENCODE_PERMISSION
+  process.env.OPENCODE_PERMISSION = "{allow:*}"
+
+  try {
+    expect(Permission.envRuleset()).toEqual([])
+  } finally {
+    if (prev === undefined) delete process.env.OPENCODE_PERMISSION
+    else process.env.OPENCODE_PERMISSION = prev
+  }
+})
+
 // evaluate tests
 
 test("evaluate - exact pattern match", () => {
