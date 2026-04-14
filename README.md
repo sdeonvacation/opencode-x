@@ -851,6 +851,8 @@ project-root/
     "continue_loop_on_deny": false,
     "primary_tools": [],
     "mcp_timeout": 30000,
+    "permission_ask_timeout": 300000,
+    "question_ask_timeout": 900000,
     "loop_detector_threshold": 5,
     "max_subagent_depth": 3,
     "max_subagent_descendants": 50,
@@ -876,6 +878,16 @@ project-root/
 - Default: rejection stops agent loop
 - Enabled: agent receives feedback and continues
 - Flow: Deny → Tab → Type feedback → Enter → Agent adapts
+
+**permission_ask_timeout:**
+
+- Timeout in milliseconds before an unanswered permission prompt (bash, edit, etc.) is auto-rejected
+- Default: `300000` (5 minutes)
+
+**question_ask_timeout:**
+
+- Timeout in milliseconds before an unanswered `question` tool call is auto-rejected
+- Default: `900000` (15 minutes)
 
 **loop_detector_threshold:**
 
