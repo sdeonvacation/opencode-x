@@ -149,7 +149,7 @@ export namespace LSPClient {
       notify: {
         async open(input: { path: string }) {
           input.path = path.isAbsolute(input.path) ? input.path : path.resolve(Instance.directory, input.path)
-          if (files[input.path] !== undefined || opening.has(input.path)) return
+          if (opening.has(input.path)) return
           opening.add(input.path)
           try {
             const text = await Filesystem.readText(input.path)
