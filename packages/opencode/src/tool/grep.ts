@@ -38,7 +38,9 @@ export const GrepTool = Tool.define("grep", {
 
     let searchPath = params.path ?? Instance.directory
     searchPath = path.isAbsolute(searchPath) ? searchPath : path.resolve(Instance.directory, searchPath)
-    await assertExternalDirectory(ctx, searchPath, { kind: "directory" })
+    const info = Filesystem.stat(searchPath)
+    const isFile = info && !info.isDirectory()
+    await assertExternalDirectory(ctx, searchPath, { kind: isFile ? "file" : "directory" })
 
     const rgPath = await Ripgrep.filepath()
     const args = ["-nH", "--hidden", "--no-messages", "--field-match-separator=|", "--regexp", params.pattern]
@@ -51,6 +53,7 @@ export const GrepTool = Tool.define("grep", {
       stdout: "pipe",
       stderr: "pipe",
       abort: ctx.abort,
+      cwd: isFile ? path.dirname(searchPath) : searchPath,
     })
 
     if (!proc.stdout || !proc.stderr) {
