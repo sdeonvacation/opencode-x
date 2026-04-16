@@ -54,9 +54,14 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   })
   const list = createMemo(() => {
     const vcs = props.api.state.vcs?.files
-    if (!vcs) return files()
-    const modified = new Set(vcs.map((f) => rel(props.api, f.file)))
-    return files().filter((f) => modified.has(f.file))
+    // When VCS data is available, use it as source of truth so the list
+    // survives /clear-compact (which deletes messages but not git state).
+    if (vcs)
+      return merge(
+        props.api,
+        vcs.map((f) => f.file),
+      )
+    return files()
   })
 
   return (
