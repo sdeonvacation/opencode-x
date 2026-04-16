@@ -193,12 +193,13 @@ export namespace ProviderTransform {
     const system = msgs.filter((msg) => msg.role === "system").slice(0, 2)
     const final = msgs.filter((msg) => msg.role !== "system").slice(-2)
 
+    const cacheTtl = process.env.ENABLE_PROMPT_CACHING_1H ? "1h" : undefined
     const providerOptions = {
       anthropic: {
-        cacheControl: { type: "ephemeral" },
+        cacheControl: { type: "ephemeral", ...(cacheTtl ? { ttl: cacheTtl } : {}) },
       },
       openrouter: {
-        cacheControl: { type: "ephemeral" },
+        cacheControl: { type: "ephemeral", ...(cacheTtl ? { ttl: cacheTtl } : {}) },
       },
       bedrock: {
         cachePoint: { type: "default" },
@@ -291,7 +292,9 @@ export namespace ProviderTransform {
       [last]: {
         ...tools[last],
         providerOptions: mergeDeep(tools[last].providerOptions ?? {}, {
-          anthropic: { cacheControl: { type: "ephemeral" } },
+          anthropic: {
+            cacheControl: { type: "ephemeral", ...(process.env.ENABLE_PROMPT_CACHING_1H ? { ttl: "1h" } : {}) },
+          },
           bedrock: { cachePoint: { type: "default" } },
         }),
       },
