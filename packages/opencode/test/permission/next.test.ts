@@ -569,6 +569,32 @@ test("ask - throws RejectedError when action is deny", async () => {
   })
 })
 
+test("ask - OPENCODE_PERMISSION allow-all does not override agent deny rules", async () => {
+  const prev = process.env.OPENCODE_PERMISSION
+  process.env.OPENCODE_PERMISSION = '{"*":"allow"}'
+  try {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await expect(
+          Permission.ask({
+            sessionID: SessionID.make("session_test"),
+            permission: "bash",
+            patterns: ["rm -rf /"],
+            metadata: {},
+            always: [],
+            ruleset: [{ permission: "bash", pattern: "*", action: "deny" }],
+          }),
+        ).rejects.toBeInstanceOf(Permission.DeniedError)
+      },
+    })
+  } finally {
+    if (prev === undefined) delete process.env.OPENCODE_PERMISSION
+    else process.env.OPENCODE_PERMISSION = prev
+  }
+})
+
 test("ask - returns pending promise when action is ask", async () => {
   await using tmp = await tmpdir({ git: true })
   await Instance.provide({

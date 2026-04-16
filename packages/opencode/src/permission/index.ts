@@ -174,13 +174,15 @@ export namespace Permission {
         let needsAsk = false
 
         for (const pattern of request.patterns) {
-          const rule = evaluate(request.permission, pattern, ruleset, approved, env)
-          log.info("evaluated", { permission: request.permission, pattern, action: rule })
-          if (rule.action === "deny") {
+          const base = evaluate(request.permission, pattern, ruleset, approved)
+          log.info("evaluated", { permission: request.permission, pattern, action: base })
+          if (base.action === "deny") {
             return yield* new DeniedError({
               ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
             })
           }
+          // env can only upgrade "ask" → "allow", never override "deny"
+          const rule = base.action === "ask" ? evaluate(request.permission, pattern, env) : base
           if (rule.action === "allow") continue
           needsAsk = true
         }
