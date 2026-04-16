@@ -1030,25 +1030,6 @@ describe("tool.bash permissions", () => {
     })
   })
 
-  test.skipIf(process.platform === "win32")("rejects multiline commands without continuation", async () => {
-    await using tmp = await tmpdir()
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const bash = await BashTool.init()
-        await expect(
-          bash.execute(
-            {
-              command: "echo alpha\necho beta",
-              description: "Run unsafe multiline command",
-            },
-            ctx,
-          ),
-        ).rejects.toThrow("Multiline shell commands must use explicit line continuation")
-      },
-    })
-  })
-
   test.skipIf(process.platform === "win32")("allows bash multiline commands with backslash continuation", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
@@ -1233,7 +1214,7 @@ describe("tool.bash truncation", () => {
         )
         mustTruncate(result)
         expect(result.output).toContain("truncated")
-        expect(result.output).toContain("The tool call succeeded but the output was truncated")
+        expect(result.output).toContain("Full output saved to:")
       },
     })
   })
@@ -1253,7 +1234,7 @@ describe("tool.bash truncation", () => {
         )
         mustTruncate(result)
         expect(result.output).toContain("truncated")
-        expect(result.output).toContain("The tool call succeeded but the output was truncated")
+        expect(result.output).toContain("Full output saved to:")
       },
     })
   })

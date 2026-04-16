@@ -1,5 +1,6 @@
 import z from "zod"
 import os from "os"
+import { createWriteStream } from "node:fs"
 import { Tool } from "./tool"
 import path from "path"
 import DESCRIPTION from "./bash.txt"
@@ -272,7 +273,32 @@ async function collect(root: Node, cwd: string, ps: boolean, shell: string): Pro
 
 function preview(text: string) {
   if (text.length <= MAX_METADATA_LENGTH) return text
-  return text.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
+  return "...\n\n" + text.slice(-MAX_METADATA_LENGTH)
+}
+
+function tail(text: string, maxLines: number, maxBytes: number) {
+  const lines = text.split("\n")
+  if (lines.length <= maxLines && Buffer.byteLength(text, "utf-8") <= maxBytes) {
+    return { text, cut: false }
+  }
+  const out: string[] = []
+  let bytes = 0
+  for (let i = lines.length - 1; i >= 0 && out.length < maxLines; i--) {
+    const size = Buffer.byteLength(lines[i], "utf-8") + (out.length > 0 ? 1 : 0)
+    if (bytes + size > maxBytes) {
+      if (out.length === 0) {
+        const buf = Buffer.from(lines[i], "utf-8")
+        let start = buf.length - maxBytes
+        if (start < 0) start = 0
+        while (start < buf.length && (buf[start] & 0xc0) === 0x80) start++
+        out.unshift(buf.subarray(start).toString("utf-8"))
+      }
+      break
+    }
+    out.unshift(lines[i])
+    bytes += size
+  }
+  return { text: out.join("\n"), cut: true }
 }
 
 function noncwd(root: Node, ps: boolean) {
@@ -356,7 +382,17 @@ async function run(
   },
   ctx: Tool.Context,
 ) {
-  let output = ""
+  const bytes = Truncate.MAX_BYTES
+  const lines = Truncate.MAX_LINES
+  const keep = bytes * 2
+  type Chunk = { text: string; size: number }
+  let last = ""
+  const list: Chunk[] = []
+  let used = 0
+  let file = "" // "" = not spilled, "pending" = spill in-flight, else path
+  let spillPromise: Promise<void> | undefined
+  let sink: ReturnType<typeof createWriteStream> | undefined
+  let cut = false
   let expired = false
   let aborted = false
 
@@ -374,13 +410,39 @@ async function run(
       yield* Effect.forkScoped(
         Stream.runForEach(Stream.decodeText(handle.all), (chunk) =>
           Effect.sync(() => {
-            output += chunk
-            ctx.metadata({
-              metadata: {
-                output: preview(output),
-                description: input.description,
-              },
-            })
+            const size = Buffer.byteLength(chunk, "utf-8")
+            list.push({ text: chunk, size })
+            used += size
+            while (used > keep && list.length > 1) {
+              const item = list.shift()
+              if (!item) break
+              used -= item.size
+              cut = true
+            }
+
+            last = preview(last + chunk)
+
+            if (sink) {
+              // sink open: write directly, list holds overflow chunks during pending
+              sink.write(chunk)
+            } else if (file === "pending") {
+              // spill in-flight: keep accumulating in list until sink is ready
+            } else if (Buffer.byteLength(list.map((c) => c.text).join(""), "utf-8") > bytes) {
+              // Spill to file asynchronously; set sentinel immediately to prevent re-entry
+              const full = list.map((c) => c.text).join("")
+              file = "pending"
+              spillPromise = Truncate.write(full).then((f) => {
+                file = f
+                cut = true
+                sink = createWriteStream(f, { flags: "a" })
+                // drain chunks that arrived during pending window
+                for (const c of list) sink.write(c.text)
+                list.length = 0
+                used = 0
+              })
+            }
+
+            ctx.metadata({ metadata: { output: last, description: input.description } })
           }),
         ),
       )
@@ -420,8 +482,42 @@ async function run(
     throw Cause.squash(exit.cause)
   }
 
+  // Await any in-flight spill before flushing sink
+  if (spillPromise) await spillPromise
+
+  // Flush sink if open
+  if (sink) {
+    const stream = sink
+    await new Promise<void>((resolve) => {
+      stream.end(() => resolve())
+      stream.on("error", () => resolve())
+    })
+  }
+
+  // Build final output from rolling buffer tail
+  const raw = list.map((c) => c.text).join("")
+  const end = tail(raw, lines, bytes)
+  if (end.cut) cut = true
+
+  // If we haven't spilled yet but need to truncate, write now
+  if (!file && cut) {
+    file = await Truncate.write(raw)
+  }
+
+  let output = end.text || "(no output)"
+  // file may still be "pending" if process ended during async spill — treat as truncated without path
+  const spillPath = file !== "pending" ? file : ""
+  if (cut && spillPath) {
+    output = `...output truncated...\n\nFull output saved to: ${spillPath}\n\n` + output
+  } else if (cut) {
+    output = `...output truncated...\n\n` + output
+  }
+
   const meta: string[] = []
-  if (expired) meta.push(`bash tool terminated command after exceeding timeout ${input.timeout} ms`)
+  if (expired)
+    meta.push(
+      `bash tool terminated command after exceeding timeout ${input.timeout} ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.`,
+    )
   if (aborted) meta.push("User aborted the command")
   if (meta.length > 0) {
     output += "\n\n<bash_metadata>\n" + meta.join("\n") + "\n</bash_metadata>"
@@ -430,9 +526,11 @@ async function run(
   return {
     title: input.description,
     metadata: {
-      output: preview(output),
+      output: last || preview(output),
       exit: code,
       description: input.description,
+      truncated: cut,
+      ...(cut && spillPath ? { outputPath: spillPath } : {}),
     },
     output,
   }
