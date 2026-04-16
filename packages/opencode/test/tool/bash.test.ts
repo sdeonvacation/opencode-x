@@ -1213,8 +1213,8 @@ describe("tool.bash truncation", () => {
           ctx,
         )
         mustTruncate(result)
-        expect(result.output).toContain("truncated")
-        expect(result.output).toContain("Full output saved to:")
+        expect(result.output).toMatch(/\.\.\.output truncated\.\.\./)
+        expect(result.output).toMatch(/Full output saved to:\s+\S+/)
       },
     })
   })
@@ -1233,8 +1233,8 @@ describe("tool.bash truncation", () => {
           ctx,
         )
         mustTruncate(result)
-        expect(result.output).toContain("truncated")
-        expect(result.output).toContain("Full output saved to:")
+        expect(result.output).toMatch(/\.\.\.output truncated\.\.\./)
+        expect(result.output).toMatch(/Full output saved to:\s+\S+/)
       },
     })
   })
