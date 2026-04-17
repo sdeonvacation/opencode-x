@@ -11,6 +11,17 @@ import type { GlobalEvent } from "@opencode-ai/sdk/v2"
 import { Flag } from "@/flag/flag"
 import { writeHeapSnapshot } from "node:v8"
 import { Heap } from "@/cli/heap"
+import { SessionStatus } from "@/session/status"
+
+// Wire up the busy-check so Instance.waitIdle can poll session status
+// without creating a circular dependency in instance.ts itself.
+Instance._checkBusy = async () => {
+  const statuses = await SessionStatus.list()
+  for (const [, s] of statuses) {
+    if (s.type !== "idle") return true
+  }
+  return false
+}
 
 await Log.init({
   print: process.argv.includes("--print-logs"),
@@ -84,8 +95,9 @@ export const rpc = {
     await Config.invalidate(true)
   },
   async changeDirectory(input: { directory: string }) {
-    await Instance.disposeAll()
+    await Instance.waitIdle()
     process.chdir(input.directory)
+    await Instance.disposeAll()
   },
   async shutdown() {
     Log.Default.info("worker shutting down")

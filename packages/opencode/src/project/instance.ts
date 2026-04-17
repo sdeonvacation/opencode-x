@@ -157,6 +157,26 @@ export const Instance = {
       },
     })
   },
+  async waitIdle(timeout = 30_000) {
+    const deadline = Date.now() + timeout
+    while (Date.now() < deadline) {
+      let busy = false
+      for (const [, value] of cache) {
+        const ctx = await value.catch(() => undefined)
+        if (!ctx) continue
+        const result = await context.provide(ctx, () => Instance._checkBusy?.())
+        if (result) {
+          busy = true
+          break
+        }
+      }
+      if (!busy) return
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    Log.Default.warn("waitIdle timed out, proceeding with disposal")
+  },
+  /** @internal set by worker to avoid circular deps */
+  _checkBusy: undefined as (() => Promise<boolean>) | undefined,
   async disposeAll() {
     if (disposal.all) return disposal.all
 
