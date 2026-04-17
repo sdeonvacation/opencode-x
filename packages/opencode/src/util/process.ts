@@ -144,22 +144,23 @@ export namespace Process {
     throw new RunFailedError(cmd, out.code, out.stdout, out.stderr)
   }
 
-  // Duplicated in `packages/sdk/js/src/process.ts` because the SDK cannot import
-  // `opencode` without creating a cycle. Keep both copies in sync.
-  export async function stop(proc: ChildProcess) {
+  export async function stop(proc: ChildProcess, timeout = 5_000) {
     if (proc.exitCode !== null || proc.signalCode !== null) return
 
-    if (process.platform !== "win32" || !proc.pid) {
+    const exited = new Promise<void>((resolve) => proc.once("exit", resolve))
+
+    if (process.platform === "win32" && proc.pid) {
+      const out = await run(["taskkill", "/pid", String(proc.pid), "/T", "/F"], {
+        nothrow: true,
+      })
+      if (out.code !== 0) proc.kill()
+    } else {
       proc.kill()
-      return
     }
 
-    const out = await run(["taskkill", "/pid", String(proc.pid), "/T", "/F"], {
-      nothrow: true,
-    })
-
-    if (out.code === 0) return
-    proc.kill()
+    const timer = timeout > 0 ? setTimeout(() => proc.kill("SIGKILL"), timeout) : undefined
+    await exited
+    if (timer) clearTimeout(timer)
   }
 
   export async function text(cmd: string[], opts: RunOptions = {}): Promise<TextResult> {
