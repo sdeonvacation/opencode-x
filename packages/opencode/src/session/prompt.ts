@@ -246,7 +246,7 @@ export namespace SessionPrompt {
                 ...req,
                 sessionID: input.session.id,
                 tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-                ruleset: Permission.effective(input.agent.permission, input.session.permission ?? []),
+                ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
               }),
             ),
         })
