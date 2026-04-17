@@ -494,6 +494,9 @@ export namespace ProviderTransform {
           return {}
         }
         if (model.id.includes("claude")) {
+          if (model.api.id.includes("opus-4.7")) {
+            return Object.fromEntries(["medium"].map((effort) => [effort, { reasoningEffort: effort }]))
+          }
           return Object.fromEntries(WIDELY_SUPPORTED_EFFORTS.map((effort) => [effort, { reasoningEffort: effort }]))
         }
         const copilotEfforts = iife(() => {
