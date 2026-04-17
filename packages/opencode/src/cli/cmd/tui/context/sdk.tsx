@@ -124,8 +124,8 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       },
       async changeDirectory(directory: string) {
         currentDirectory = directory
-        await props.events?.changeDirectory?.(directory)
         sdk = createSDK()
+        await props.events?.changeDirectory?.(directory)
       },
       url: props.url,
     }
