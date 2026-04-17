@@ -690,9 +690,8 @@ export namespace Session {
     runPromise((svc) => svc.setArchived(input)),
   )
 
-  export const setPermission = fn(
-    z.object({ sessionID: SessionID.zod, permission: Permission.Ruleset }),
-    (input) => runPromise((svc) => svc.setPermission(input)),
+  export const setPermission = fn(z.object({ sessionID: SessionID.zod, permission: Permission.Ruleset }), (input) =>
+    runPromise((svc) => svc.setPermission(input)),
   )
 
   export const setRevert = fn(
@@ -719,8 +718,10 @@ export namespace Session {
     if (input?.workspaceID) {
       conditions.push(eq(SessionTable.workspace_id, input.workspaceID))
     }
-    if (input?.directory) {
-      conditions.push(eq(SessionTable.directory, input.directory))
+    if (!Flag.OPENCODE_EXPERIMENTAL_WORKSPACES) {
+      if (input?.directory) {
+        conditions.push(eq(SessionTable.directory, input.directory))
+      }
     }
     if (input?.roots) {
       conditions.push(isNull(SessionTable.parent_id))
