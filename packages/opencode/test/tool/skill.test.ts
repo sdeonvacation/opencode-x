@@ -1,4 +1,3 @@
-import { Effect } from "effect"
 import { afterEach, describe, expect, test } from "bun:test"
 import path from "path"
 import { pathToFileURL } from "url"
