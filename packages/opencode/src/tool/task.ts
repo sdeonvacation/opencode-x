@@ -7,6 +7,7 @@ import { MessageV2 } from "../session/message-v2"
 import { Agent } from "../agent/agent"
 import { Bus } from "../bus"
 import { ModelID, ProviderID } from "../provider/schema"
+import { Provider } from "../provider/provider"
 import { SessionPrompt } from "../session/prompt"
 import { Config } from "../config/config"
 import { Effect } from "effect"
@@ -16,6 +17,18 @@ import { create as createGuard } from "../orchestration/tool-guard"
 import { withTimeout } from "@/util/timeout"
 import { spawnSubagent } from "../orchestration/task-spawn"
 import { resolveTaskModel } from "../orchestration/task-model-resolver"
+import { detect as detectUltrawork } from "../orchestration/ultrawork"
+import { resolveModel as resolveUltrawork } from "../orchestration/ultrawork-hook"
+import { classify } from "../orchestration/hybrid-heuristics"
+import { run as runPreflight } from "../orchestration/hybrid-preflight"
+import { route as hybridRoute } from "../orchestration/hybrid-router"
+import type {
+  HybridRoutingConfig,
+  ModelRef,
+  PreflightInput,
+  PreflightResult,
+  RouteDecision,
+} from "../orchestration/hybrid-types"
 
 const id = "task"
 const SUBAGENT_TIMEOUT = 900_000
@@ -37,6 +50,65 @@ const parameters = z.object({
     .optional(),
   command: z.string().describe("The command that triggered this task").optional(),
 })
+
+const READ_RE = /\b(grep|glob|ls|tree|read)\b/i
+const WRITE_RE = /\b(edit|write|patch)\b/i
+
+export function hint(prompt: string, command?: string): PreflightInput["operation_hint"] {
+  const text = [command, prompt].filter(Boolean).join("\n")
+  if (WRITE_RE.test(text)) return "code_change"
+  if (READ_RE.test(text)) return "read"
+  return classify(text)
+}
+
+function input(prompt: string, agent: string, base: ModelRef, command?: string): PreflightInput {
+  const summary = prompt.slice(0, 500)
+  return {
+    prompt: summary,
+    agent,
+    invocation_type: "tool",
+    command_string: command,
+    operation_hint: hint(prompt, command),
+    parts_summary: summary,
+    base_model: { providerID: base.providerID, modelID: base.modelID },
+  }
+}
+
+async function publish(sessionID: string, decision: RouteDecision) {
+  await Bus.publish(OrchestrationEvent.Route, {
+    sessionID,
+    route: decision.target,
+    operation_type: decision.preflight?.operation_type,
+    confidence: decision.preflight?.confidence,
+    info_gap: decision.preflight?.info_gap,
+    needs_code_change: decision.preflight?.needs_code_change,
+    assumptions_count: decision.assumptions.length,
+    verification_used: false,
+    success: true,
+    was_overridden: decision.was_overridden,
+    override_reason: decision.override_reason,
+    preflight_fallback: decision.preflight?.preflight_fallback,
+  })
+}
+
+async function hybrid(
+  sessionID: string,
+  prompt: string,
+  agent: string,
+  base: ModelRef,
+  cfg: HybridRoutingConfig,
+  command?: string,
+) {
+  const preflight: PreflightResult | undefined = await Effect.runPromise(
+    runPreflight(input(prompt, agent, base, command), cfg).pipe(
+      Effect.catch(() => Effect.succeed(undefined)),
+      Effect.provide(Provider.defaultLayer),
+    ),
+  )
+  const decision = hybridRoute(preflight, base, cfg, false)
+  await publish(sessionID, decision)
+  return decision
+}
 
 export const TaskTool = Tool.defineEffect(
   id,
@@ -106,7 +178,23 @@ export const TaskTool = Tool.defineEffect(
           ultraworkModel: cfg.experimental?.ultrawork_model,
           fallback: model,
         })
-        const concurrencyKey = `${finalModel.providerID}:${finalModel.modelID}`
+
+        // Hybrid routing hook (gated behind flag)
+        const hybridCfg = cfg.experimental?.hybrid_routing
+        let routedModel: ModelRef = finalModel
+        const ultrawork =
+          detectUltrawork(params.prompt, cfg.experimental?.ultrawork_model) ??
+          resolveUltrawork({
+            enabled: params.use_ultrawork === true,
+            ultraworkModel: cfg.experimental?.ultrawork_model,
+          })
+        const routed =
+          hybridCfg?.enabled && !ultrawork
+            ? await hybrid(nextSession.id, params.prompt, params.subagent_type, finalModel, hybridCfg, params.command)
+            : undefined
+        if (routed) routedModel = routed.model
+
+        const concurrencyKey = `${routedModel.providerID}:${routedModel.modelID}`
         const concurrencyLimit = cfg.experimental?.model_concurrency?.[concurrencyKey] ?? 5
         const guard = createGuard({
           sessionID: String(ctx.sessionID),
@@ -117,9 +205,26 @@ export const TaskTool = Tool.defineEffect(
           title: params.description,
           metadata: {
             sessionId: nextSession.id,
-            model: finalModel,
+            model: routedModel,
           },
         })
+
+        if (routed?.target === "ask") {
+          return {
+            title: params.description,
+            metadata: {
+              sessionId: nextSession.id,
+              model: routedModel,
+            },
+            output: [
+              `task_id: ${nextSession.id} (for resuming to continue this task if needed)`,
+              "",
+              "<task_result>",
+              routed.ask_text ?? "",
+              "</task_result>",
+            ].join("\n"),
+          }
+        }
 
         function cancel() {
           SessionPrompt.cancel(nextSession.id)
@@ -148,8 +253,8 @@ export const TaskTool = Tool.defineEffect(
                 messageID,
                 sessionID: nextSession.id,
                 model: {
-                  modelID: ModelID.make(finalModel.modelID),
-                  providerID: ProviderID.make(finalModel.providerID),
+                  modelID: ModelID.make(routedModel.modelID),
+                  providerID: ProviderID.make(routedModel.providerID),
                 },
                 agent: next.name,
                 tools: {
@@ -181,7 +286,7 @@ export const TaskTool = Tool.defineEffect(
             title: params.description,
             metadata: {
               sessionId: nextSession.id,
-              model: finalModel,
+              model: routedModel,
             },
             output: [
               `task_id: ${nextSession.id} (for resuming to continue this task if needed)`,

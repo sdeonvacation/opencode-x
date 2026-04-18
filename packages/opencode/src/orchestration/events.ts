@@ -65,4 +65,24 @@ export namespace OrchestrationEvent {
       queueLength: z.number(),
     }),
   )
+
+  export const Route = BusEvent.define(
+    "orchestration.route",
+    z.object({
+      sessionID: z.string(),
+      route: z.enum(["local", "cloud", "ask"]),
+      operation_type: z.enum(["read", "bash_simple", "bash_complex", "code_change", "other"]).optional(),
+      confidence: z.number().optional(),
+      info_gap: z.enum(["high", "medium", "low"]).optional(),
+      needs_code_change: z.boolean().optional(),
+      assumptions_count: z.number().int(),
+      verification_used: z.boolean(),
+      success: z.boolean(),
+      was_overridden: z.boolean(),
+      override_reason: z
+        .enum(["code_change", "low_confidence", "policy_bash_complex", "info_gap", "preflight_unavailable"])
+        .optional(),
+      preflight_fallback: z.enum(["configured", "first_local", "base", "none"]).optional(),
+    }),
+  )
 }

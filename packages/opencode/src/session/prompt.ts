@@ -27,7 +27,12 @@ import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import * as Stream from "effect/Stream"
 import { Command } from "../command"
 import { pathToFileURL, fileURLToPath } from "url"
+import { Config } from "../config/config"
 import { ConfigMarkdown } from "../config/markdown"
+import { run as runPreflight } from "../orchestration/hybrid-preflight"
+import { route as hybridRoute } from "../orchestration/hybrid-router"
+import { OrchestrationEvent } from "../orchestration/events"
+import { run as runVerify } from "../orchestration/verify"
 import { SessionSummary } from "./summary"
 import { NamedError } from "@opencode-ai/util/error"
 import { SessionProcessor } from "./processor"
@@ -63,6 +68,10 @@ const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested struc
 
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
+
+  export function shouldVerify(decision?: import("../orchestration/hybrid-types").RouteDecision) {
+    return decision?.preflight?.needs_code_change === true || decision?.preflight?.operation_type === "code_change"
+  }
 
   export interface Interface {
     readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
@@ -100,6 +109,7 @@ export namespace SessionPrompt {
       const instruction = yield* Instruction.Service
       const state = yield* SessionRunState.Service
       const revert = yield* SessionRevert.Service
+      const config = yield* Config.Service
 
       const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
         log.info("cancel", { sessionID })
@@ -944,6 +954,97 @@ export namespace SessionPrompt {
         function* (input: PromptInput) {
           const session = yield* sessions.get(input.sessionID)
           yield* revert.cleanup(session)
+
+          const cfg = yield* config.get()
+          const hybridCfg = cfg.experimental?.hybrid_routing
+          let decision: import("../orchestration/hybrid-types").RouteDecision | undefined
+          if (hybridCfg?.enabled) {
+            const base = input.model ?? (yield* lastModel(input.sessionID))
+            const summary = input.parts
+              .filter((p): p is { type: "text"; text: string } => p.type === "text")
+              .map((p) => p.text)
+              .join(" ")
+              .slice(0, 500)
+            const preflightInput: import("../orchestration/hybrid-types").PreflightInput = {
+              prompt: summary,
+              agent: input.agent ?? (yield* agents.defaultAgent()),
+              invocation_type: input.invocation_type ?? "chat",
+              command_string: input.command_string,
+              parts_summary: summary,
+              base_model: { providerID: base.providerID, modelID: base.modelID },
+            }
+            const preflight: import("../orchestration/hybrid-types").PreflightResult | undefined = yield* runPreflight(
+              preflightInput,
+              hybridCfg,
+            ).pipe(
+              Effect.catch(() => Effect.succeed(undefined)),
+              Effect.provideService(Provider.Service, provider),
+            )
+            decision = hybridRoute(
+              preflight,
+              { providerID: base.providerID, modelID: base.modelID },
+              hybridCfg,
+              input.model !== undefined,
+            )
+
+            if (decision.target === "ask") {
+              // Create user message then return early with ask assistant message
+              const userMsg = yield* createUserMessage(input)
+              yield* sessions.touch(input.sessionID)
+              const ctx = yield* InstanceState.context
+              const agentName = input.agent ?? (yield* agents.defaultAgent())
+              const ag = yield* agents.get(agentName)
+              const askMsg: MessageV2.Assistant = {
+                id: MessageID.ascending(),
+                parentID: userMsg.info.id,
+                role: "assistant",
+                mode: ag?.name ?? agentName,
+                agent: ag?.name ?? agentName,
+                path: { cwd: ctx.directory, root: ctx.worktree },
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                modelID: base.modelID,
+                providerID: base.providerID,
+                time: { created: Date.now() },
+                sessionID: input.sessionID,
+                finish: "stop",
+              }
+              yield* sessions.updateMessage(askMsg)
+              const askPart: MessageV2.Part = {
+                type: "text",
+                id: PartID.ascending(),
+                messageID: askMsg.id,
+                sessionID: input.sessionID,
+                text: decision.ask_text!,
+              }
+              yield* sessions.updatePart(askPart)
+              yield* bus.publish(OrchestrationEvent.Route, {
+                sessionID: input.sessionID,
+                route: "ask",
+                operation_type: preflight?.operation_type,
+                confidence: preflight?.confidence,
+                info_gap: preflight?.info_gap,
+                needs_code_change: preflight?.needs_code_change,
+                assumptions_count: decision.assumptions.length,
+                verification_used: false,
+                success: true,
+                was_overridden: decision.was_overridden,
+                override_reason: decision.override_reason,
+                preflight_fallback: preflight?.preflight_fallback,
+              })
+              return { info: askMsg, parts: [askPart] }
+            }
+
+            // Stamp routed model onto input
+            input = {
+              ...input,
+              model: {
+                providerID: ProviderID.make(decision.model.providerID),
+                modelID: ModelID.make(decision.model.modelID),
+              },
+            }
+          }
+
           const message = yield* createUserMessage(input)
           yield* sessions.touch(input.sessionID)
 
@@ -957,7 +1058,51 @@ export namespace SessionPrompt {
           }
 
           if (input.noReply === true) return message
-          return yield* loop({ sessionID: input.sessionID })
+          const result = yield* loop({ sessionID: input.sessionID })
+          if (decision?.target === "local" && decision.assumptions.length > 0) {
+            const part: MessageV2.TextPart = {
+              id: PartID.ascending(),
+              messageID: result.info.id,
+              sessionID: input.sessionID,
+              type: "text",
+              synthetic: true,
+              text: `Assuming:\n${decision.assumptions.map((item) => `- ${item}`).join("\n")}`,
+            }
+            yield* sessions.updatePart(part)
+            result.parts.unshift(part)
+          }
+
+          // Post-loop: verification and telemetry
+          if (hybridCfg?.enabled && decision) {
+            let verifyUsed = false
+            let success = true
+            if (shouldVerify(decision)) {
+              verifyUsed = true
+              const ctx = yield* InstanceState.context
+              const vr = yield* runVerify(hybridCfg, decision.model, input.sessionID, ctx.worktree).pipe(
+                Effect.catch(() => Effect.succeed({ ok: false, source: "none" as const })),
+                Effect.provideService(AppFileSystem.Service, fsys),
+                Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+              )
+              success = vr.ok
+            }
+            yield* bus.publish(OrchestrationEvent.Route, {
+              sessionID: input.sessionID,
+              route: decision.target as "local" | "cloud",
+              operation_type: decision.preflight?.operation_type,
+              confidence: decision.preflight?.confidence,
+              info_gap: decision.preflight?.info_gap,
+              needs_code_change: decision.preflight?.needs_code_change,
+              assumptions_count: decision.assumptions.length,
+              verification_used: verifyUsed,
+              success,
+              was_overridden: decision.was_overridden,
+              override_reason: decision.override_reason,
+              preflight_fallback: decision.preflight?.preflight_fallback,
+            })
+          }
+
+          return result
         },
       )
 
@@ -1538,6 +1683,8 @@ export namespace SessionPrompt {
         const result = yield* prompt({
           sessionID: input.sessionID,
           messageID: input.messageID,
+          invocation_type: "command",
+          command_string: input.command,
           model: userModel,
           agent: userAgent,
           parts,
@@ -1564,8 +1711,8 @@ export namespace SessionPrompt {
     }),
   )
 
-  const defaultLayer = Layer.suspend(() =>
-    layer.pipe(
+  const defaultLayer = Layer.suspend(() => {
+    const live = layer.pipe(
       Layer.provide(SessionRunState.defaultLayer),
       Layer.provide(SessionStatus.defaultLayer),
       Layer.provide(SessionCompaction.defaultLayer),
@@ -1576,6 +1723,8 @@ export namespace SessionPrompt {
       Layer.provide(LSP.defaultLayer),
       Layer.provide(FileTime.defaultLayer),
       Layer.provide(ToolRegistry.defaultLayer),
+    )
+    return live.pipe(
       Layer.provide(Truncate.defaultLayer),
       Layer.provide(Provider.defaultLayer),
       Layer.provide(Instruction.defaultLayer),
@@ -1586,13 +1735,16 @@ export namespace SessionPrompt {
       Layer.provide(Agent.defaultLayer),
       Layer.provide(Bus.layer),
       Layer.provide(CrossSpawnSpawner.defaultLayer),
-    ),
-  )
+      Layer.provide(Config.defaultLayer),
+    )
+  })
   const { runPromise } = makeRuntime(Service, defaultLayer)
 
   export const PromptInput = z.object({
     sessionID: SessionID.zod,
     messageID: MessageID.zod.optional(),
+    invocation_type: z.enum(["chat", "command", "tool"]).optional(),
+    command_string: z.string().optional(),
     model: z
       .object({
         providerID: ProviderID.zod,

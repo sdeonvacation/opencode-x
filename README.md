@@ -609,6 +609,34 @@ export AWS_REGION=us-east-1
 }
 ```
 
+### Local Models via llama.cpp
+
+Connect to locally-running LLMs via [llama.cpp](https://github.com/ggerganov/llama.cpp) OpenAI-compatible server:
+
+```json
+{
+  "provider": {
+    "llamacpp": {
+      "options": {
+        "baseURL": "http://127.0.0.1:8000/v1",
+        "apiKey": "dummy"
+      },
+      "models": {
+        "my-local-model": {}
+      }
+    }
+  },
+  "model": "llamacpp/my-local-model",
+  "experimental": {
+    "hybrid_routing": {
+      "local_models": [{ "providerID": "llamacpp", "modelID": "my-local-model" }]
+    }
+  }
+}
+```
+
+**Setup:** Start llama.cpp server with `--server --host 127.0.0.1 --port 8000`. Adjust `baseURL` if using different host/port. Replace `my-local-model` with actual model name from llama.cpp.
+
 ---
 
 ## OpenCode Go

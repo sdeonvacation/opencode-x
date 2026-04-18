@@ -13,6 +13,11 @@ import { TaskTool } from "../../src/tool/task"
 import { ToolRegistry } from "../../src/tool/registry"
 import { provideTmpdirInstance, tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { resolveTaskModel } from "../../src/orchestration/task-model-resolver"
+import { route as hybridRoute } from "../../src/orchestration/hybrid-router"
+import * as HybridPreflight from "../../src/orchestration/hybrid-preflight"
+import { hint } from "../../src/tool/task"
+import type { HybridRoutingConfig, ModelRef } from "../../src/orchestration/hybrid-types"
 
 // Helper: initialize TaskTool (Tool.defineEffect) for non-Effect test contexts
 const initTask = () =>
@@ -643,6 +648,92 @@ describe("tool.task", () => {
     })
   })
 
+  test("task ask route returns clarification result without running subagent", async () => {
+    await using tmp = await tmpdir({
+      config: {
+        experimental: {
+          hybrid_routing: {
+            enabled: true,
+            threshold: 0.7,
+            local_models: [{ providerID: "ollama", modelID: "llama3" }],
+            verify_commands: [],
+            verify_cache_ttl_ms: 300_000,
+          },
+        },
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const sessionID = SessionID.make("ses_task_ask")
+        const messageID = MessageID.make("msg_task_ask")
+        const subtaskID = SessionID.make("ses_sub_task_ask")
+
+        const get = spyOn(Session, "get").mockImplementation((async (id: Parameters<typeof Session.get>[0]) => {
+          if (id === sessionID) return { id: sessionID } as never
+          if (id === subtaskID) return { id: subtaskID, parentID: sessionID } as never
+          throw new Error(`Unknown session ${id}`)
+        }) as unknown as typeof Session.get)
+        const create = spyOn(Session, "create").mockResolvedValue({ id: subtaskID } as Awaited<
+          ReturnType<typeof Session.create>
+        >)
+        const msg = spyOn(MessageV2, "get").mockReturnValue({
+          info: {
+            role: "assistant",
+            modelID: "gpt-5.2",
+            providerID: "openai",
+          },
+        } as ReturnType<typeof MessageV2.get>)
+        const parts = spyOn(SessionPrompt, "resolvePromptParts").mockResolvedValue([{ type: "text", text: "do work" }])
+        const prompt = spyOn(SessionPrompt, "prompt").mockResolvedValue({
+          parts: [{ type: "text", text: "done" }],
+        } as Awaited<ReturnType<typeof SessionPrompt.prompt>>)
+        const preflight = spyOn(HybridPreflight, "run").mockReturnValue(
+          Effect.succeed({
+            confidence: 0.9,
+            info_gap: "high",
+            needs_code_change: false,
+            operation_type: "other",
+            assumptions: [],
+            ask_candidates: ["repo path"],
+          }) as never,
+        )
+
+        try {
+          const tool = await initTask()
+          const result = await tool.execute(
+            {
+              description: "need info",
+              prompt: "please inspect repo",
+              subagent_type: "general",
+            },
+            {
+              sessionID,
+              messageID,
+              agent: "build",
+              abort: AbortSignal.any([]),
+              messages: [],
+              metadata: () => {},
+              ask: async () => {},
+              extra: { bypassAgentCheck: true },
+            },
+          )
+
+          expect(result.output).toContain("I need more information to proceed")
+          expect(prompt).not.toHaveBeenCalled()
+        } finally {
+          get.mockRestore()
+          create.mockRestore()
+          msg.mockRestore()
+          parts.mockRestore()
+          prompt.mockRestore()
+          preflight.mockRestore()
+        }
+      },
+    })
+  })
+
   test("uses session-scoped loop detection across task executions", async () => {
     await using tmp = await tmpdir({
       config: {
@@ -728,6 +819,203 @@ describe("tool.task", () => {
           prompt.mockRestore()
         }
       },
+    })
+  })
+})
+
+// Hybrid routing unit tests (pure logic, no Effect runtime needed)
+describe("tool.task hybrid routing", () => {
+  const fallback: ModelRef = { providerID: "anthropic", modelID: "claude-3-5-sonnet" }
+  const local: ModelRef = { providerID: "ollama", modelID: "llama3" }
+  const ultrawork: ModelRef = { providerID: "openai", modelID: "o3" }
+
+  const hybridCfg: HybridRoutingConfig = {
+    enabled: true,
+    threshold: 0.7,
+    local_models: [local],
+    verify_commands: [],
+    verify_cache_ttl_ms: 300_000,
+  }
+
+  describe("resolveTaskModel precedence (flag off path)", () => {
+    test("ultrawork keyword in prompt wins regardless of hybrid flag", () => {
+      const result = resolveTaskModel({
+        prompt: "please use ulw for this task",
+        subagentType: "explore",
+        categories: {},
+        ultraworkModel: ultrawork,
+        fallback,
+      })
+      expect(result).toEqual(ultrawork)
+    })
+
+    test("use_ultrawork=true wins", () => {
+      const result = resolveTaskModel({
+        prompt: "do some work",
+        subagentType: "explore",
+        useUltrawork: true,
+        categories: {},
+        ultraworkModel: ultrawork,
+        fallback,
+      })
+      expect(result).toEqual(ultrawork)
+    })
+
+    test("flag off: resolveTaskModel result unchanged", () => {
+      const result = resolveTaskModel({
+        prompt: "do some work",
+        subagentType: "explore",
+        categories: {},
+        fallback,
+      })
+      expect(result).toEqual(fallback)
+    })
+  })
+
+  describe("hybrid routing precedence (flag on path)", () => {
+    test("ultrawork precedence skips hybrid routing", () => {
+      const result = resolveTaskModel({
+        prompt: "use ultrawork for this coder task",
+        subagentType: "coder",
+        categories: {},
+        ultraworkModel: ultrawork,
+        fallback,
+      })
+      expect(result).toEqual(ultrawork)
+    })
+
+    test("coder with read operation → local model", () => {
+      const decision = hybridRoute(
+        {
+          confidence: 0.9,
+          info_gap: "low",
+          needs_code_change: false,
+          operation_type: "read",
+          assumptions: [],
+          ask_candidates: [],
+        },
+        fallback,
+        hybridCfg,
+        false,
+      )
+      expect(decision.target).toBe("local")
+      expect(decision.model).toEqual(local)
+    })
+
+    test("debugger with bash_simple operation → local model", () => {
+      const decision = hybridRoute(
+        {
+          confidence: 0.1,
+          info_gap: "low",
+          needs_code_change: false,
+          operation_type: "bash_simple",
+          assumptions: [],
+          ask_candidates: [],
+        },
+        fallback,
+        hybridCfg,
+        false,
+      )
+      expect(decision.target).toBe("local")
+      expect(decision.model).toEqual(local)
+    })
+
+    test("cheap-fix with bash_complex operation → cloud model", () => {
+      const decision = hybridRoute(
+        {
+          confidence: 0.9,
+          info_gap: "low",
+          needs_code_change: false,
+          operation_type: "bash_complex",
+          assumptions: [],
+          ask_candidates: [],
+        },
+        fallback,
+        hybridCfg,
+        false,
+      )
+      expect(decision.target).toBe("cloud")
+      expect(decision.model).toEqual(fallback)
+    })
+
+    test("refactor with code_change operation → cloud model", () => {
+      const decision = hybridRoute(
+        {
+          confidence: 0.9,
+          info_gap: "low",
+          needs_code_change: false,
+          operation_type: "code_change",
+          assumptions: [],
+          ask_candidates: [],
+        },
+        fallback,
+        hybridCfg,
+        false,
+      )
+      expect(decision.target).toBe("cloud")
+      expect(decision.model).toEqual(fallback)
+      expect(decision.override_reason).toBe("code_change")
+    })
+
+    test("e2e-writer with preflight unavailable → cloud model", () => {
+      const decision = hybridRoute(undefined, fallback, hybridCfg, false)
+      expect(decision.target).toBe("cloud")
+      expect(decision.model).toEqual(fallback)
+      expect(decision.override_reason).toBe("preflight_unavailable")
+    })
+
+    test("explore with read operation → local model", () => {
+      const decision = hybridRoute(
+        {
+          confidence: 0.9,
+          info_gap: "low",
+          needs_code_change: false,
+          operation_type: "read",
+          assumptions: [],
+          ask_candidates: [],
+        },
+        fallback,
+        hybridCfg,
+        false,
+      )
+      expect(decision.target).toBe("local")
+      expect(decision.model).toEqual(local)
+    })
+  })
+
+  describe("tool routing hints", () => {
+    test("read tools hint local class", () => {
+      expect(hint("use grep and read files")).toBe("read")
+    })
+
+    test("write tools hint code_change class", () => {
+      expect(hint("apply patch then write file")).toBe("code_change")
+    })
+
+    test("bash_simple command hint stays local", () => {
+      expect(hint("inspect", "echo hello")).toBe("bash_simple")
+    })
+
+    test("bash_complex command hint stays cloud", () => {
+      expect(hint("inspect", "bun test")).toBe("bash_complex")
+    })
+
+    test("task ask route returns clarification result", () => {
+      const decision = hybridRoute(
+        {
+          confidence: 0.9,
+          info_gap: "high",
+          needs_code_change: false,
+          operation_type: "other",
+          assumptions: [],
+          ask_candidates: ["repo path", "target file"],
+        },
+        fallback,
+        hybridCfg,
+        false,
+      )
+      expect(decision.target).toBe("ask")
+      expect(decision.ask_text).toContain("I need more information to proceed")
     })
   })
 })

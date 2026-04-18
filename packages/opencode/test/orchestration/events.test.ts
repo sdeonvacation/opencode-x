@@ -10,6 +10,7 @@ describe("orchestration/events", () => {
     expect(OrchestrationEvent.LoopDetected.type).toBe("orchestration.loop-detected")
     expect(OrchestrationEvent.ConcurrencyQueued.type).toBe("orchestration.concurrency-queued")
     expect(OrchestrationEvent.ConcurrencyReleased.type).toBe("orchestration.concurrency-released")
+    expect(OrchestrationEvent.Route.type).toBe("orchestration.route")
   })
 
   test("accepts valid payloads", () => {
@@ -48,6 +49,22 @@ describe("orchestration/events", () => {
     expect(
       OrchestrationEvent.ConcurrencyReleased.properties.safeParse({ key: "openai:gpt", queueLength: 0 }).success,
     ).toBe(true)
+    expect(
+      OrchestrationEvent.Route.properties.safeParse({
+        sessionID: "s1",
+        route: "cloud",
+        operation_type: "code_change",
+        confidence: 0.4,
+        info_gap: "low",
+        needs_code_change: true,
+        assumptions_count: 1,
+        verification_used: true,
+        success: false,
+        was_overridden: true,
+        override_reason: "code_change",
+        preflight_fallback: "base",
+      }).success,
+    ).toBe(true)
   })
 
   test("rejects invalid payloads", () => {
@@ -70,5 +87,15 @@ describe("orchestration/events", () => {
       false,
     )
     expect(OrchestrationEvent.ConcurrencyReleased.properties.safeParse({ key: 1, queueLength: 0 }).success).toBe(false)
+    expect(
+      OrchestrationEvent.Route.properties.safeParse({
+        sessionID: "s1",
+        route: "local",
+        assumptions_count: "1",
+        verification_used: false,
+        success: true,
+        was_overridden: false,
+      }).success,
+    ).toBe(false)
   })
 })
