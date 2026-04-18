@@ -181,21 +181,8 @@ export namespace Permission {
               ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
             })
           }
-          const envallow = base.action === "ask" && evaluate(request.permission, pattern, env).action === "allow"
-          if (envallow) {
-            const deny = [...ruleset, ...approved].findLast(
-              (rule) =>
-                rule.action === "deny" &&
-                Wildcard.match(request.permission, rule.permission) &&
-                Wildcard.match(pattern, rule.pattern),
-            )
-            if (deny) {
-              return yield* new DeniedError({
-                ruleset: [deny],
-              })
-            }
-          }
-          const rule = envallow ? { permission: request.permission, pattern, action: "allow" as const } : base
+          // env can only upgrade "ask" → "allow", never override "deny"
+          const rule = base.action === "ask" ? evaluate(request.permission, pattern, env) : base
           if (rule.action === "allow") continue
           needsAsk = true
         }

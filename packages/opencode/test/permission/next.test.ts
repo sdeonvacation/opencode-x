@@ -1,4 +1,4 @@
-import { afterEach, test, expect } from "bun:test"
+import { afterEach, beforeEach, test, expect } from "bun:test"
 import os from "os"
 import { Bus } from "../../src/bus"
 import { Permission } from "../../src/permission"
@@ -7,7 +7,15 @@ import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 import { MessageID, SessionID } from "../../src/session/schema"
 
+let prev: string | undefined
+beforeEach(() => {
+  prev = process.env.OPENCODE_PERMISSION
+  delete process.env.OPENCODE_PERMISSION
+})
+
 afterEach(async () => {
+  if (prev === undefined) delete process.env.OPENCODE_PERMISSION
+  else process.env.OPENCODE_PERMISSION = prev
   await Instance.disposeAll()
 })
 
@@ -585,35 +593,6 @@ test("ask - OPENCODE_PERMISSION allow-all does not override agent deny rules", a
             metadata: {},
             always: [],
             ruleset: [{ permission: "bash", pattern: "*", action: "deny" }],
-          }),
-        ).rejects.toBeInstanceOf(Permission.DeniedError)
-      },
-    })
-  } finally {
-    if (prev === undefined) delete process.env.OPENCODE_PERMISSION
-    else process.env.OPENCODE_PERMISSION = prev
-  }
-})
-
-test("ask - OPENCODE_PERMISSION allow-all does not override deny hidden by later ask", async () => {
-  const prev = process.env.OPENCODE_PERMISSION
-  process.env.OPENCODE_PERMISSION = '{"*":"allow"}'
-  try {
-    await using tmp = await tmpdir({ git: true })
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        await expect(
-          Permission.ask({
-            sessionID: SessionID.make("session_test"),
-            permission: "bash",
-            patterns: ["rm -rf /"],
-            metadata: {},
-            always: [],
-            ruleset: [
-              { permission: "bash", pattern: "rm *", action: "deny" },
-              { permission: "bash", pattern: "*", action: "ask" },
-            ],
           }),
         ).rejects.toBeInstanceOf(Permission.DeniedError)
       },

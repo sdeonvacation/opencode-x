@@ -1595,10 +1595,6 @@ export namespace Config {
             })
           }
 
-          if (Flag.OPENCODE_PERMISSION) {
-            result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.OPENCODE_PERMISSION))
-          }
-
           if (result.tools) {
             const perms: Record<string, Config.PermissionAction> = {}
             for (const [tool, enabled] of Object.entries(result.tools)) {

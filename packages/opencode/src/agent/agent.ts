@@ -82,7 +82,6 @@ export namespace Agent {
         Effect.fn("Agent.state")(function* (ctx) {
           const cfg = yield* config.get()
           const skillDirs = yield* skill.dirs()
-          const env = Permission.envRuleset()
           const whitelistedDirs = [Truncate.GLOB, ...skillDirs.map((dir) => path.join(dir, "*"))]
 
           const defaults = Permission.fromConfig({
@@ -264,12 +263,6 @@ export namespace Agent {
             item.parallelToolCalls = value.parallelToolCalls ?? item.parallelToolCalls
             item.options = mergeDeep(item.options, value.options ?? {})
             item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
-          }
-
-          if (env.length) {
-            for (const name in agents) {
-              agents[name].permission = Permission.merge(agents[name].permission, env)
-            }
           }
 
           // Ensure Truncate.GLOB is allowed unless explicitly configured
