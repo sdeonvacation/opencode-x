@@ -1165,39 +1165,6 @@ export namespace Config {
             .describe(
               "Model override used for keyword-triggered ultrawork routing, or when task.use_ultrawork is explicitly set to true",
             ),
-          hybrid_routing: z
-            .object({
-              enabled: z.boolean().default(false).describe("Enable intelligent local/cloud LLM routing"),
-              threshold: z
-                .number()
-                .min(0)
-                .max(1)
-                .default(0.7)
-                .describe("Preflight confidence below this routes to cloud"),
-              preflight_model: z
-                .object({ providerID: z.string(), modelID: z.string() })
-                .optional()
-                .describe("Model used for preflight classification; falls back to local_models[0] then the base model"),
-              local_models: z
-                .array(z.object({ providerID: z.string(), modelID: z.string() }))
-                .default([])
-                .describe("Ordered list of local models; first entry used for routing"),
-              verify_commands: z
-                .array(z.string())
-                .default([])
-                .describe("Shell commands run after code_change operations to verify correctness"),
-              verify_cache_ttl_ms: z
-                .number()
-                .int()
-                .positive()
-                .default(300_000)
-                .describe("TTL in ms for autodetected verify command cache (default: 5 minutes)"),
-            })
-            .refine((val) => val.enabled !== true || val.local_models.length > 0, {
-              message: "hybrid_routing.enabled requires non-empty local_models",
-            })
-            .optional()
-            .describe("Hybrid local/cloud routing (experimental)"),
         })
         .optional(),
     })

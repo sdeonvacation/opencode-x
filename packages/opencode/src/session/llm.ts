@@ -440,7 +440,6 @@ export namespace LLM {
         metadata: {
           userId: cfg.username ?? "unknown",
           sessionId: input.sessionID,
-          ...(cfg.experimental?.hybrid_routing?.enabled ? { hybrid_routing_enabled: true } : {}),
         },
       },
     })
