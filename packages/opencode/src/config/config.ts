@@ -912,6 +912,28 @@ export namespace Config {
 
   export type Provider = z.infer<typeof Provider>
 
+  export const HybridModelRef = z
+    .object({
+      providerID: z.string(),
+      modelID: z.string(),
+    })
+    .strict()
+    .meta({
+      ref: "HybridModelRefConfig",
+    })
+
+  export const Hybrid = z
+    .object({
+      enabled: z.boolean().optional().default(false).describe("Enable hybrid cloud/local model routing"),
+      local_model: HybridModelRef.optional().describe("Local model reference"),
+      cloud_model: HybridModelRef.optional().describe("Cloud model override"),
+      log_routing: z.boolean().optional().default(false).describe("Enable verbose routing decision logging"),
+    })
+    .strict()
+    .meta({
+      ref: "HybridConfig",
+    })
+
   export const Info = z
     .object({
       $schema: z.string().optional().describe("JSON schema reference for configuration validation"),
@@ -1064,6 +1086,7 @@ export namespace Config {
       instructions: z.array(z.string()).optional().describe("Additional instruction files or patterns to include"),
       layout: Layout.optional().describe("@deprecated Always uses stretch layout."),
       permission: Permission.optional(),
+      hybrid: Hybrid.optional().describe("Hybrid cloud/local model routing configuration"),
       tools: z.record(z.string(), z.boolean()).optional(),
       enterprise: z
         .object({
@@ -1169,6 +1192,24 @@ export namespace Config {
         .optional(),
     })
     .strict()
+    .superRefine((value, ctx) => {
+      const local = value.hybrid?.local_model
+      if (local && !value.provider?.[local.providerID]) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Unknown provider: ${local.providerID}`,
+          path: ["hybrid", "local_model", "providerID"],
+        })
+      }
+      const cloud = value.hybrid?.cloud_model
+      if (cloud && !value.provider?.[cloud.providerID]) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Unknown provider: ${cloud.providerID}`,
+          path: ["hybrid", "cloud_model", "providerID"],
+        })
+      }
+    })
     .meta({
       ref: "Config",
     })

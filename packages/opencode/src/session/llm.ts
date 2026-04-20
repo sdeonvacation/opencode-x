@@ -21,6 +21,8 @@ import { Wildcard } from "@/util/wildcard"
 import { SessionID } from "@/session/schema"
 import { Auth } from "@/auth"
 import { Installation } from "@/installation"
+import { filterForRoute } from "@/tool/tool-filter"
+import { resolveHybridRoute } from "@/session/route-classifier"
 
 export namespace LLM {
   const log = Log.create({ service: "llm" })
@@ -43,6 +45,7 @@ export namespace LLM {
     toolMeta?: Map<string, ToolMeta>
     retries?: number
     toolChoice?: "auto" | "required" | "none"
+    onModelResolved?: (model: Provider.Model) => void
   }
 
   export type StreamRequest = StreamInput & {
@@ -127,12 +130,31 @@ export namespace LLM {
       modelID: input.model.id,
       providerID: input.model.providerID,
     })
-    const [language, cfg, provider, auth] = await Promise.all([
+    const [baseLanguage, cfg, baseProvider, baseAuth] = await Promise.all([
       Provider.getLanguage(input.model),
       Config.get(),
       Provider.getProvider(input.model.providerID),
       Auth.get(input.model.providerID),
     ])
+    const all = await resolveTools(input)
+    const hybrid = await resolveHybridRoute({
+      enabled: cfg.hybrid?.enabled ?? Flag.OPENCODE_HYBRID_ROUTING,
+      cfg,
+      input: {
+        sessionID: input.sessionID,
+        messages: input.messages,
+        tools: all,
+        model: input.model,
+      },
+      language: baseLanguage,
+      provider: baseProvider,
+      auth: baseAuth,
+    })
+    const model = hybrid.model
+    const language = hybrid.language
+    const provider = hybrid.provider
+    const auth = hybrid.auth
+    input.onModelResolved?.(model)
     // TODO: move this to a proper hook
     const isOpenaiOauth = provider.id === "openai" && auth?.type === "oauth"
 
@@ -140,7 +162,7 @@ export namespace LLM {
     system.push(
       [
         // use agent prompt otherwise provider prompt
-        ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
+        ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(model)),
         // any custom prompt passed into this call
         ...input.system,
         // any custom prompt from last user message
@@ -151,11 +173,7 @@ export namespace LLM {
     )
 
     const header = system[0]
-    await Plugin.trigger(
-      "experimental.chat.system.transform",
-      { sessionID: input.sessionID, model: input.model },
-      { system },
-    )
+    await Plugin.trigger("experimental.chat.system.transform", { sessionID: input.sessionID, model }, { system })
     // rejoin to maintain 2-part structure for caching if header unchanged
     if (system.length > 2 && system[0] === header) {
       const rest = system.slice(1)
@@ -164,19 +182,17 @@ export namespace LLM {
     }
 
     const variant =
-      !input.small && input.model.variants && input.user.model.variant
-        ? input.model.variants[input.user.model.variant]
-        : {}
+      !input.small && model.variants && input.user.model.variant ? model.variants[input.user.model.variant] : {}
     const base = input.small
-      ? ProviderTransform.smallOptions(input.model)
+      ? ProviderTransform.smallOptions(model)
       : ProviderTransform.options({
-          model: input.model,
+          model,
           sessionID: input.sessionID,
           providerOptions: provider.options,
         })
     const options: Record<string, any> = pipe(
       base,
-      mergeDeep(input.model.options),
+      mergeDeep(model.options),
       mergeDeep(input.agent.options),
       mergeDeep(variant),
     )
@@ -204,17 +220,17 @@ export namespace LLM {
       {
         sessionID: input.sessionID,
         agent: input.agent.name,
-        model: input.model,
+        model,
         provider,
         message: input.user,
       },
       {
-        temperature: input.model.capabilities.temperature
-          ? (input.agent.temperature ?? ProviderTransform.temperature(input.model))
+        temperature: model.capabilities.temperature
+          ? (input.agent.temperature ?? ProviderTransform.temperature(model))
           : undefined,
-        topP: input.agent.topP ?? ProviderTransform.topP(input.model),
-        topK: ProviderTransform.topK(input.model),
-        maxOutputTokens: ProviderTransform.maxOutputTokens(input.model),
+        topP: input.agent.topP ?? ProviderTransform.topP(model),
+        topK: ProviderTransform.topK(model),
+        maxOutputTokens: ProviderTransform.maxOutputTokens(model),
         options,
       },
     )
@@ -224,7 +240,7 @@ export namespace LLM {
       {
         sessionID: input.sessionID,
         agent: input.agent.name,
-        model: input.model,
+        model,
         provider,
         message: input.user,
       },
@@ -233,8 +249,10 @@ export namespace LLM {
       },
     )
 
-    const tools = await resolveTools(input)
-    const toolMeta = resolveToolMeta(input, tools)
+    const tools = all
+    const active = filterForRoute(all, hybrid.route)
+    const visible = { ...active }
+    const toolMeta = resolveToolMeta(input, active)
     const parallelToolCalls = parallelGate({
       agent: input.agent,
       permission: input.permission,
@@ -242,13 +260,13 @@ export namespace LLM {
       toolMeta,
     })
     const providerOptions = ProviderTransform.providerOptions(
-      input.model,
+      model,
       mergeDeep(
         params.options,
         ProviderTransform.parallelToolCallOptions({
-          model: input.model,
+          model,
           enabled: parallelToolCalls,
-          provider: cfg.provider?.[input.model.providerID],
+          provider: cfg.provider?.[model.providerID],
         }),
       ),
     )
@@ -261,15 +279,15 @@ export namespace LLM {
     // 2. Providers with explicit "litellmProxy: true" option (opt-in for custom gateways)
     const isLiteLLMProxy =
       provider.options?.["litellmProxy"] === true ||
-      input.model.providerID.toLowerCase().includes("litellm") ||
-      input.model.api.id.toLowerCase().includes("litellm")
+      model.providerID.toLowerCase().includes("litellm") ||
+      model.api.id.toLowerCase().includes("litellm")
 
     // LiteLLM/Bedrock rejects requests where the message history contains tool
     // calls but no tools param is present. When there are no active tools (e.g.
     // during compaction), inject a stub tool to satisfy the validation requirement.
     // The stub description explicitly tells the model not to call it.
-    if (isLiteLLMProxy && Object.keys(tools).length === 0 && hasToolCalls(input.messages)) {
-      tools["_noop"] = tool({
+    if (isLiteLLMProxy && Object.keys(active).length === 0 && hasToolCalls(input.messages)) {
+      visible["_noop"] = tool({
         description: "Do not call this tool. It exists only for API compatibility and must never be invoked.",
         inputSchema: jsonSchema({
           type: "object",
@@ -397,13 +415,13 @@ export namespace LLM {
       topP: params.topP,
       topK: params.topK,
       providerOptions,
-      activeTools: Object.keys(tools).filter((x) => x !== "invalid"),
-      tools: ProviderTransform.toolCaching(tools, input.model) as typeof tools,
+      activeTools: Object.keys(visible).filter((x) => x !== "invalid"),
+      tools: ProviderTransform.toolCaching(visible, model) as typeof visible,
       toolChoice: input.toolChoice,
       maxOutputTokens: params.maxOutputTokens,
       abortSignal: input.abort,
       headers: {
-        ...(input.model.providerID.startsWith("opencode")
+        ...(model.providerID.startsWith("opencode")
           ? {
               "x-opencode-project": Instance.project.id,
               "x-opencode-session": input.sessionID,
@@ -415,7 +433,7 @@ export namespace LLM {
               ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
               "User-Agent": `opencode/${Installation.VERSION}`,
             }),
-        ...input.model.headers,
+        ...model.headers,
         ...headers,
       },
       maxRetries: input.retries ?? 0,
@@ -428,7 +446,7 @@ export namespace LLM {
             async transformParams(args) {
               if (args.type === "stream") {
                 // @ts-expect-error
-                args.params.prompt = ProviderTransform.message(args.params.prompt, input.model, options)
+                args.params.prompt = ProviderTransform.message(args.params.prompt, model, options)
               }
               return args.params
             },

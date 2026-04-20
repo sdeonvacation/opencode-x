@@ -1,0 +1,82 @@
+Hybrid routing: Core Principle
+
+Cloud thinks. Local executes.
+
+⚙️ Routing Model
+1. Reasoning (default path)
+
+Any time the system needs to:
+
+interpret intent
+plan next steps
+debug / explain
+decide what to do next
+→ CLOUD
+
+2. Tool Execution (deterministic)
+🟢 Always LOCAL
+grep, glob, search, ls, tree
+read_file, cat
+bash_simple (echo, ls, env, etc.)
+→ LOCAL
+
+🟡 Split (Execution vs Interpretation)
+bash_complex
+execution → LOCAL
+interpretation → CLOUD
+
+Definitions:
+bash_simple:
+  execution only, no reasoning required
+
+bash_complex:
+  any scenario where output must be interpreted to decide next action
+
+🔴 Always CLOUD
+edit, write, patch, apply_diff
+→ CLOUD
+🔁 Execution Loop (This is the key)
+
+Your agent becomes:
+
+CLOUD (reason)
+↓
+decide next action
+↓
+LOCAL (execute tool)
+↓
+return result
+↓
+CLOUD (reason again)
+↓
+repeat
+
+💡 Example:
+
+User:
+
+Fix failing tests
+
+Flow:
+
+CLOUD → "Run tests"
+↓
+LOCAL → npm test
+↓
+CLOUD → analyze failure
+↓
+CLOUD → propose fix
+↓
+CLOUD → apply patch
+↓
+LOCAL → run tests again
+↓
+CLOUD → verify result
+
+Other info:
+
+1. This feature should be behind a feature flag
+2. User should be able to connect to a local LLM running on llama.cpp, ollama etc
+3. The routing decision should be well logged - enablement based on a flag
+
+Intent of this feature: Cost saving

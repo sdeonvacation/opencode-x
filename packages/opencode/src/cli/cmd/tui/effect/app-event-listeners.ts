@@ -6,6 +6,7 @@ import { DialogConfirm } from "@tui/ui/dialog-confirm"
 import { type DialogContext } from "@tui/ui/dialog"
 import { type ToastContext } from "@tui/ui/toast"
 import { FormatError, FormatUnknownError } from "@/cli/error"
+import { type useEvent } from "@/cli/cmd/tui/context/event"
 
 type AppEvent =
   | {
@@ -69,12 +70,7 @@ function errorMessage(error: unknown) {
 
 export type AppEventListenersDeps = {
   sdk: {
-    event: {
-      on: <T extends AppEvent["type"]>(
-        type: T,
-        handler: (evt: Extract<AppEvent, { type: T }>) => void | Promise<void>,
-      ) => () => void
-    }
+    event: Pick<ReturnType<typeof useEvent>, "on" | "subscribe">
     client: {
       global: {
         upgrade: (input: { target: string }) => Promise<{ data?: unknown; error?: unknown }>
@@ -135,6 +131,16 @@ export function setupAppEventListeners(deps: AppEventListenersDeps): (() => void
         variant: "error",
         message,
         duration: 5000,
+      })
+    }),
+
+    deps.sdk.event.subscribe((evt) => {
+      const next = evt as { type: string; properties?: Record<string, unknown> }
+      if (next.type !== "hybrid.route.decided") return
+      if (next.properties?.reason !== "local_unavailable") return
+      deps.toast.show({
+        variant: "warning",
+        message: "Local model unavailable. Using cloud model instead.",
       })
     }),
 

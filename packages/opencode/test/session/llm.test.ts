@@ -5,16 +5,22 @@ import { Cause, Exit, Stream } from "effect"
 import z from "zod"
 import { makeRuntime } from "../../src/effect/run-service"
 import { LLM } from "../../src/session/llm"
+import { resolveHybridRoute } from "../../src/session/route-classifier"
 import { Instance } from "../../src/project/instance"
 import { Provider } from "../../src/provider/provider"
 import { ProviderTransform } from "../../src/provider/transform"
 import { ModelsDev } from "../../src/provider/models"
 import { ProviderID, ModelID } from "../../src/provider/schema"
+import { filterForRoute } from "../../src/tool/tool-filter"
 import { Filesystem } from "../../src/util/filesystem"
+import { Auth } from "../../src/auth"
+import { Config } from "../../src/config/config"
+import { Bus } from "../../src/bus"
 import { tmpdir } from "../fixture/fixture"
 import type { Agent } from "../../src/agent/agent"
 import type { MessageV2 } from "../../src/session/message-v2"
 import { SessionID, MessageID } from "../../src/session/schema"
+import { RouteDecided } from "../../src/session/route-logger"
 
 describe("session.llm.hasToolCalls", () => {
   test("returns false for empty messages array", () => {
@@ -189,7 +195,6 @@ describe("session.llm.parallelToolCalls", () => {
 
         for await (const _ of stream.fullStream) {
         }
-
         const capture = await request
         expect(capture.body.parallel_tool_calls).toBe(true)
       },
@@ -639,10 +644,11 @@ describe("session.llm.stream", () => {
           tools: {},
         })
 
+        const capture = await Promise.race([request, timeout(5000)])
+        console.log("hybrid-local-stream-request", capture.body)
+
         for await (const _ of stream.fullStream) {
         }
-
-        const capture = await request
         const body = capture.body
         const headers = capture.headers
         const url = capture.url
@@ -1014,7 +1020,6 @@ describe("session.llm.stream", () => {
 
         for await (const _ of stream.fullStream) {
         }
-
         const capture = await request
         const body = capture.body
 
@@ -1370,6 +1375,318 @@ describe("session.llm.stream", () => {
         expect(config?.temperature).toBe(0.3)
         expect(config?.topP).toBe(0.8)
         expect(config?.maxOutputTokens).toBe(ProviderTransform.maxOutputTokens(resolved))
+      },
+    })
+  })
+
+  test("routes hybrid local steps to local model and filters cloud-only tools", async () => {
+    const server = state.server
+    if (!server) {
+      throw new Error("Server not initialized")
+    }
+
+    const source = await loadFixture("openai", "gpt-5.2")
+    const model = source.model
+    const local = { ...model, id: "local-lite", name: "Local Lite" }
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: ["openai"],
+            provider: {
+              openai: {
+                name: "OpenAI",
+                env: ["OPENAI_API_KEY"],
+                npm: "@ai-sdk/openai",
+                api: "https://api.openai.com/v1",
+                models: {
+                  [model.id]: model,
+                  [local.id]: local,
+                },
+                options: { apiKey: "test-openai-key", baseURL: `${server.url.origin}/v1` },
+              },
+            },
+            hybrid: {
+              enabled: true,
+              local_model: {
+                providerID: "openai",
+                modelID: local.id,
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const cfg = await Config.get()
+        const resolved = await Provider.getModel(ProviderID.openai, ModelID.make(model.id))
+        const language = await Provider.getLanguage(resolved)
+        const provider = await Provider.getProvider(resolved.providerID)
+        const auth = await Auth.get(resolved.providerID)
+        const sessionID = SessionID.make("session-hybrid-local")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+        const user = {
+          id: MessageID.make("user-hybrid-local"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: ProviderID.make("openai"), modelID: resolved.id },
+        } satisfies MessageV2.User
+
+        const tools = {
+          grep: tool({ description: "grep", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+          edit: tool({ description: "edit", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+          task: tool({ description: "task", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+        }
+
+        const hybrid = await resolveHybridRoute({
+          enabled: cfg.hybrid?.enabled ?? false,
+          cfg,
+          input: {
+            sessionID,
+            messages: [
+              {
+                role: "assistant",
+                content: [{ type: "tool-call", toolCallId: "call-1", toolName: "grep", input: {} }],
+              },
+              { role: "tool", content: [{ type: "tool-result", toolCallId: "call-1", toolName: "grep" }] },
+            ] as ModelMessage[],
+            tools,
+            model: resolved,
+          },
+          language,
+          provider,
+          auth,
+        })
+
+        const filtered = filterForRoute(tools, hybrid.route)
+
+        expect(hybrid.route).toBe("local")
+        expect(hybrid.model.id).toBe(ModelID.make(local.id))
+        expect(Object.keys(filtered)).toEqual(["grep"])
+        expect(user.model.modelID).toBe(resolved.id)
+      },
+    })
+  })
+
+  test("filters tools in hybrid local stream requests", async () => {
+    const server = state.server
+    if (!server) {
+      throw new Error("Server not initialized")
+    }
+
+    const source = await loadFixture("openai", "gpt-5.2")
+    const model = source.model
+    const local = { ...model, id: "local-stream", name: "Local Stream" }
+    const request = waitRequest(
+      "/responses",
+      createEventResponse(
+        [
+          {
+            type: "response.created",
+            response: { id: "resp-hybrid-local", created_at: Math.floor(Date.now() / 1000), model: local.id },
+          },
+          {
+            type: "response.completed",
+            response: { incomplete_details: null, usage: { input_tokens: 1, output_tokens: 1 } },
+          },
+        ],
+        true,
+      ),
+    )
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: ["openai"],
+            provider: {
+              openai: {
+                name: "OpenAI",
+                env: ["OPENAI_API_KEY"],
+                npm: "@ai-sdk/openai",
+                api: "https://api.openai.com/v1",
+                models: {
+                  [model.id]: model,
+                  [local.id]: local,
+                },
+                options: { apiKey: "test-openai-key", baseURL: `${server.url.origin}/v1` },
+              },
+            },
+            hybrid: {
+              enabled: true,
+              local_model: {
+                providerID: "openai",
+                modelID: local.id,
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await Provider.getModel(ProviderID.openai, ModelID.make(model.id))
+        const sessionID = SessionID.make("session-hybrid-local-stream")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+        const user = {
+          id: MessageID.make("user-hybrid-local-stream"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: ProviderID.make("openai"), modelID: resolved.id },
+        } satisfies MessageV2.User
+
+        const abort = new AbortController()
+        await LLM.stream({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: [],
+          abort: abort.signal,
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "tool-call", toolCallId: "call-1", toolName: "grep", input: {} }],
+            },
+            {
+              role: "tool",
+              content: [
+                { type: "tool-result", toolCallId: "call-1", toolName: "grep", output: { type: "text", value: "" } },
+              ],
+            },
+          ] as ModelMessage[],
+          tools: {
+            grep: tool({ description: "grep", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+            edit: tool({ description: "edit", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+            task: tool({ description: "task", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+          },
+        })
+
+        const capture = await request
+        abort.abort()
+        const body = capture.body
+        const sent = body.tools as Array<{ function?: { name?: string }; name?: string }> | undefined
+
+        expect(body.model).toBe(local.id)
+        expect(sent?.map((item) => item.function?.name ?? item.name).filter(Boolean)).toEqual(["grep"])
+      },
+    })
+  })
+
+  test("bash ls routes to local (bash_simple) regardless of session tool set", async () => {
+    const server = state.server
+    if (!server) {
+      throw new Error("Server not initialized")
+    }
+
+    const source = await loadFixture("openai", "gpt-5.2")
+    const model = source.model
+    const cloud = { ...model, id: "cloud-lite", name: "Cloud Lite" }
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: ["openai"],
+            provider: {
+              openai: {
+                name: "OpenAI",
+                env: ["OPENAI_API_KEY"],
+                npm: "@ai-sdk/openai",
+                api: "https://api.openai.com/v1",
+                models: {
+                  [model.id]: model,
+                  [cloud.id]: cloud,
+                },
+                options: { apiKey: "test-openai-key", baseURL: `${server.url.origin}/v1` },
+              },
+            },
+            hybrid: {
+              enabled: true,
+              local_model: {
+                providerID: "openai",
+                modelID: cloud.id,
+              },
+              cloud_model: {
+                providerID: "openai",
+                modelID: cloud.id,
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const cfg = await Config.get()
+        const resolved = await Provider.getModel(ProviderID.openai, ModelID.make(model.id))
+        const language = await Provider.getLanguage(resolved)
+        const provider = await Provider.getProvider(resolved.providerID)
+        const auth = await Auth.get(resolved.providerID)
+        const sessionID = SessionID.make("session-hybrid-fallback")
+        const hit = deferred<{ properties: { route: string; reason: string; modelID: string } }>()
+        const unsub = Bus.subscribe(RouteDecided, (event) => hit.resolve(event))
+
+        try {
+          const hybrid = await resolveHybridRoute({
+            enabled: cfg.hybrid?.enabled ?? false,
+            cfg,
+            input: {
+              sessionID,
+              messages: [
+                {
+                  role: "assistant",
+                  content: [{ type: "tool-call", toolCallId: "call-1", toolName: "bash", input: { command: "ls" } }],
+                },
+                { role: "tool", content: [{ type: "tool-result", toolCallId: "call-1", toolName: "bash" }] },
+              ] as ModelMessage[],
+              tools: {
+                bash: tool({ description: "bash", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+                edit: tool({ description: "edit", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+              },
+              model: resolved,
+            },
+            language,
+            provider,
+            auth,
+          })
+
+          const event = await hit.promise
+
+          expect(hybrid.route).toBe("local")
+          expect(event.properties.route).toBe("local")
+          expect(event.properties.reason).toBe("bash_simple")
+        } finally {
+          unsub()
+        }
       },
     })
   })

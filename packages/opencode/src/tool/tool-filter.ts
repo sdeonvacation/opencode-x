@@ -7,6 +7,8 @@ import { ApplyPatchTool } from "./apply_patch"
 import { EditTool } from "./edit"
 import { WriteTool } from "./write"
 import type { Tool } from "./tool"
+import { LOCAL_ONLY_TOOLS, type Route } from "@/session/route-classifier"
+import type { Tool as ModelTool } from "ai"
 
 export type ToolFilterInput = {
   providerID: ProviderID
@@ -34,4 +36,15 @@ export function filterTools(tools: Tool.Info[], input: ToolFilterInput): Tool.In
     if (tool.id === EditTool.id || tool.id === WriteTool.id) return !usePatch
     return true
   })
+}
+
+export function filterForRoute(tools: Tool.Info[], route: Route): Tool.Info[]
+export function filterForRoute<T extends ModelTool>(tools: Record<string, T>, route: Route): Record<string, T>
+export function filterForRoute<T extends ModelTool>(tools: Tool.Info[] | Record<string, T>, route: Route) {
+  if (route === "cloud") return tools
+  if (Array.isArray(tools))
+    return tools.filter((tool) => LOCAL_ONLY_TOOLS.has(tool.id) || tool.id === "bash" || tool.id === "invalid")
+  return Object.fromEntries(
+    Object.entries(tools).filter(([id]) => LOCAL_ONLY_TOOLS.has(id) || id === "bash" || id === "invalid"),
+  )
 }

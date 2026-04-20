@@ -33,7 +33,7 @@ export function SubagentFooter() {
 
   const usage = createMemo(() => {
     const msg = messages()
-    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
+    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.input > 0)
     if (!last) return
 
     const tokens =

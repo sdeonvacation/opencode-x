@@ -542,7 +542,12 @@ export namespace SessionProcessor {
             yield* Effect.gen(function* () {
               ctx.currentText = undefined
               ctx.reasoningMap = {}
-              const stream = llm.stream(streamInput)
+              const stream = llm.stream({
+                ...streamInput,
+                onModelResolved: (m) => {
+                  ctx.model = m
+                },
+              })
 
               yield* stream.pipe(
                 Stream.tap((event) => handleEvent(event)),

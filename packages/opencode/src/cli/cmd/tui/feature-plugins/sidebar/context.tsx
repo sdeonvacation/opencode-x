@@ -24,7 +24,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const cost = createMemo(() => messageCost() + clearedCost())
 
   const state = createMemo(() => {
-    const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
+    const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.input > 0)
     if (!last) {
       return {
         tokens: 0,

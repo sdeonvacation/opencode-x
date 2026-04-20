@@ -28,14 +28,15 @@ describe("setupAppEventListeners", () => {
   }
 
   test("registers all listeners and cleanup unsubscribes them", () => {
-    const off = Array.from({ length: 6 }, () => mock(() => {}))
+    const off = Array.from({ length: 7 }, () => mock(() => {}))
     const all = [...off]
     const on: AppEventListenersDeps["sdk"]["event"]["on"] = (_type, _handler) => off.shift()!
+    const subscribe: AppEventListenersDeps["sdk"]["event"]["subscribe"] = (_handler) => off.shift()!
     const kv = createKV()
 
     const result = setupAppEventListeners({
       sdk: {
-        event: { on },
+        event: { on, subscribe },
         client: {
           global: {
             async upgrade() {
@@ -72,6 +73,9 @@ describe("setupAppEventListeners", () => {
             handlers.set(type, handler as (evt: unknown) => void)
             return () => {}
           },
+          subscribe() {
+            return () => {}
+          },
         },
         client: {
           global: {
@@ -98,6 +102,48 @@ describe("setupAppEventListeners", () => {
     expect(show).toHaveBeenCalledWith({ title: "t", message: "m", variant: "info", duration: 123 })
   })
 
+  test("hybrid route listener shows warning for local unavailable", () => {
+    const events: Array<(evt: unknown) => void> = []
+    const show = mock((_opts: unknown) => {})
+    const kv = createKV()
+
+    setupAppEventListeners({
+      sdk: {
+        event: {
+          on(_type, _handler) {
+            return () => {}
+          },
+          subscribe(handler) {
+            events.push(handler as (evt: unknown) => void)
+            return () => {}
+          },
+        },
+        client: {
+          global: {
+            async upgrade() {
+              return { data: { success: true, version: "1.0.0" } }
+            },
+          },
+        },
+      },
+      route: { data: { type: "home" }, navigate() {} },
+      command: { trigger() {} },
+      toast: { show },
+      dialog: {} as AppEventListenersDeps["dialog"],
+      kv,
+      exit: async () => {},
+    })
+
+    for (const handler of events) handler({ type: "hybrid.route.decided", properties: { reason: "other" } })
+    expect(show).not.toHaveBeenCalled()
+
+    for (const handler of events) handler({ type: "hybrid.route.decided", properties: { reason: "local_unavailable" } })
+    expect(show).toHaveBeenCalledWith({
+      variant: "warning",
+      message: "Local model unavailable. Using cloud model instead.",
+    })
+  })
+
   test("update listener skips or performs upgrade flows", async () => {
     const handlers = new Map<string, (evt: unknown) => Promise<void> | void>()
     const calls: Array<[string, string]> = []
@@ -119,6 +165,9 @@ describe("setupAppEventListeners", () => {
         event: {
           on(type, handler) {
             handlers.set(type, handler as (evt: unknown) => Promise<void> | void)
+            return () => {}
+          },
+          subscribe() {
             return () => {}
           },
         },
