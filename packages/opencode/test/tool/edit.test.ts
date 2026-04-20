@@ -637,7 +637,7 @@ describe("tool.edit", () => {
   })
 
   describe("concurrent editing", () => {
-    test("preserves concurrent edits to different sections of the same file", async () => {
+    test("preserves different-section edits on the same file under local serialization", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "top = 0\nmiddle = keep\nbottom = 0\n", "utf-8")
@@ -670,10 +670,6 @@ describe("tool.edit", () => {
           )
 
           await firstAsk.promise
-
-          // FileTime.withLock serializes, so second edit runs after first completes
-          // Re-read to get updated timestamp after first edit
-          await FileTime.read(ctx.sessionID, filepath)
 
           const promise2 = edit.execute(
             {
