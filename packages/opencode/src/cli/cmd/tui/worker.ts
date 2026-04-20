@@ -87,7 +87,11 @@ export const rpc = {
       directory: input.directory,
       init: InstanceBootstrap,
       fn: async () => {
-        await upgrade().catch(() => {})
+        try {
+          await upgrade().catch(() => {})
+        } finally {
+          await Instance.dispose()
+        }
       },
     })
   },

@@ -267,7 +267,13 @@ export namespace Worktree {
           Instance.provide({
             directory: info.directory,
             init: InstanceBootstrap,
-            fn: () => undefined,
+            fn: async () => {
+              try {
+                return undefined
+              } finally {
+                await Instance.dispose()
+              }
+            },
           })
             .then(() => true)
             .catch((error) => {
