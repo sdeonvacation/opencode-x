@@ -928,6 +928,24 @@ export namespace Config {
       local_model: HybridModelRef.optional().describe("Local model reference"),
       cloud_model: HybridModelRef.optional().describe("Cloud model override"),
       log_routing: z.boolean().optional().default(false).describe("Enable verbose routing decision logging"),
+      compression_threshold: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .default(10)
+        .describe("Line count threshold for compression (default: 10)"),
+      compression_templates: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe("Per-tool template override map (optional)"),
+      compression_timeout_ms: z
+        .number()
+        .int()
+        .min(100)
+        .optional()
+        .default(5000)
+        .describe("Timeout in ms for local model compression call (default: 5000)"),
     })
     .strict()
     .meta({

@@ -65,6 +65,7 @@ packages/
 - **Database**: SQLite via `drizzle-orm` + `bun:sqlite`
 - **Monorepo**: Turborepo + Bun workspaces
 - **Testing**: `bun test`
+- **Logs**: ~/.local/share/opencode/log
 
 ## Style Guide
 

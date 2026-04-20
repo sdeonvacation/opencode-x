@@ -36,6 +36,8 @@ describe("config.hybrid", () => {
     expect(cfg.hybrid).toEqual({
       enabled: false,
       log_routing: false,
+      compression_threshold: 10,
+      compression_timeout_ms: 5000,
     })
   })
 

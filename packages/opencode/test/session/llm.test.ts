@@ -1475,7 +1475,7 @@ describe("session.llm.stream", () => {
 
         expect(hybrid.route).toBe("local")
         expect(hybrid.model.id).toBe(ModelID.make(local.id))
-        expect(Object.keys(filtered)).toEqual(["grep"])
+        expect(Object.keys(filtered)).toEqual([])
         expect(user.model.modelID).toBe(resolved.id)
       },
     })
@@ -1592,7 +1592,7 @@ describe("session.llm.stream", () => {
         const sent = body.tools as Array<{ function?: { name?: string }; name?: string }> | undefined
 
         expect(body.model).toBe(local.id)
-        expect(sent?.map((item) => item.function?.name ?? item.name).filter(Boolean)).toEqual(["grep"])
+        expect(sent?.map((item) => item.function?.name ?? item.name).filter(Boolean)).toEqual(["grep", "edit", "task"])
       },
     })
   })

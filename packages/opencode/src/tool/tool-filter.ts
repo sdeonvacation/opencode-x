@@ -42,9 +42,6 @@ export function filterForRoute(tools: Tool.Info[], route: Route): Tool.Info[]
 export function filterForRoute<T extends ModelTool>(tools: Record<string, T>, route: Route): Record<string, T>
 export function filterForRoute<T extends ModelTool>(tools: Tool.Info[] | Record<string, T>, route: Route) {
   if (route === "cloud") return tools
-  if (Array.isArray(tools))
-    return tools.filter((tool) => LOCAL_ONLY_TOOLS.has(tool.id) || tool.id === "bash" || tool.id === "invalid")
-  return Object.fromEntries(
-    Object.entries(tools).filter(([id]) => LOCAL_ONLY_TOOLS.has(id) || id === "bash" || id === "invalid"),
-  )
+  // Local route no longer filters tools (local model doesn't get tools)
+  return Array.isArray(tools) ? [] : ({} as Record<string, T>)
 }

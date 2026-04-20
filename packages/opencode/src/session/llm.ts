@@ -21,7 +21,6 @@ import { Wildcard } from "@/util/wildcard"
 import { SessionID } from "@/session/schema"
 import { Auth } from "@/auth"
 import { Installation } from "@/installation"
-import { filterForRoute } from "@/tool/tool-filter"
 import { resolveHybridRoute } from "@/session/route-classifier"
 
 export namespace LLM {
@@ -250,9 +249,8 @@ export namespace LLM {
     )
 
     const tools = all
-    const active = filterForRoute(all, hybrid.route)
-    const visible = { ...active }
-    const toolMeta = resolveToolMeta(input, active)
+    const visible = { ...all }
+    const toolMeta = resolveToolMeta(input, all)
     const parallelToolCalls = parallelGate({
       agent: input.agent,
       permission: input.permission,
@@ -286,7 +284,7 @@ export namespace LLM {
     // calls but no tools param is present. When there are no active tools (e.g.
     // during compaction), inject a stub tool to satisfy the validation requirement.
     // The stub description explicitly tells the model not to call it.
-    if (isLiteLLMProxy && Object.keys(active).length === 0 && hasToolCalls(input.messages)) {
+    if (isLiteLLMProxy && Object.keys(all).length === 0 && hasToolCalls(input.messages)) {
       visible["_noop"] = tool({
         description: "Do not call this tool. It exists only for API compatibility and must never be invoked.",
         inputSchema: jsonSchema({

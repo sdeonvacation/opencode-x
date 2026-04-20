@@ -1,4 +1,4 @@
-import { Cause, Deferred, Effect, Layer, ServiceMap } from "effect"
+import { Cause, Deferred, Effect, Layer, Option, ServiceMap } from "effect"
 import * as Stream from "effect/Stream"
 import { Agent } from "@/agent/agent"
 import { Bus } from "@/bus"
@@ -9,17 +9,21 @@ import { Snapshot } from "@/snapshot"
 import { Log } from "@/util/log"
 import { Session } from "."
 import { LLM } from "./llm"
+import { LLMCompress } from "./llm-compress"
 import { MessageV2 } from "./message-v2"
 import { isOverflow } from "./overflow"
+import { shouldCompress, templateFor } from "./route-classifier"
 import { PartID } from "./schema"
 import type { SessionID } from "./schema"
 import { SessionRetry } from "./retry"
 import { SessionStatus } from "./status"
 import { SessionSummary } from "./summary"
-import type { Provider } from "@/provider/provider"
+import { Provider } from "@/provider/provider"
+import { ModelID, ProviderID } from "@/provider/schema"
 import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
 import { isRecord } from "@/util/record"
+import { Flag } from "@/flag/flag"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -72,6 +76,9 @@ export namespace SessionProcessor {
     needsCompaction: boolean
     currentText: MessageV2.TextPart | undefined
     reasoningMap: Record<string, MessageV2.ReasoningPart>
+    localModel?: Provider.Model
+    compressionThreshold: number
+    compressionTimeout: number
   }
 
   type StreamEvent = Event
@@ -108,6 +115,13 @@ export namespace SessionProcessor {
         // may execute tools internally before emitting start-step events,
         // so capturing inside the event handler can be too late.
         const initialSnapshot = yield* snapshot.track()
+        const cfg = yield* config.get()
+        const ref = cfg.hybrid?.local_model
+        const local = ref
+          ? yield* Effect.tryPromise(() =>
+              Provider.getModel(ProviderID.make(ref.providerID), ModelID.make(ref.modelID)),
+            ).pipe(Effect.option)
+          : Option.none<Provider.Model>()
         const ctx: ProcessorContext = {
           assistantMessage: input.assistantMessage,
           sessionID: input.sessionID,
@@ -119,6 +133,9 @@ export namespace SessionProcessor {
           needsCompaction: false,
           currentText: undefined,
           reasoningMap: {},
+          localModel: Option.getOrUndefined(local),
+          compressionThreshold: cfg.hybrid?.compression_threshold ?? 10,
+          compressionTimeout: cfg.hybrid?.compression_timeout_ms ?? 5000,
         }
         let aborted = false
 
@@ -188,6 +205,36 @@ export namespace SessionProcessor {
               attachments: output.attachments,
             },
           })
+          const enabled = cfg.hybrid?.enabled ?? Flag.OPENCODE_HYBRID_ROUTING
+          if (enabled && ctx.localModel && shouldCompress(output.output, ctx.compressionThreshold)) {
+            const result = yield* LLMCompress.compress({
+              tool: match.part.tool,
+              output: output.output,
+              template: templateFor(match.part.tool, cfg.hybrid?.compression_templates),
+              model: ctx.localModel,
+              threshold: ctx.compressionThreshold,
+              timeout: ctx.compressionTimeout,
+            })
+            yield* session.updatePart({
+              ...match.part,
+              state: {
+                status: "completed",
+                input: match.part.state.input,
+                output: result.compressed,
+                metadata: {
+                  ...output.metadata,
+                  compressed: true,
+                  compression_template: result.stats.template,
+                  compression_ratio: result.stats.ratio,
+                  compression_fallback: result.stats.fallback,
+                  compression_validated: result.stats.validated,
+                },
+                title: output.title,
+                time: { start: match.part.state.time.start, end: Date.now() },
+                attachments: output.attachments,
+              },
+            })
+          }
           yield* settleToolCall(toolCallID)
         })
 

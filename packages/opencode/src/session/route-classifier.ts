@@ -348,3 +348,53 @@ function call(messages: ModelMessage[], id?: string): Context | undefined {
     }
   }
 }
+
+export type CompressionTemplate = "extract" | "summarize" | "filter"
+
+export const COMPRESSION_SYSTEM = `You are a lossless compression tool. Rules:
+- Output ONLY facts present in the input
+- Never add information, analysis, or recommendations
+- Never infer intent or suggest next steps
+- Preserve all identifiers: file paths, line numbers, symbol names, error codes
+- If unsure whether to keep or drop, keep it`
+
+export const COMPRESSION_TEMPLATES: Record<CompressionTemplate, string> = {
+  extract: `Extract only the key lines from the following tool output.
+Return file paths, line numbers, matching content, and error messages.
+Use bullet format. Max 20 items.
+Do NOT add commentary, analysis, or recommendations.
+Do NOT infer what the results mean.`,
+
+  summarize: `Summarize the following content in 3-6 bullets.
+Preserve all identifiers (file paths, line numbers, function names, class names).
+Keep code structure references (which function, which class, which module).
+Do NOT add interpretation, analysis, or recommendations.
+Do NOT speculate about purpose or intent.`,
+
+  filter: `Return only the relevant items from the following output.
+Drop duplicate entries, empty lines, and boilerplate.
+Keep error codes, file paths, test names, and status indicators.
+Do NOT add summary, analysis, or recommendations.
+Do NOT reorder or reinterpret the items.`,
+}
+
+export function templateFor(tool: string, override?: Record<string, string>): CompressionTemplate {
+  const o = override?.[tool]
+  if (o === "extract" || o === "summarize" || o === "filter") return o
+  if (tool === "read") return "summarize"
+  return "extract"
+}
+
+export function shouldCompress(output: string, threshold: number): boolean {
+  return listLines(output) > threshold
+}
+
+export function validateCompression(raw: string, compressed: string): boolean {
+  const rawLines = listLines(raw)
+  const compLines = listLines(compressed)
+  // Expansion check: strictly longer = invalid
+  if (compLines > rawLines) return false
+  // Empty check
+  if (!compressed.trim()) return false
+  return true
+}
