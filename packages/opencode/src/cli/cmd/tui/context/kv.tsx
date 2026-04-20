@@ -38,7 +38,7 @@ export const { use: useKV, provider: KVProvider } = createSimpleContext({
     }
 
     // Read under the same lock used for writes because kv.json is shared across processes.
-    Flock.withLock(lock, () => Filesystem.readJson<Record<string, unknown>>(filePath))
+    Flock.withLock(lock, () => Filesystem.readJson<Record<string, unknown>>(filePath), { timeoutMs: 5000 })
       .then((x) => {
         setStore(x as Record<string, unknown>)
       })
