@@ -69,11 +69,7 @@ export const Instance = {
     }
     const ctx = await existing
     return context.provide(ctx, async () => {
-      try {
-        return await input.fn()
-      } finally {
-        await Instance.dispose()
-      }
+      return input.fn()
     })
   },
   get current() {
