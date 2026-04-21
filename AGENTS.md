@@ -9,19 +9,13 @@
 
 ```bash
 bun install
-
 bun run dev
 bun run --cwd packages/opencode dev
-
 bun --cwd packages/opencode run build
-
 bun --cwd packages/opencode test --timeout 30000
 bun --cwd packages/opencode test test/tool/task.test.ts
-
 bun --cwd packages/opencode typecheck
-
 ./packages/sdk/js/script/build.ts
-
 bun --cwd packages/opencode db <drizzle-kit-cmd>
 ```
 
@@ -69,94 +63,35 @@ packages/
 
 ## Style Guide
 
-### General Principles
-
-- One function unless composable or reusable
+- One function unless reusable
 - Avoid `try`/`catch` where possible
 - Avoid `any` type
 - Prefer single word variable names
 - Use Bun APIs when possible (`Bun.file()`)
 - Type inference preferred; explicit types only for exports or clarity
 - Functional array methods (flatMap, filter, map) over for loops; type guards on filter
+- Avoid unnecessary destructuring; use dot notation (`obj.a` not `const { a } = obj`)
+- Prefer `const` over `let`; ternaries or early returns instead of reassignment
+- Avoid `else`; prefer early returns
 
-### Naming
+### Naming (MANDATORY)
 
-Single word names by default. Multiple words only when single word unclear.
+Single word names by default. Multi-word names only when single word unclear.
 
-### Naming Enforcement (Read This)
-
-THIS RULE IS MANDATORY FOR AGENT WRITTEN CODE.
-
-- Single word names by default for locals, params, helper functions.
-- Multi-word names allowed only when single word unclear.
-- No new camelCase compounds when short single-word alternative exists.
-- Short names to prefer: `pid`, `cfg`, `err`, `opts`, `dir`, `root`, `child`, `state`, `timeout`.
-- Avoid unless truly required: `inputPID`, `existingClient`, `connectTimeout`, `workerPath`.
+Preferred short names: `pid`, `cfg`, `err`, `opts`, `dir`, `root`, `child`, `state`, `timeout`.
+Avoid: `inputPID`, `existingClient`, `connectTimeout`, `workerPath`.
 
 ```ts
 // Good
 const foo = 1
 function journal(dir: string) {}
+const journal = await Bun.file(path.join(dir, "journal.json")).json()
 
 // Bad
 const fooBar = 1
 function prepareJournal(dir: string) {}
-```
-
-Inline when value used once.
-
-```ts
-// Good
-const journal = await Bun.file(path.join(dir, "journal.json")).json()
-
-// Bad
 const journalPath = path.join(dir, "journal.json")
 const journal = await Bun.file(journalPath).json()
-```
-
-### Destructuring
-
-Avoid unnecessary destructuring. Use dot notation.
-
-```ts
-// Good
-obj.a
-obj.b
-
-// Bad
-const { a, b } = obj
-```
-
-### Variables
-
-Prefer `const` over `let`. Ternaries or early returns instead of reassignment.
-
-```ts
-// Good
-const foo = condition ? 1 : 2
-
-// Bad
-let foo
-if (condition) foo = 1
-else foo = 2
-```
-
-### Control Flow
-
-Avoid `else`. Prefer early returns.
-
-```ts
-// Good
-function foo() {
-  if (condition) return 1
-  return 2
-}
-
-// Bad
-function foo() {
-  if (condition) return 1
-  else return 2
-}
 ```
 
 ### Schema Definitions (Drizzle)
