@@ -28,6 +28,8 @@ import * as Stream from "effect/Stream"
 import { Command } from "../command"
 import { pathToFileURL, fileURLToPath } from "url"
 import { ConfigMarkdown } from "../config/markdown"
+import { Config } from "../config/config"
+import { resolveLocal, resolveLocalAsync } from "./resolve-local"
 import { SessionSummary } from "./summary"
 import { NamedError } from "@opencode-ai/util/error"
 import { SessionProcessor } from "./processor"
@@ -100,6 +102,7 @@ export namespace SessionPrompt {
       const instruction = yield* Instruction.Service
       const state = yield* SessionRunState.Service
       const revert = yield* SessionRevert.Service
+      const config = yield* Config.Service
 
       const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
         log.info("cancel", { sessionID })
@@ -165,9 +168,11 @@ export namespace SessionPrompt {
 
         const ag = yield* agents.get("title")
         if (!ag) return
+        const cfg = yield* config.get()
         const mdl = ag.model
           ? yield* provider.getModel(ag.model.providerID, ag.model.modelID)
-          : ((yield* provider.getSmallModel(input.providerID)) ??
+          : ((yield* resolveLocal(provider, cfg, "title")) ??
+            (yield* provider.getSmallModel(input.providerID)) ??
             (yield* provider.getModel(input.providerID, input.modelID)))
         const msgs = onlySubtasks
           ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
@@ -972,10 +977,15 @@ export namespace SessionPrompt {
             await SessionRevert.cleanup(session)
 
             const base = input.model ?? (await lastModel(input.sessionID).pipe(Effect.runPromise))
+            const cfg = await Config.get()
             const model = await (async () => {
               if (input.model) return Provider.getModel(input.model.providerID, input.model.modelID)
               if (input.small === false) return Provider.getModel(base.providerID, base.modelID)
-              return (await Provider.getSmallModel(base.providerID)) ?? Provider.getModel(base.providerID, base.modelID)
+              return (
+                (await resolveLocalAsync(cfg, "complete")) ??
+                (await Provider.getSmallModel(base.providerID)) ??
+                Provider.getModel(base.providerID, base.modelID)
+              )
             })()
 
             const user = await createUserMessage({
@@ -1585,7 +1595,8 @@ export namespace SessionPrompt {
       Layer.provide(SessionRevert.defaultLayer),
       Layer.provide(Agent.defaultLayer),
       Layer.provide(Bus.layer),
-      Layer.provide(CrossSpawnSpawner.defaultLayer),
+      // mergeAll to stay within Effect pipe's 20-argument limit
+      Layer.provide(Layer.mergeAll(CrossSpawnSpawner.defaultLayer, Config.defaultLayer)),
     ),
   )
   const { runPromise } = makeRuntime(Service, defaultLayer)

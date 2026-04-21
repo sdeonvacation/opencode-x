@@ -19,6 +19,7 @@ import { Effect, Layer, ServiceMap } from "effect"
 import { makeRuntime } from "@/effect/run-service"
 import { InstanceState } from "@/effect/instance-state"
 import { isOverflow as overflow } from "./overflow"
+import { resolveLocal } from "./resolve-local"
 
 export namespace SessionCompaction {
   const log = Log.create({ service: "session.compaction" })
@@ -182,7 +183,8 @@ export namespace SessionCompaction {
         const agent = yield* agents.get("compaction")
         const model = agent.model
           ? yield* provider.getModel(agent.model.providerID, agent.model.modelID)
-          : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID)
+          : ((yield* resolveLocal(provider, yield* config.get(), "compaction")) ??
+            (yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID)))
         // Allow plugins to inject context or replace compaction prompt.
         const compacting = yield* plugin.trigger(
           "experimental.session.compacting",

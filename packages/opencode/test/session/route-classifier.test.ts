@@ -277,6 +277,18 @@ describe("session.route-classifier.compression", () => {
     test("templateFor: override for unknown tool", () => {
       expect(templateFor("mytool", { mytool: "filter" })).toBe("filter")
     })
+
+    test("templateFor: webfetch → summarize", () => {
+      expect(templateFor("webfetch")).toBe("summarize")
+    })
+
+    test("templateFor: websearch → extract", () => {
+      expect(templateFor("websearch")).toBe("extract")
+    })
+
+    test("templateFor: webfetch override respected", () => {
+      expect(templateFor("webfetch", { webfetch: "filter" })).toBe("filter")
+    })
   })
 
   describe("shouldCompress", () => {
@@ -328,6 +340,40 @@ describe("session.route-classifier.compression", () => {
     test("list: always false regardless of line count", () => {
       const output = Array(1000).fill("line").join("\n") // 1000 lines
       expect(shouldCompress(output, "list")).toBe(false)
+    })
+
+    test("webfetch: > 50 lines → true", () => {
+      const output = Array(55).fill("line").join("\n")
+      expect(shouldCompress(output, "webfetch")).toBe(true)
+    })
+
+    test("webfetch: === 50 lines → false (not strictly greater)", () => {
+      const output = Array(50).fill("line").join("\n")
+      expect(shouldCompress(output, "webfetch")).toBe(false)
+    })
+
+    test("webfetch: ≤ 50 lines → false", () => {
+      const output = Array(45).fill("line").join("\n")
+      expect(shouldCompress(output, "webfetch")).toBe(false)
+    })
+
+    test("webfetch: empty → false", () => {
+      expect(shouldCompress("", "webfetch")).toBe(false)
+    })
+
+    test("websearch: > 50 lines → true", () => {
+      const output = Array(55).fill("line").join("\n")
+      expect(shouldCompress(output, "websearch")).toBe(true)
+    })
+
+    test("websearch: === 50 lines → false (not strictly greater)", () => {
+      const output = Array(50).fill("line").join("\n")
+      expect(shouldCompress(output, "websearch")).toBe(false)
+    })
+
+    test("websearch: ≤ 50 lines → false", () => {
+      const output = Array(45).fill("line").join("\n")
+      expect(shouldCompress(output, "websearch")).toBe(false)
     })
 
     test("empty string → false for bash", () => {

@@ -307,7 +307,7 @@ Do NOT reorder or reinterpret the items.`,
 export function templateFor(tool: string, override?: Record<string, string>): CompressionTemplate {
   const o = override?.[tool]
   if (o === "extract" || o === "summarize" || o === "filter") return o
-  if (tool === "read") return "summarize"
+  if (tool === "read" || tool === "webfetch") return "summarize"
   if (tool === "bash") return "filter"
   return "extract"
 }
@@ -316,6 +316,7 @@ export function shouldCompress(output: string, tool: string): boolean {
   const lines = listLines(output)
   if (tool === "bash") return lines > 30
   if (tool === "grep" || tool === "glob") return lines > 100
+  if (tool === "webfetch" || tool === "websearch") return lines > 50
   return false
 }
 
