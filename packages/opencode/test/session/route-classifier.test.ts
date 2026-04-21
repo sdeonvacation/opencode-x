@@ -4,6 +4,7 @@ import {
   bashKind,
   category,
   complexityClassify,
+  compressionEligibleEntry,
   extractOutput,
   listLines,
   COMPRESSION_SYSTEM,
@@ -23,7 +24,7 @@ describe("session.route-classifier", () => {
     expect(complexityClassify({ enabled: true })).toMatchObject({ route: "cloud", reason: "reasoning" })
   })
 
-  test("grep, 10 lines, no triggers → local simple", () => {
+  test("grep, 10 lines → local simple", () => {
     const out = Array(10).fill("line").join("\n")
     expect(complexityClassify({ enabled: true, toolName: "grep", toolOutput: out })).toMatchObject({
       route: "local",
@@ -74,42 +75,12 @@ describe("session.route-classifier", () => {
     ).toMatchObject({ route: "cloud", reason: "complex" })
   })
 
-  test("grep output with 'Error:' → cloud trigger", () => {
-    expect(
-      complexityClassify({ enabled: true, toolName: "grep", toolOutput: "Error: cannot open file" }),
-    ).toMatchObject({ route: "cloud", reason: "trigger(Error:)" })
-  })
-
-  test("bash output with stack frame → cloud trigger(stack_frame)", () => {
-    expect(complexityClassify({ enabled: true, toolName: "bash", toolOutput: "  at foo (bar.ts:10:5)" })).toMatchObject(
-      { route: "cloud", reason: "trigger(stack_frame)" },
-    )
-  })
-
-  test("bash output with FAILED → cloud trigger", () => {
-    expect(complexityClassify({ enabled: true, toolName: "bash", toolOutput: "1 test FAILED" })).toMatchObject({
-      route: "cloud",
-    })
-  })
-
   test("'how it works' query does not block local routing (intent keywords removed)", () => {
     const out = Array(5).fill("x").join("\n")
     expect(complexityClassify({ enabled: true, toolName: "read", toolOutput: out })).toMatchObject({
       route: "local",
       reason: "simple",
     })
-  })
-
-  test("domain keyword 'auth' in tool input → cloud trigger(auth)", () => {
-    const out = Array(5).fill("x").join("\n")
-    expect(
-      complexityClassify({
-        enabled: true,
-        toolName: "read",
-        toolOutput: out,
-        toolInput: { path: "src/auth.ts" },
-      }),
-    ).toMatchObject({ route: "cloud", reason: "trigger(auth)" })
   })
 
   test("read with 200+ lines → cloud (line check before tool type)", () => {
@@ -278,8 +249,8 @@ describe("session.route-classifier.compression", () => {
       expect(templateFor("glob")).toBe("extract")
     })
 
-    test("bash → extract", () => {
-      expect(templateFor("bash")).toBe("extract")
+    test("bash → filter", () => {
+      expect(templateFor("bash")).toBe("filter")
     })
 
     test("list → extract", () => {
@@ -309,37 +280,58 @@ describe("session.route-classifier.compression", () => {
   })
 
   describe("shouldCompress", () => {
-    test("lines > threshold → true", () => {
-      const output = Array(101).fill("line").join("\n") // 101 lines
-      expect(shouldCompress(output, 100)).toBe(true)
+    test("bash: lines > 30 → true", () => {
+      const output = Array(32).fill("line").join("\n") // 32 lines
+      expect(shouldCompress(output, "bash")).toBe(true)
     })
 
-    test("lines === threshold → false (not strictly greater)", () => {
+    test("bash: lines === 30 → false (not strictly greater)", () => {
+      const output = Array(30).fill("line").join("\n") // 30 lines
+      expect(shouldCompress(output, "bash")).toBe(false)
+    })
+
+    test("bash: lines < 30 → false", () => {
+      const output = Array(10).fill("line").join("\n") // 10 lines
+      expect(shouldCompress(output, "bash")).toBe(false)
+    })
+
+    test("grep: lines > 100 → true", () => {
+      const output = Array(102).fill("line").join("\n") // 102 lines
+      expect(shouldCompress(output, "grep")).toBe(true)
+    })
+
+    test("grep: lines === 100 → false (not strictly greater)", () => {
       const output = Array(100).fill("line").join("\n") // 100 lines
-      expect(shouldCompress(output, 100)).toBe(false)
+      expect(shouldCompress(output, "grep")).toBe(false)
     })
 
-    test("lines < threshold → false", () => {
+    test("grep: lines < 100 → false", () => {
       const output = Array(50).fill("line").join("\n") // 50 lines
-      expect(shouldCompress(output, 100)).toBe(false)
+      expect(shouldCompress(output, "grep")).toBe(false)
     })
 
-    test("empty string → false (0 lines, threshold 0 → false)", () => {
-      expect(shouldCompress("", 0)).toBe(false)
+    test("glob: lines > 100 → true", () => {
+      const output = Array(102).fill("line").join("\n") // 102 lines
+      expect(shouldCompress(output, "glob")).toBe(true)
     })
 
-    test("single line → false when threshold is 1", () => {
-      expect(shouldCompress("one line", 1)).toBe(false)
+    test("glob: lines === 100 → false (not strictly greater)", () => {
+      const output = Array(100).fill("line").join("\n") // 100 lines
+      expect(shouldCompress(output, "glob")).toBe(false)
     })
 
-    test("two lines → true when threshold is 1", () => {
-      expect(shouldCompress("line1\nline2", 1)).toBe(true)
+    test("read: always false regardless of line count", () => {
+      const output = Array(1000).fill("line").join("\n") // 1000 lines
+      expect(shouldCompress(output, "read")).toBe(false)
     })
 
-    test("delegates to listLines for counting", () => {
-      // listLines("a\nb\nc") = 3
-      expect(shouldCompress("a\nb\nc", 2)).toBe(true)
-      expect(shouldCompress("a\nb\nc", 3)).toBe(false)
+    test("list: always false regardless of line count", () => {
+      const output = Array(1000).fill("line").join("\n") // 1000 lines
+      expect(shouldCompress(output, "list")).toBe(false)
+    })
+
+    test("empty string → false for bash", () => {
+      expect(shouldCompress("", "bash")).toBe(false)
     })
   })
 
@@ -383,6 +375,60 @@ describe("session.route-classifier.compression", () => {
     test("edge: raw empty, compressed non-empty → false (expansion: 1 > 0)", () => {
       // listLines("") = 0, listLines("x") = 1 → 1 > 0 → false
       expect(validateCompression("", "x")).toBe(false)
+    })
+  })
+
+  describe("compressionEligibleEntry", () => {
+    const base = {
+      sessionID: "s1",
+      step: 1,
+      modelID: "gpt-5.2",
+      providerID: "openai",
+    }
+
+    test("bash under threshold → not_compressible, eligible=false", () => {
+      const out = Array(10).fill("line").join("\n")
+      const entry = compressionEligibleEntry({ ...base, tool: "bash", output: out })
+      expect(entry.eligible).toBe(false)
+      expect(entry.reason).toBe("not_compressible")
+      expect(entry.tool).toBe("bash")
+      expect(entry.lineCount).toBe(10)
+    })
+
+    test("bash over threshold → bash_threshold, eligible=true", () => {
+      const out = Array(35).fill("line").join("\n")
+      const entry = compressionEligibleEntry({ ...base, tool: "bash", output: out })
+      expect(entry.eligible).toBe(true)
+      expect(entry.reason).toBe("bash_threshold")
+    })
+
+    test("grep over threshold → grep_threshold, eligible=true", () => {
+      const out = Array(105).fill("line").join("\n")
+      const entry = compressionEligibleEntry({ ...base, tool: "grep", output: out })
+      expect(entry.eligible).toBe(true)
+      expect(entry.reason).toBe("grep_threshold")
+    })
+
+    test("glob over threshold → glob_threshold, eligible=true", () => {
+      const out = Array(105).fill("line").join("\n")
+      const entry = compressionEligibleEntry({ ...base, tool: "glob", output: out })
+      expect(entry.eligible).toBe(true)
+      expect(entry.reason).toBe("glob_threshold")
+    })
+
+    test("read tool → not_compressible, eligible=false", () => {
+      const out = Array(200).fill("line").join("\n")
+      const entry = compressionEligibleEntry({ ...base, tool: "read", output: out })
+      expect(entry.eligible).toBe(false)
+      expect(entry.reason).toBe("not_compressible")
+    })
+
+    test("preserves sessionID, step, modelID, providerID", () => {
+      const entry = compressionEligibleEntry({ ...base, tool: "bash", output: "" })
+      expect(entry.sessionID).toBe("s1")
+      expect(entry.step).toBe(1)
+      expect(entry.modelID).toBe("gpt-5.2")
+      expect(entry.providerID).toBe("openai")
     })
   })
 })

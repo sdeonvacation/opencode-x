@@ -3,7 +3,7 @@ import fs from "fs/promises"
 import { Bus } from "../../src/bus"
 import { Config } from "../../src/config/config"
 import { Instance } from "../../src/project/instance"
-import { RouteDecided, log } from "../../src/session/route-logger"
+import { CompressionEligible, log } from "../../src/session/route-logger"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
 
@@ -37,15 +37,15 @@ describe("session.route-logger", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const hit = deferred<{ type: string; properties: { route: string; reason: string } }>()
-        const unsub = Bus.subscribe(RouteDecided, (event) => hit.resolve(event))
+        const hit = deferred<{ type: string; properties: { eligible: boolean; reason: string } }>()
+        const unsub = Bus.subscribe(CompressionEligible, (event) => hit.resolve(event))
         try {
           await log(
             {
               sessionID: "session-1",
               step: 2,
-              route: "cloud",
-              reason: "reasoning",
+              eligible: false,
+              reason: "no_tool",
               modelID: "gpt-5.2",
               providerID: "openai",
             },
@@ -53,8 +53,8 @@ describe("session.route-logger", () => {
           )
           const event = await hit.promise
           const text = await waitLog((text) => text.length > 0)
-          expect(event.properties.route).toBe("cloud")
-          expect(event.properties.reason).toBe("reasoning")
+          expect(event.properties.eligible).toBe(false)
+          expect(event.properties.reason).toBe("no_tool")
           expect(text.includes("service=hybrid")).toBe(false)
         } finally {
           unsub()
@@ -70,24 +70,25 @@ describe("session.route-logger", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const hit = deferred<{ type: string; properties: { route: string; tool?: string } }>()
-        const unsub = Bus.subscribe(RouteDecided, (event) => hit.resolve(event))
+        const hit = deferred<{ type: string; properties: { eligible: boolean; tool?: string } }>()
+        const unsub = Bus.subscribe(CompressionEligible, (event) => hit.resolve(event))
         try {
           await log(
             {
               sessionID: "session-2",
               step: 3,
-              route: "local",
-              reason: "local_only",
+              eligible: true,
+              reason: "grep_threshold",
               tool: "grep",
               modelID: "llama3.2:8b",
               providerID: "openai-compatible",
+              lineCount: 150,
             },
             Config.Info.parse({ hybrid: { enabled: true, log_routing: true } }),
           )
           const event = await hit.promise
           const text = await waitLog((text) => text.includes("service=hybrid"))
-          expect(event.properties.route).toBe("local")
+          expect(event.properties.eligible).toBe(true)
           expect(event.properties.tool).toBe("grep")
           expect(text.includes("service=hybrid")).toBe(true)
         } finally {

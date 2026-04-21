@@ -4,28 +4,26 @@ import type { Config } from "@/config/config"
 import { Log } from "@/util/log"
 import z from "zod"
 
-export const RouteDecided = BusEvent.define(
-  "hybrid.route.decided",
+export const CompressionEligible = BusEvent.define(
+  "hybrid.compression.eligible",
   z.object({
     sessionID: z.string(),
     step: z.number(),
-    route: z.enum(["cloud", "local"]),
-    reason: z.string(),
     tool: z.string().optional(),
     modelID: z.string(),
     providerID: z.string(),
-    complexity: z.enum(["simple", "complex", "unknown"]).optional(),
+    eligible: z.boolean(),
+    reason: z.string(),
     lineCount: z.number().optional(),
-    trigger: z.string().optional(),
   }),
 )
 
-export type RouteLogEntry = z.infer<typeof RouteDecided.properties>
+export type RouteLogEntry = z.infer<typeof CompressionEligible.properties>
 
 const logger = Log.create({ service: "hybrid" })
 
 export async function log(entry: RouteLogEntry, cfg: Config.Info) {
-  await Bus.publish(RouteDecided, entry)
+  await Bus.publish(CompressionEligible, entry)
   if (!cfg.hybrid?.log_routing) return
-  logger.info("route", entry)
+  logger.info("compression", entry)
 }

@@ -2,7 +2,7 @@ import { Auth } from "@/auth"
 import type { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
-import { log as routeLog } from "@/session/route-logger"
+import type { RouteLogEntry } from "@/session/route-logger"
 import type { ModelMessage, Tool } from "ai"
 
 export type RouteCategory = "LOCAL_ONLY" | "CLOUD_ONLY" | "SPLIT"
@@ -14,7 +14,6 @@ export type RouteDecision = {
   tool?: string
   complexity?: "simple" | "complex" | "unknown"
   lineCount?: number
-  trigger?: string
 }
 
 export type ClassifyInput = {
@@ -52,16 +51,6 @@ const SIMPLE = [
   "find",
   "grep",
   "make",
-]
-
-const DOMAIN_KEYWORDS = ["auth", "concurrency", "distributed", "race", "deadlock", "security"]
-const ERROR_PATTERNS: [RegExp, string][] = [
-  [/\bError[:\s]/, "Error:"],
-  [/\bException[:\s]/, "Exception:"],
-  [/\bFAILED\b/, "FAILED"],
-  [/\bpanic[:\s]/i, "panic:"],
-  [/\bstack trace\b/i, "stack_trace"],
-  [/\bat .+\(.+:\d+:\d+\)/, "stack_frame"],
 ]
 
 const LINE_LIMIT = 200
@@ -108,50 +97,12 @@ export function listLines(text: string): number {
   return text.split("\n").length
 }
 
-function hasKeyword(text: string, keywords: string[]): string | undefined {
-  const lower = text.toLowerCase()
-  return keywords.find((kw) => {
-    const re = new RegExp(`\\b${kw.replace(/\s+/g, "\\s+")}\\b`)
-    return re.test(lower)
-  })
-}
-
-function immediateCloudTrigger(output?: string, input?: Record<string, unknown>): string | undefined {
-  const inputText = input ? JSON.stringify(input) : ""
-  if (inputText) {
-    const kw = hasKeyword(inputText, DOMAIN_KEYWORDS)
-    if (kw) return kw
-  }
-
-  if (output) {
-    const kw = hasKeyword(output, DOMAIN_KEYWORDS)
-    if (kw) return kw
-
-    for (const [pat, label] of ERROR_PATTERNS) {
-      if (pat.test(output)) return label
-    }
-  }
-
-  return undefined
-}
-
 export function complexityClassify(input: ClassifyInput): RouteDecision {
   if (!input.enabled) return { route: "cloud", reason: "disabled" }
   if (!input.toolName) return { route: "cloud", reason: "reasoning" }
 
   if (CLOUD_ONLY_TOOLS.has(input.toolName)) {
     return { route: "cloud", reason: "cloud_only", tool: input.toolName, complexity: "complex" }
-  }
-
-  const trigger = immediateCloudTrigger(input.toolOutput, input.toolInput)
-  if (trigger) {
-    return {
-      route: "cloud",
-      reason: `trigger(${trigger})`,
-      tool: input.toolName,
-      complexity: "complex",
-      trigger,
-    }
   }
 
   const lines = listLines(input.toolOutput ?? "")
@@ -211,58 +162,20 @@ export async function resolveHybridRoute(input: {
   }
 
   if (decision.route === "cloud") {
-    const next = await cloud()
-    await routeLog(
-      entry({
-        sessionID: input.input.sessionID,
-        messages: input.input.messages,
-        decision,
-        model: next.model,
-      }),
-      input.cfg,
-    )
-    return next
+    return await cloud()
   }
 
   const ref = input.cfg.hybrid?.local_model
   if (!ref) {
-    const next = await cloud()
-    await routeLog(
-      entry({
-        sessionID: input.input.sessionID,
-        messages: input.input.messages,
-        decision: { ...decision, route: "cloud", reason: "local_unconfigured" },
-        model: next.model,
-      }),
-      input.cfg,
-    )
-    return next
+    return await cloud()
   }
 
   try {
-    const next = await resolve(ref, "local")
-    await routeLog(
-      entry({
-        sessionID: input.input.sessionID,
-        messages: input.input.messages,
-        decision,
-        model: next.model,
-      }),
-      input.cfg,
-    )
-    return next
-  } catch {
+    const local = await resolve(ref, "local")
     const next = await cloud()
-    await routeLog(
-      entry({
-        sessionID: input.input.sessionID,
-        messages: input.input.messages,
-        decision: { ...decision, route: "cloud", reason: "local_unavailable" },
-        model: next.model,
-      }),
-      input.cfg,
-    )
-    return next
+    return { ...next, route: "local" as const }
+  } catch {
+    return await cloud()
   }
 
   async function resolve(ref: { providerID: string; modelID: string }, route: Route): Promise<Resolved> {
@@ -276,18 +189,31 @@ export async function resolveHybridRoute(input: {
   }
 }
 
-function entry(input: { sessionID: string; messages: ModelMessage[]; decision: RouteDecision; model: Provider.Model }) {
+export function compressionEligibleEntry(input: {
+  sessionID: string
+  step: number
+  tool: string
+  output: string
+  modelID: string
+  providerID: string
+}): RouteLogEntry {
+  const eligible = shouldCompress(input.output, input.tool)
+  const reason = !input.tool
+    ? "no_tool"
+    : input.tool === "bash" && eligible
+      ? "bash_threshold"
+      : (input.tool === "grep" || input.tool === "glob") && eligible
+        ? `${input.tool}_threshold`
+        : "not_compressible"
   return {
     sessionID: input.sessionID,
-    step: input.messages.reduce((sum, msg) => sum + (msg.role === "assistant" ? 1 : 0), 1),
-    route: input.decision.route,
-    reason: input.decision.reason,
-    tool: input.decision.tool,
-    modelID: input.model.id,
-    providerID: input.model.providerID,
-    complexity: input.decision.complexity,
-    lineCount: input.decision.lineCount,
-    trigger: input.decision.trigger,
+    step: input.step,
+    tool: input.tool,
+    modelID: input.modelID,
+    providerID: input.providerID,
+    eligible,
+    reason,
+    lineCount: listLines(input.output),
   }
 }
 
@@ -382,11 +308,15 @@ export function templateFor(tool: string, override?: Record<string, string>): Co
   const o = override?.[tool]
   if (o === "extract" || o === "summarize" || o === "filter") return o
   if (tool === "read") return "summarize"
+  if (tool === "bash") return "filter"
   return "extract"
 }
 
-export function shouldCompress(output: string, threshold: number): boolean {
-  return listLines(output) > threshold
+export function shouldCompress(output: string, tool: string): boolean {
+  const lines = listLines(output)
+  if (tool === "bash") return lines > 30
+  if (tool === "grep" || tool === "glob") return lines > 100
+  return false
 }
 
 export function validateCompression(raw: string, compressed: string): boolean {

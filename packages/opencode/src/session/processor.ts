@@ -12,7 +12,8 @@ import { LLM } from "./llm"
 import { LLMCompress } from "./llm-compress"
 import { MessageV2 } from "./message-v2"
 import { isOverflow } from "./overflow"
-import { shouldCompress, templateFor } from "./route-classifier"
+import { compressionEligibleEntry, shouldCompress, templateFor } from "./route-classifier"
+import { log as routeLog } from "./route-logger"
 import { PartID } from "./schema"
 import type { SessionID } from "./schema"
 import { SessionRetry } from "./retry"
@@ -206,7 +207,7 @@ export namespace SessionProcessor {
             },
           })
           const enabled = cfg.hybrid?.enabled ?? Flag.OPENCODE_HYBRID_ROUTING
-          if (enabled && ctx.localModel && shouldCompress(output.output, ctx.compressionThreshold)) {
+          if (enabled && ctx.localModel && shouldCompress(output.output, match.part.tool)) {
             const result = yield* LLMCompress.compress({
               tool: match.part.tool,
               output: output.output,
@@ -234,6 +235,22 @@ export namespace SessionProcessor {
                 attachments: output.attachments,
               },
             })
+          }
+          if (enabled) {
+            const model = ctx.localModel ?? ctx.model
+            yield* Effect.promise(() =>
+              routeLog(
+                compressionEligibleEntry({
+                  sessionID: ctx.sessionID,
+                  step: 0,
+                  tool: match.part.tool,
+                  output: output.output,
+                  modelID: model.id,
+                  providerID: model.providerID,
+                }),
+                cfg,
+              ),
+            )
           }
           yield* settleToolCall(toolCallID)
         })

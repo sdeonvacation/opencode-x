@@ -20,7 +20,6 @@ import { tmpdir } from "../fixture/fixture"
 import type { Agent } from "../../src/agent/agent"
 import type { MessageV2 } from "../../src/session/message-v2"
 import { SessionID, MessageID } from "../../src/session/schema"
-import { RouteDecided } from "../../src/session/route-logger"
 
 describe("session.llm.hasToolCalls", () => {
   test("returns false for empty messages array", () => {
@@ -1474,7 +1473,7 @@ describe("session.llm.stream", () => {
         const filtered = filterForRoute(tools, hybrid.route)
 
         expect(hybrid.route).toBe("local")
-        expect(hybrid.model.id).toBe(ModelID.make(local.id))
+        expect(hybrid.model.id).toBe(ModelID.make(model.id))
         expect(Object.keys(filtered)).toEqual([])
         expect(user.model.modelID).toBe(resolved.id)
       },
@@ -1591,7 +1590,7 @@ describe("session.llm.stream", () => {
         const body = capture.body
         const sent = body.tools as Array<{ function?: { name?: string }; name?: string }> | undefined
 
-        expect(body.model).toBe(local.id)
+        expect(body.model).toBe(model.id)
         expect(sent?.map((item) => item.function?.name ?? item.name).filter(Boolean)).toEqual(["grep", "edit", "task"])
       },
     })
@@ -1652,41 +1651,31 @@ describe("session.llm.stream", () => {
         const provider = await Provider.getProvider(resolved.providerID)
         const auth = await Auth.get(resolved.providerID)
         const sessionID = SessionID.make("session-hybrid-fallback")
-        const hit = deferred<{ properties: { route: string; reason: string; modelID: string } }>()
-        const unsub = Bus.subscribe(RouteDecided, (event) => hit.resolve(event))
 
-        try {
-          const hybrid = await resolveHybridRoute({
-            enabled: cfg.hybrid?.enabled ?? false,
-            cfg,
-            input: {
-              sessionID,
-              messages: [
-                {
-                  role: "assistant",
-                  content: [{ type: "tool-call", toolCallId: "call-1", toolName: "bash", input: { command: "ls" } }],
-                },
-                { role: "tool", content: [{ type: "tool-result", toolCallId: "call-1", toolName: "bash" }] },
-              ] as ModelMessage[],
-              tools: {
-                bash: tool({ description: "bash", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
-                edit: tool({ description: "edit", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+        const hybrid = await resolveHybridRoute({
+          enabled: cfg.hybrid?.enabled ?? false,
+          cfg,
+          input: {
+            sessionID,
+            messages: [
+              {
+                role: "assistant",
+                content: [{ type: "tool-call", toolCallId: "call-1", toolName: "bash", input: { command: "ls" } }],
               },
-              model: resolved,
+              { role: "tool", content: [{ type: "tool-result", toolCallId: "call-1", toolName: "bash" }] },
+            ] as ModelMessage[],
+            tools: {
+              bash: tool({ description: "bash", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
+              edit: tool({ description: "edit", inputSchema: z.object({}), execute: async () => ({ output: "" }) }),
             },
-            language,
-            provider,
-            auth,
-          })
+            model: resolved,
+          },
+          language,
+          provider,
+          auth,
+        })
 
-          const event = await hit.promise
-
-          expect(hybrid.route).toBe("local")
-          expect(event.properties.route).toBe("local")
-          expect(event.properties.reason).toBe("bash_simple")
-        } finally {
-          unsub()
-        }
+        expect(hybrid.route).toBe("local")
       },
     })
   })

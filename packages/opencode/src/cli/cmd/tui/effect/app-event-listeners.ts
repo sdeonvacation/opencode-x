@@ -134,16 +134,6 @@ export function setupAppEventListeners(deps: AppEventListenersDeps): (() => void
       })
     }),
 
-    deps.sdk.event.subscribe((evt) => {
-      const next = evt as { type: string; properties?: Record<string, unknown> }
-      if (next.type !== "hybrid.route.decided") return
-      if (next.properties?.reason !== "local_unavailable") return
-      deps.toast.show({
-        variant: "warning",
-        message: "Local model unavailable. Using cloud model instead.",
-      })
-    }),
-
     deps.sdk.event.on("installation.update-available", async (evt) => {
       const version = evt.properties.version
 
