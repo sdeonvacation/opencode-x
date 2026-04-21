@@ -196,15 +196,18 @@ export function compressionEligibleEntry(input: {
   output: string
   modelID: string
   providerID: string
+  thresholds?: CompressionThresholds
 }): RouteLogEntry {
-  const eligible = shouldCompress(input.output, input.tool)
+  const eligible = shouldCompress(input.output, input.tool, input.thresholds)
   const reason = !input.tool
     ? "no_tool"
     : input.tool === "bash" && eligible
       ? "bash_threshold"
       : (input.tool === "grep" || input.tool === "glob") && eligible
         ? `${input.tool}_threshold`
-        : "not_compressible"
+        : (input.tool === "webfetch" || input.tool === "websearch") && eligible
+          ? `${input.tool}_threshold`
+          : "not_compressible"
   return {
     sessionID: input.sessionID,
     step: input.step,
@@ -312,11 +315,17 @@ export function templateFor(tool: string, override?: Record<string, string>): Co
   return "extract"
 }
 
-export function shouldCompress(output: string, tool: string): boolean {
+export type CompressionThresholds = {
+  grep?: number
+  webfetch?: number
+  bash?: number
+}
+
+export function shouldCompress(output: string, tool: string, thresholds?: CompressionThresholds): boolean {
   const lines = listLines(output)
-  if (tool === "bash") return lines > 30
-  if (tool === "grep" || tool === "glob") return lines > 100
-  if (tool === "webfetch" || tool === "websearch") return lines > 50
+  if (tool === "bash") return lines > (thresholds?.bash ?? 30)
+  if (tool === "grep" || tool === "glob") return lines > (thresholds?.grep ?? 50)
+  if (tool === "webfetch" || tool === "websearch") return lines > (thresholds?.webfetch ?? 50)
   return false
 }
 

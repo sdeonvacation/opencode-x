@@ -946,6 +946,26 @@ export namespace Config {
         .optional()
         .default(5000)
         .describe("Timeout in ms for local model compression call (default: 5000)"),
+      compression_thresholds: z
+        .object({
+          grep: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .default(50)
+            .describe("Line threshold for grep/glob output (default: 50)"),
+          webfetch: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .default(50)
+            .describe("Line threshold for webfetch/websearch output (default: 50)"),
+          bash: z.number().int().min(1).optional().default(30).describe("Line threshold for bash output (default: 30)"),
+        })
+        .optional()
+        .describe("Per-tool line count thresholds for compression eligibility"),
     })
     .strict()
     .meta({

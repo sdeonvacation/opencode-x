@@ -307,28 +307,28 @@ describe("session.route-classifier.compression", () => {
       expect(shouldCompress(output, "bash")).toBe(false)
     })
 
-    test("grep: lines > 100 → true", () => {
-      const output = Array(102).fill("line").join("\n") // 102 lines
+    test("grep: lines > 50 → true (default threshold)", () => {
+      const output = Array(52).fill("line").join("\n") // 52 lines
       expect(shouldCompress(output, "grep")).toBe(true)
     })
 
-    test("grep: lines === 100 → false (not strictly greater)", () => {
-      const output = Array(100).fill("line").join("\n") // 100 lines
-      expect(shouldCompress(output, "grep")).toBe(false)
-    })
-
-    test("grep: lines < 100 → false", () => {
+    test("grep: lines === 50 → false (not strictly greater)", () => {
       const output = Array(50).fill("line").join("\n") // 50 lines
       expect(shouldCompress(output, "grep")).toBe(false)
     })
 
-    test("glob: lines > 100 → true", () => {
-      const output = Array(102).fill("line").join("\n") // 102 lines
+    test("grep: lines < 50 → false", () => {
+      const output = Array(30).fill("line").join("\n") // 30 lines
+      expect(shouldCompress(output, "grep")).toBe(false)
+    })
+
+    test("glob: lines > 50 → true (default threshold)", () => {
+      const output = Array(52).fill("line").join("\n") // 52 lines
       expect(shouldCompress(output, "glob")).toBe(true)
     })
 
-    test("glob: lines === 100 → false (not strictly greater)", () => {
-      const output = Array(100).fill("line").join("\n") // 100 lines
+    test("glob: lines === 50 → false (not strictly greater)", () => {
+      const output = Array(50).fill("line").join("\n") // 50 lines
       expect(shouldCompress(output, "glob")).toBe(false)
     })
 
@@ -378,6 +378,33 @@ describe("session.route-classifier.compression", () => {
 
     test("empty string → false for bash", () => {
       expect(shouldCompress("", "bash")).toBe(false)
+    })
+
+    test("custom threshold: grep at 20 lines", () => {
+      const output = Array(22).fill("line").join("\n")
+      expect(shouldCompress(output, "grep", { grep: 20 })).toBe(true)
+      const under = Array(20).fill("line").join("\n")
+      expect(shouldCompress(under, "grep", { grep: 20 })).toBe(false)
+    })
+
+    test("custom threshold: webfetch at 10 lines", () => {
+      const output = Array(12).fill("line").join("\n")
+      expect(shouldCompress(output, "webfetch", { webfetch: 10 })).toBe(true)
+      const under = Array(10).fill("line").join("\n")
+      expect(shouldCompress(under, "webfetch", { webfetch: 10 })).toBe(false)
+    })
+
+    test("custom threshold: bash at 15 lines", () => {
+      const output = Array(17).fill("line").join("\n")
+      expect(shouldCompress(output, "bash", { bash: 15 })).toBe(true)
+      const under = Array(15).fill("line").join("\n")
+      expect(shouldCompress(under, "bash", { bash: 15 })).toBe(false)
+    })
+
+    test("partial thresholds: unset tools use defaults", () => {
+      const output = Array(52).fill("line").join("\n")
+      expect(shouldCompress(output, "grep", { bash: 10 })).toBe(true)
+      expect(shouldCompress(output, "webfetch", { grep: 10 })).toBe(true)
     })
   })
 

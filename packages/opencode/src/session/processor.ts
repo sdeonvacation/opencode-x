@@ -12,7 +12,7 @@ import { LLM } from "./llm"
 import { LLMCompress } from "./llm-compress"
 import { MessageV2 } from "./message-v2"
 import { isOverflow } from "./overflow"
-import { compressionEligibleEntry, shouldCompress, templateFor } from "./route-classifier"
+import { compressionEligibleEntry, shouldCompress, templateFor, type CompressionThresholds } from "./route-classifier"
 import { log as routeLog } from "./route-logger"
 import { PartID } from "./schema"
 import type { SessionID } from "./schema"
@@ -80,6 +80,7 @@ export namespace SessionProcessor {
     localModel?: Provider.Model
     compressionThreshold: number
     compressionTimeout: number
+    compressionThresholds?: CompressionThresholds
   }
 
   type StreamEvent = Event
@@ -137,6 +138,7 @@ export namespace SessionProcessor {
           localModel: Option.getOrUndefined(local),
           compressionThreshold: cfg.hybrid?.compression_threshold ?? 10,
           compressionTimeout: cfg.hybrid?.compression_timeout_ms ?? 5000,
+          compressionThresholds: cfg.hybrid?.compression_thresholds,
         }
         let aborted = false
 
@@ -207,7 +209,7 @@ export namespace SessionProcessor {
             },
           })
           const enabled = cfg.hybrid?.enabled ?? Flag.OPENCODE_HYBRID_ROUTING
-          if (enabled && ctx.localModel && shouldCompress(output.output, match.part.tool)) {
+          if (enabled && ctx.localModel && shouldCompress(output.output, match.part.tool, ctx.compressionThresholds)) {
             const result = yield* LLMCompress.compress({
               tool: match.part.tool,
               output: output.output,
@@ -247,6 +249,7 @@ export namespace SessionProcessor {
                   output: output.output,
                   modelID: model.id,
                   providerID: model.providerID,
+                  thresholds: ctx.compressionThresholds,
                 }),
                 cfg,
               ),
