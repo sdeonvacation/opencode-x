@@ -493,7 +493,7 @@ export namespace LSPServer {
       const args = []
       if (!binary) {
         if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
-        const resolved = await Npm.which("pyright")
+        const resolved = await Npm.which("pyright", "pyright-langserver")
         if (!resolved) return
         binary = resolved
       }

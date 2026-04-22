@@ -76,7 +76,7 @@ export const ReadTool = Tool.defineEffect(
     })
 
     const warm = Effect.fn("ReadTool.warm")(function* (filepath: string, sessionID: Tool.Context["sessionID"]) {
-      yield* lsp.touchFile(filepath, false).pipe(Effect.ignore, Effect.forkIn(scope))
+      yield* lsp.touchFile(filepath).pipe(Effect.ignore, Effect.forkIn(scope))
       yield* time.read(sessionID, filepath)
     })
 

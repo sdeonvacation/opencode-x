@@ -153,13 +153,14 @@ export namespace Npm {
     log.info("dependencies in sync")
   }
 
-  export async function which(pkg: string) {
+  export async function which(pkg: string, bin?: string) {
     const dir = directory(pkg)
     const binDir = path.join(dir, "node_modules", ".bin")
 
     const pick = async () => {
       const files = await readdir(binDir).catch(() => [])
       if (files.length === 0) return undefined
+      if (bin) return files.includes(bin) ? bin : undefined
       if (files.length === 1) return files[0]
       // Multiple binaries — resolve from package.json bin field like npx does
       const pkgJson = await Filesystem.readJson<{ bin?: string | Record<string, string> }>(
@@ -176,13 +177,13 @@ export namespace Npm {
       return files[0]
     }
 
-    const bin = await pick()
-    if (bin) return path.join(binDir, bin)
+    const resolved = await pick()
+    if (resolved) return path.join(binDir, resolved)
 
     await rm(path.join(dir, "package-lock.json"), { force: true })
     await add(pkg)
-    const resolved = await pick()
-    if (!resolved) return
-    return path.join(binDir, resolved)
+    const next = await pick()
+    if (!next) return
+    return path.join(binDir, next)
   }
 }

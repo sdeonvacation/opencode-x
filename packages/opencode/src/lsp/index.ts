@@ -144,7 +144,7 @@ export namespace LSP {
     readonly init: () => Effect.Effect<void>
     readonly status: () => Effect.Effect<Status[]>
     readonly hasClients: (file: string) => Effect.Effect<boolean>
-    readonly touchFile: (input: string, waitForDiagnostics?: boolean) => Effect.Effect<void>
+    readonly touchFile: (input: string, diagnostics?: "document" | "full") => Effect.Effect<void>
     readonly diagnostics: () => Effect.Effect<Record<string, LSPClient.Diagnostic[]>>
     readonly hover: (input: LocInput) => Effect.Effect<any>
     readonly definition: (input: LocInput) => Effect.Effect<any[]>
@@ -285,6 +285,7 @@ export namespace LSP {
               serverID: server.id,
               server: handle,
               root,
+              directory: Instance.directory,
             }).catch(async (err) => {
               s.broken.add(key)
               await Process.stop(handle.process)
@@ -388,15 +389,21 @@ export namespace LSP {
         })
       })
 
-      const touchFile = Effect.fn("LSP.touchFile")(function* (input: string, waitForDiagnostics?: boolean) {
+      const touchFile = Effect.fn("LSP.touchFile")(function* (input: string, diagnostics?: "document" | "full") {
         log.info("touching file", { file: input })
         const clients = yield* getClients(input)
         yield* Effect.promise(() =>
           Promise.all(
             clients.map(async (client) => {
-              const wait = waitForDiagnostics ? client.waitForDiagnostics({ path: input }) : Promise.resolve()
-              await client.notify.open({ path: input })
-              return wait
+              const after = Date.now()
+              const version = await client.notify.open({ path: input })
+              if (!diagnostics) return
+              return client.waitForDiagnostics({
+                path: input,
+                version,
+                mode: diagnostics,
+                after,
+              })
             }),
           ).catch((err) => {
             log.error("failed to touch file", { err, file: input })
@@ -550,8 +557,8 @@ export namespace LSP {
 
   export const hasClients = async (file: string) => runPromise((svc) => svc.hasClients(file))
 
-  export const touchFile = async (input: string, waitForDiagnostics?: boolean) =>
-    runPromise((svc) => svc.touchFile(input, waitForDiagnostics))
+  export const touchFile = async (input: string, diagnostics?: "document" | "full") =>
+    runPromise((svc) => svc.touchFile(input, diagnostics))
 
   export const diagnostics = async () => runPromise((svc) => svc.diagnostics())
 

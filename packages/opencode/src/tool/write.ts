@@ -90,7 +90,7 @@ export const WriteTool = Tool.define("write", {
 
     let output = "Wrote file successfully."
     update("Collecting diagnostics...", "diagnostics")
-    await LSP.touchFile(filepath, true)
+    await LSP.touchFile(filepath, "document")
     const diagnostics = await LSP.diagnostics()
     const normalizedFilepath = Filesystem.normalizePath(filepath)
     let projectDiagnosticsCount = 0

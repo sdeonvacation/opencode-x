@@ -152,7 +152,7 @@ export const EditTool = Tool.define("edit", {
     })
 
     let output = "Edit applied successfully."
-    await LSP.touchFile(filePath, true)
+    await LSP.touchFile(filePath, "document")
     const diagnostics = await LSP.diagnostics()
     const normalizedFilePath = Filesystem.normalizePath(filePath)
     const issues = diagnostics[normalizedFilePath] ?? []
