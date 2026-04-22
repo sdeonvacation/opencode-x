@@ -210,6 +210,7 @@ export namespace MessageV2 {
     type: z.literal("compaction"),
     auto: z.boolean(),
     overflow: z.boolean().optional(),
+    tail_start_id: MessageID.zod.optional(),
   }).meta({
     ref: "CompactionPart",
   })
@@ -317,6 +318,12 @@ export namespace MessageV2 {
       ref: "ToolStateCompleted",
     })
   export type ToolStateCompleted = z.infer<typeof ToolStateCompleted>
+
+  function truncateToolOutput(text: string, maxChars?: number) {
+    if (!maxChars || text.length <= maxChars) return text
+    const omitted = text.length - maxChars
+    return `${text.slice(0, maxChars)}\n[Tool output truncated for compaction: omitted ${omitted} chars]`
+  }
 
   export const ToolStateError = z
     .object({
@@ -591,7 +598,7 @@ export namespace MessageV2 {
   export const toModelMessagesEffect = Effect.fnUntraced(function* (
     input: WithParts[],
     model: Provider.Model,
-    options?: { stripMedia?: boolean },
+    options?: { stripMedia?: boolean; toolOutputMaxChars?: number },
   ) {
     const result: UIMessage[] = []
     const toolNames = new Set<string>()
@@ -730,7 +737,9 @@ export namespace MessageV2 {
           if (part.type === "tool") {
             toolNames.add(part.tool)
             if (part.state.status === "completed") {
-              const outputText = part.state.time.compacted ? "[Old tool result content cleared]" : part.state.output
+              const outputText = part.state.time.compacted
+                ? "[Old tool result content cleared]"
+                : truncateToolOutput(part.state.output, options?.toolOutputMaxChars)
               const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
 
               // For providers that don't support media in tool results, extract media files
@@ -846,7 +855,7 @@ export namespace MessageV2 {
   export function toModelMessages(
     input: WithParts[],
     model: Provider.Model,
-    options?: { stripMedia?: boolean },
+    options?: { stripMedia?: boolean; toolOutputMaxChars?: number },
   ): Promise<ModelMessage[]> {
     return Effect.runPromise(toModelMessagesEffect(input, model, options))
   }
@@ -935,8 +944,21 @@ export namespace MessageV2 {
   export function filterCompacted(msgs: Iterable<MessageV2.WithParts>) {
     const result = [] as MessageV2.WithParts[]
     const completed = new Set<string>()
+    let retain: MessageID | undefined
     for (const msg of msgs) {
       result.push(msg)
+      if (retain) {
+        if (msg.info.id === retain) break
+        continue
+      }
+      if (msg.info.role === "user" && completed.has(msg.info.id)) {
+        const part = msg.parts.find((item): item is MessageV2.CompactionPart => item.type === "compaction")
+        if (!part) continue
+        if (!part.tail_start_id) break
+        retain = part.tail_start_id
+        if (msg.info.id === retain) break
+        continue
+      }
       if (
         msg.info.role === "user" &&
         completed.has(msg.info.id) &&
