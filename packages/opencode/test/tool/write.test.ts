@@ -153,6 +153,76 @@ describe("tool.write", () => {
       })
     })
 
+    test("preserves BOM when overwriting existing files", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "existing.cs")
+      const bom = String.fromCharCode(0xfeff)
+      await fs.writeFile(filepath, `${bom}using System;\n`, "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const { FileTime } = await import("../../src/file/time")
+          await FileTime.read(ctx.sessionID, filepath)
+
+          const write = await WriteTool.init()
+          await write.execute(
+            {
+              filePath: filepath,
+              content: "using Up;\n",
+            },
+            ctx,
+          )
+
+          const content = await fs.readFile(filepath, "utf-8")
+          expect(content.charCodeAt(0)).toBe(0xfeff)
+          expect(content.slice(1)).toBe("using Up;\n")
+        },
+      })
+    })
+
+    test("restores BOM after formatter strips it", async () => {
+      await using tmp = await tmpdir({
+        config: {
+          formatter: {
+            stripbom: {
+              extensions: [".cs"],
+              command: [
+                "node",
+                "-e",
+                "const fs = require('fs'); const file = process.argv[1]; let text = fs.readFileSync(file, 'utf8'); if (text.charCodeAt(0) === 0xfeff) text = text.slice(1); fs.writeFileSync(file, text, 'utf8')",
+                "$FILE",
+              ],
+            },
+          },
+        },
+      })
+      const filepath = path.join(tmp.path, "formatted.cs")
+      const bom = String.fromCharCode(0xfeff)
+      await fs.writeFile(filepath, `${bom}using System;\n`, "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const { FileTime } = await import("../../src/file/time")
+          await FileTime.read(ctx.sessionID, filepath)
+
+          const write = await WriteTool.init()
+          await write.execute(
+            {
+              filePath: filepath,
+              content: "using Up;\n",
+            },
+            ctx,
+          )
+
+          const content = await fs.readFile(filepath, "utf-8")
+          expect(content.charCodeAt(0)).toBe(0xfeff)
+          expect(content.slice(1)).toBe("using Up;\n")
+        },
+      })
+    })
+
     test("returns diff in metadata for existing files", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")

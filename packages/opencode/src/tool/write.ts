@@ -13,6 +13,7 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { trimDiff } from "./edit"
 import { assertExternalDirectory } from "./external-directory"
+import * as Bom from "@/util/bom"
 
 const MAX_DIAGNOSTICS_PER_FILE = 20
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
@@ -42,10 +43,14 @@ export const WriteTool = Tool.define("write", {
     await assertExternalDirectory(ctx, filepath)
 
     const exists = await Filesystem.exists(filepath)
-    const contentOld = exists ? await Filesystem.readText(filepath) : ""
+    const source = exists ? await Bom.read(filepath) : { bom: false, text: "" }
+    const next = Bom.split(params.content)
+    const bom = source.bom || next.bom
+    const contentOld = source.text
+    const contentNew = next.text
     if (exists) await FileTime.assert(ctx.sessionID, filepath)
 
-    const diff = trimDiff(createTwoFilesPatch(filepath, filepath, contentOld, params.content))
+    const diff = trimDiff(createTwoFilesPatch(filepath, filepath, contentOld, contentNew))
     await ctx.ask({
       permission: "edit",
       patterns: [path.relative(Instance.worktree, filepath)],
@@ -67,13 +72,15 @@ export const WriteTool = Tool.define("write", {
       })
     }, 1000)
     try {
-      await Filesystem.write(filepath, params.content)
+      await Filesystem.write(filepath, Bom.join(contentNew, bom))
     } finally {
       clearInterval(timer)
     }
 
     update("Formatting file...", "format")
-    await Format.file(filepath)
+    if (await Format.file(filepath)) {
+      await Bom.sync(filepath, bom)
+    }
     Bus.publish(File.Event.Edited, { file: filepath })
     await Bus.publish(FileWatcher.Event.Updated, {
       file: filepath,

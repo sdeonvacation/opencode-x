@@ -14,6 +14,7 @@ import { Filesystem } from "../util/filesystem"
 import DESCRIPTION from "./apply_patch.txt"
 import { File } from "../file"
 import { Format } from "../format"
+import * as Bom from "@/util/bom"
 
 const PatchParams = z.object({
   patchText: z.string().describe("The full patch text that describes all changes to be made"),
@@ -54,6 +55,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       diff: string
       additions: number
       deletions: number
+      bom: boolean
     }> = []
 
     let totalDiff = ""
@@ -67,11 +69,12 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
           const oldContent = ""
           const newContent =
             hunk.contents.length === 0 || hunk.contents.endsWith("\n") ? hunk.contents : `${hunk.contents}\n`
-          const diff = trimDiff(createTwoFilesPatch(filePath, filePath, oldContent, newContent))
+          const next = Bom.split(newContent)
+          const diff = trimDiff(createTwoFilesPatch(filePath, filePath, oldContent, next.text))
 
           let additions = 0
           let deletions = 0
-          for (const change of diffLines(oldContent, newContent)) {
+          for (const change of diffLines(oldContent, next.text)) {
             if (change.added) additions += change.count || 0
             if (change.removed) deletions += change.count || 0
           }
@@ -79,11 +82,12 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
           fileChanges.push({
             filePath,
             oldContent,
-            newContent,
+            newContent: next.text,
             type: "add",
             diff,
             additions,
             deletions,
+            bom: next.bom,
           })
 
           totalDiff += diff + "\n"
@@ -97,13 +101,16 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
             throw new Error(`apply_patch verification failed: Failed to read file to update: ${filePath}`)
           }
 
-          const oldContent = await fs.readFile(filePath, "utf-8")
+          const source = await Bom.read(filePath)
+          const oldContent = source.text
           let newContent = oldContent
+          let bom = source.bom
 
           // Apply the update chunks to get new content
           try {
             const fileUpdate = Patch.deriveNewContentsFromChunks(filePath, hunk.chunks)
             newContent = fileUpdate.content
+            bom = fileUpdate.bom
           } catch (error) {
             throw new Error(`apply_patch verification failed: ${error}`)
           }
@@ -129,6 +136,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
             diff,
             additions,
             deletions,
+            bom,
           })
 
           totalDiff += diff + "\n"
@@ -136,9 +144,10 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
         }
 
         case "delete": {
-          const contentToDelete = await fs.readFile(filePath, "utf-8").catch((error) => {
+          const source = await Bom.read(filePath).catch((error) => {
             throw new Error(`apply_patch verification failed: ${error}`)
           })
+          const contentToDelete = source.text
           const deleteDiff = trimDiff(createTwoFilesPatch(filePath, filePath, contentToDelete, ""))
 
           const deletions = contentToDelete.split("\n").length
@@ -151,6 +160,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
             diff: deleteDiff,
             additions: 0,
             deletions,
+            bom: source.bom,
           })
 
           totalDiff += deleteDiff + "\n"
@@ -192,12 +202,12 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
         case "add":
           // Create parent directories (recursive: true is safe on existing/root dirs)
           await fs.mkdir(path.dirname(change.filePath), { recursive: true })
-          await fs.writeFile(change.filePath, change.newContent, "utf-8")
+          await fs.writeFile(change.filePath, Bom.join(change.newContent, change.bom), "utf-8")
           updates.push({ file: change.filePath, event: "add" })
           break
 
         case "update":
-          await fs.writeFile(change.filePath, change.newContent, "utf-8")
+          await fs.writeFile(change.filePath, Bom.join(change.newContent, change.bom), "utf-8")
           updates.push({ file: change.filePath, event: "change" })
           break
 
@@ -205,7 +215,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
           if (change.movePath) {
             // Create parent directories (recursive: true is safe on existing/root dirs)
             await fs.mkdir(path.dirname(change.movePath), { recursive: true })
-            await fs.writeFile(change.movePath, change.newContent, "utf-8")
+            await fs.writeFile(change.movePath, Bom.join(change.newContent, change.bom), "utf-8")
             await fs.unlink(change.filePath)
             updates.push({ file: change.filePath, event: "unlink" })
             updates.push({ file: change.movePath, event: "add" })
@@ -219,7 +229,9 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       }
 
       if (edited) {
-        await Format.file(edited)
+        if (await Format.file(edited)) {
+          await Bom.sync(edited, change.bom)
+        }
         Bus.publish(File.Event.Edited, { file: edited })
       }
     }

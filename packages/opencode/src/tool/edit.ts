@@ -18,6 +18,7 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { Snapshot } from "@/snapshot"
 import { assertExternalDirectory } from "./external-directory"
+import * as Bom from "@/util/bom"
 
 const MAX_DIAGNOSTICS_PER_FILE = 20
 
@@ -60,7 +61,11 @@ export const EditTool = Tool.define("edit", {
     await FileTime.withLock(filePath, async () => {
       if (params.oldString === "") {
         const existed = await Filesystem.exists(filePath)
-        contentNew = params.newString
+        const source = existed ? await Bom.read(filePath) : { bom: false, text: "" }
+        const next = Bom.split(params.newString)
+        const bom = source.bom || next.bom
+        contentOld = source.text
+        contentNew = next.text
         diff = trimDiff(createTwoFilesPatch(filePath, filePath, contentOld, contentNew))
         await ctx.ask({
           permission: "edit",
@@ -71,8 +76,10 @@ export const EditTool = Tool.define("edit", {
             diff,
           },
         })
-        await Filesystem.write(filePath, params.newString)
-        await Format.file(filePath)
+        await Filesystem.write(filePath, Bom.join(contentNew, bom))
+        if (await Format.file(filePath)) {
+          contentNew = await Bom.sync(filePath, bom)
+        }
         Bus.publish(File.Event.Edited, { file: filePath })
         await Bus.publish(FileWatcher.Event.Updated, {
           file: filePath,
@@ -86,13 +93,16 @@ export const EditTool = Tool.define("edit", {
       if (!stats) throw new Error(`File ${filePath} not found`)
       if (stats.isDirectory()) throw new Error(`Path is a directory, not a file: ${filePath}`)
       await FileTime.assert(ctx.sessionID, filePath)
-      contentOld = await Filesystem.readText(filePath)
+      const source = await Bom.read(filePath)
+      contentOld = source.text
 
       const ending = detectLineEnding(contentOld)
       const old = convertToLineEnding(normalizeLineEndings(params.oldString), ending)
-      const next = convertToLineEnding(normalizeLineEndings(params.newString), ending)
+      const replacement = convertToLineEnding(normalizeLineEndings(params.newString), ending)
 
-      contentNew = replace(contentOld, old, next, params.replaceAll)
+      const next = Bom.split(replace(contentOld, old, replacement, params.replaceAll))
+      const bom = source.bom || next.bom
+      contentNew = next.text
 
       diff = trimDiff(
         createTwoFilesPatch(filePath, filePath, normalizeLineEndings(contentOld), normalizeLineEndings(contentNew)),
@@ -107,14 +117,15 @@ export const EditTool = Tool.define("edit", {
         },
       })
 
-      await Filesystem.write(filePath, contentNew)
-      await Format.file(filePath)
+      await Filesystem.write(filePath, Bom.join(contentNew, bom))
+      if (await Format.file(filePath)) {
+        contentNew = await Bom.sync(filePath, bom)
+      }
       Bus.publish(File.Event.Edited, { file: filePath })
       await Bus.publish(FileWatcher.Event.Updated, {
         file: filePath,
         event: "change",
       })
-      contentNew = await Filesystem.readText(filePath)
       diff = trimDiff(
         createTwoFilesPatch(filePath, filePath, normalizeLineEndings(contentOld), normalizeLineEndings(contentNew)),
       )

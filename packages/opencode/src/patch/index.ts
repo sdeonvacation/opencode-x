@@ -3,6 +3,7 @@ import * as path from "path"
 import * as fs from "fs/promises"
 import { readFileSync } from "fs"
 import { Log } from "../util/log"
+import * as Bom from "../util/bom"
 
 export namespace Patch {
   const log = Log.create({ service: "patch" })
@@ -306,18 +307,19 @@ export namespace Patch {
   interface ApplyPatchFileUpdate {
     unified_diff: string
     content: string
+    bom: boolean
   }
 
   export function deriveNewContentsFromChunks(filePath: string, chunks: UpdateFileChunk[]): ApplyPatchFileUpdate {
     // Read original file content
-    let originalContent: string
+    let originalContent: ReturnType<typeof Bom.split>
     try {
-      originalContent = readFileSync(filePath, "utf-8")
+      originalContent = Bom.split(readFileSync(filePath, "utf-8"))
     } catch (error) {
       throw new Error(`Failed to read file ${filePath}: ${error}`)
     }
 
-    let originalLines = originalContent.split("\n")
+    let originalLines = originalContent.text.split("\n")
 
     // Drop trailing empty element for consistent line counting
     if (originalLines.length > 0 && originalLines[originalLines.length - 1] === "") {
@@ -332,14 +334,16 @@ export namespace Patch {
       newLines.push("")
     }
 
-    const newContent = newLines.join("\n")
+    const next = Bom.split(newLines.join("\n"))
+    const newContent = next.text
 
     // Generate unified diff
-    const unifiedDiff = generateUnifiedDiff(originalContent, newContent)
+    const unifiedDiff = generateUnifiedDiff(originalContent.text, newContent)
 
     return {
       unified_diff: unifiedDiff,
       content: newContent,
+      bom: originalContent.bom || next.bom,
     }
   }
 
@@ -554,13 +558,13 @@ export namespace Patch {
               await fs.mkdir(moveDir, { recursive: true })
             }
 
-            await fs.writeFile(hunk.move_path, fileUpdate.content, "utf-8")
+            await fs.writeFile(hunk.move_path, Bom.join(fileUpdate.content, fileUpdate.bom), "utf-8")
             await fs.unlink(hunk.path)
             modified.push(hunk.move_path)
             log.info(`Moved file: ${hunk.path} -> ${hunk.move_path}`)
           } else {
             // Regular update
-            await fs.writeFile(hunk.path, fileUpdate.content, "utf-8")
+            await fs.writeFile(hunk.path, Bom.join(fileUpdate.content, fileUpdate.bom), "utf-8")
             modified.push(hunk.path)
             log.info(`Updated file: ${hunk.path}`)
           }
