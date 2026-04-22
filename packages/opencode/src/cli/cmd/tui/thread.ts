@@ -16,6 +16,7 @@ import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { TuiConfig } from "@/config/tui"
 import { Instance } from "@/project/instance"
 import { writeHeapSnapshot } from "v8"
+import { validateSession } from "./validate-session"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -199,6 +200,19 @@ export const TuiThreadCommand = cmd({
             fetch: createWorkerFetch(client),
             events: createEventSource(client),
           }
+
+      try {
+        await validateSession({
+          url: transport.url,
+          sessionID: args.session,
+          directory: cwd,
+          fetch: transport.fetch,
+        })
+      } catch (error) {
+        UI.error(errorMessage(error))
+        process.exitCode = 1
+        return
+      }
 
       setTimeout(() => {
         client.call("checkUpgrade", { directory: cwd }).catch(() => {})
