@@ -11,9 +11,10 @@ import { Instance } from "../project/instance"
 import { Flag } from "@/flag/flag"
 import { Process } from "../util/process"
 import { spawn as lspspawn } from "./launch"
-import { Effect, Layer, ServiceMap } from "effect"
+import { Effect, Layer, ScopedCache, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
+import { SessionStatus } from "@/session/status"
 
 export namespace LSP {
   const log = Log.create({ service: "lsp" })
@@ -221,6 +222,39 @@ export namespace LSP {
           )
 
           return s
+        }),
+      )
+
+      // Idle shutdown: when all sessions idle for 30 min, invalidate LSP state
+      const dir = Instance.directory
+      let idleTimer: ReturnType<typeof setTimeout> | undefined
+      const unsub = Bus.subscribe(SessionStatus.Event.Status, async () => {
+        const all = await SessionStatus.list()
+        const anyBusy = [...all.values()].some((s) => s.type !== "idle")
+        if (anyBusy) {
+          if (idleTimer) {
+            clearTimeout(idleTimer)
+            idleTimer = undefined
+          }
+          return
+        }
+        if (!idleTimer) {
+          idleTimer = setTimeout(
+            () => {
+              idleTimer = undefined
+              Effect.runPromise(ScopedCache.invalidate(state.cache, dir)).catch(() => {})
+            },
+            30 * 60 * 1000,
+          )
+        }
+      })
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          unsub()
+          if (idleTimer) {
+            clearTimeout(idleTimer)
+            idleTimer = undefined
+          }
         }),
       )
 
