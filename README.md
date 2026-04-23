@@ -2,7 +2,7 @@
 
 AI-powered development platform with hybrid local+cloud routing, safe parallelism, and enhanced orchestration.
 
-**For detailed setup and configuration, see [OPENCODE_GUIDE.md](./OPENCODE_GUIDE.md).**
+**For detailed setup and configuration, see [OPENCODE-X_GUIDE.md](./OPENCODE-X_GUIDE.md).**
 
 ---
 
