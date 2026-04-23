@@ -1,5 +1,6 @@
 import { describe, expect, test, spyOn, beforeEach, afterEach } from "bun:test"
 import path from "path"
+import fs from "fs/promises"
 import * as Lsp from "../../src/lsp/index"
 import { LSPServer } from "../../src/lsp/server"
 import { Instance } from "../../src/project/instance"
@@ -58,8 +59,39 @@ describe("LSP service lifecycle", () => {
   test(
     "hasClients() returns true for .ts files in instance",
     withInstance(async (dir) => {
+      await fs.mkdir(path.join(dir, "src"), { recursive: true })
+      await Bun.write(path.join(dir, "bun.lock"), "lock")
+      await Bun.write(path.join(dir, "package.json"), "{}")
+      await Bun.write(path.join(dir, "tsconfig.json"), "{}")
       const result = await Lsp.LSP.hasClients(path.join(dir, "test.ts"))
       expect(result).toBe(true)
+    }),
+  )
+
+  test(
+    "typescript root prefers nearest package config",
+    withInstance(async (dir) => {
+      const root = path.join(dir, "packages", "app")
+      await fs.mkdir(path.join(root, "src"), { recursive: true })
+      await Bun.write(path.join(dir, "bun.lock"), "lock")
+      await Bun.write(path.join(root, "package.json"), "{}")
+      await Bun.write(path.join(root, "tsconfig.json"), "{}")
+
+      const result = await LSPServer.Typescript.root(path.join(root, "src", "test.ts"))
+      expect(result).toBe(root)
+    }),
+  )
+
+  test(
+    "typescript root falls back to package boundary before lockfile",
+    withInstance(async (dir) => {
+      const root = path.join(dir, "packages", "app")
+      await fs.mkdir(path.join(root, "src"), { recursive: true })
+      await Bun.write(path.join(dir, "bun.lock"), "lock")
+      await Bun.write(path.join(root, "package.json"), "{}")
+
+      const result = await LSPServer.Typescript.root(path.join(root, "src", "test.ts"))
+      expect(result).toBe(root)
     }),
   )
 

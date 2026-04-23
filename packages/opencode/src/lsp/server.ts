@@ -25,6 +25,18 @@ export namespace LSPServer {
   const run = (cmd: string[], opts: Process.RunOptions = {}) => Process.run(cmd, { ...opts, nothrow: true })
   const output = (cmd: string[], opts: Process.RunOptions = {}) => Process.text(cmd, { ...opts, nothrow: true })
 
+  const nearest = async (file: string, targets: string[]) => {
+    const files = Filesystem.up({
+      targets,
+      start: path.dirname(file),
+      stop: Instance.directory,
+    })
+    const first = await files.next()
+    await files.return()
+    if (!first.value) return
+    return path.dirname(first.value)
+  }
+
   export interface Handle {
     process: ChildProcessWithoutNullStreams
     initialization?: Record<string, any>
@@ -35,24 +47,10 @@ export namespace LSPServer {
   const NearestRoot = (includePatterns: string[], excludePatterns?: string[]): RootFunction => {
     return async (file) => {
       if (excludePatterns) {
-        const excludedFiles = Filesystem.up({
-          targets: excludePatterns,
-          start: path.dirname(file),
-          stop: Instance.directory,
-        })
-        const excluded = await excludedFiles.next()
-        await excludedFiles.return()
-        if (excluded.value) return undefined
+        const excluded = await nearest(file, excludePatterns)
+        if (excluded) return undefined
       }
-      const files = Filesystem.up({
-        targets: includePatterns,
-        start: path.dirname(file),
-        stop: Instance.directory,
-      })
-      const first = await files.next()
-      await files.return()
-      if (!first.value) return Instance.directory
-      return path.dirname(first.value)
+      return (await nearest(file, includePatterns)) ?? Instance.directory
     }
   }
 
@@ -94,10 +92,15 @@ export namespace LSPServer {
 
   export const Typescript: Info = {
     id: "typescript",
-    root: NearestRoot(
-      ["package-lock.json", "bun.lockb", "bun.lock", "pnpm-lock.yaml", "yarn.lock"],
-      ["deno.json", "deno.jsonc"],
-    ),
+    root: async (file) => {
+      if (await nearest(file, ["deno.json", "deno.jsonc"])) return
+      return (
+        (await nearest(file, ["tsconfig.json", "jsconfig.json"])) ??
+        (await nearest(file, ["package.json"])) ??
+        (await nearest(file, ["package-lock.json", "bun.lockb", "bun.lock", "pnpm-lock.yaml", "yarn.lock"])) ??
+        Instance.directory
+      )
+    },
     extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"],
     async spawn(root) {
       const tsserver = Module.resolve("typescript/lib/tsserver.js", Instance.directory)
