@@ -78,7 +78,6 @@ Memory and stability fixes for extended sessions and large tool output:
 | **Task categories**        | Added category-based task routing                | No branch-added task category routing       |
 | **TUI commands**           | Adds `/goto`, `/clear`, `/clear-compact`, `/btw` | Does not include this branch command set    |
 | **Long-session stability** | Adds memory and output-handling fixes            | Does not include this branch fix set        |
-| **Terminal fonts**         | Adds terminal font settings + bundled font       | Does not include this branch font feature   |
 
 ---
 
