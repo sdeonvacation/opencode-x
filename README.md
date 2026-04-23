@@ -68,9 +68,9 @@ Memory and stability fixes for extended sessions and large tool output:
 
 ---
 
-## vs. Upstream (dev)
+## Opencode-X vs. Opencode upstream (dev)
 
-| Feature                    | OpenCode X branch                                | upstream/dev                                |
+| Feature                    | OpenCode X                               | Opencode                                |
 | -------------------------- | ------------------------------------------------ | ------------------------------------------- |
 | **Hybrid routing**         | Configurable local+cloud routing by turn type    | No branch-added hybrid routing layer        |
 | **Parallel tools**         | Parallel execution for approved safe tool sets   | No branch-added parallel tool execution     |
