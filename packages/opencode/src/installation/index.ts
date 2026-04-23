@@ -253,7 +253,7 @@ export namespace Installation {
           }
 
           const response = yield* httpOk.execute(
-            HttpClientRequest.get("https://api.github.com/repos/anomalyco/opencode/releases/latest").pipe(
+            HttpClientRequest.get("https://api.github.com/repos/sdeonvacation/opencode-x/releases/latest").pipe(
               HttpClientRequest.acceptJson,
             ),
           )
