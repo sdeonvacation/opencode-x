@@ -70,15 +70,15 @@ Memory and stability fixes for extended sessions and large tool output:
 
 ## vs. Upstream (dev)
 
-| Feature                    | X                                  | Upstream             |
-| -------------------------- | ---------------------------------- | -------------------- |
-| **Hybrid routing**         | ✓ Local+cloud split by complexity  | Cloud-only (default) |
-| **Parallel tools**         | ✓ Safe concurrency for I/O         | Sequential only      |
-| **Loop/spawn guards**      | ✓ Configurable depth + descendants | Basic/manual         |
-| **Task categories**        | ✓ Delegate by category             | No routing           |
-| **TUI commands**           | ✓ /goto, /clear, /btw              | Limited              |
-| **Long-session stability** | ✓ Message/DB optimizations         | Baseline             |
-| **Terminal fonts**         | ✓ Customizable + bundled           | System default       |
+| Feature                    | OpenCode X branch                                | upstream/dev                                |
+| -------------------------- | ------------------------------------------------ | ------------------------------------------- |
+| **Hybrid routing**         | Configurable local+cloud routing by turn type    | No branch-added hybrid routing layer        |
+| **Parallel tools**         | Parallel execution for approved safe tool sets   | No branch-added parallel tool execution     |
+| **Loop/spawn guards**      | Added loop detection and spawn limits            | Fewer orchestration guardrails in this area |
+| **Task categories**        | Added category-based task routing                | No branch-added task category routing       |
+| **TUI commands**           | Adds `/goto`, `/clear`, `/clear-compact`, `/btw` | Does not include this branch command set    |
+| **Long-session stability** | Adds memory and output-handling fixes            | Does not include this branch fix set        |
+| **Terminal fonts**         | Adds terminal font settings + bundled font       | Does not include this branch font feature   |
 
 ---
 
