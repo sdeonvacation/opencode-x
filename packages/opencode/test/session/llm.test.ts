@@ -1351,7 +1351,7 @@ describe("session.llm.stream", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const resolved = await getModel(ProviderID.make("anthropic"), ModelID.make(model.id))
+        const resolved = await Provider.getModel(ProviderID.make("anthropic"), ModelID.make(model.id))
         const sessionID = SessionID.make("session-test-anthropic-tools")
         const agent = {
           name: "test",
@@ -1456,12 +1456,13 @@ describe("session.llm.stream", () => {
           },
         ] as any[]
 
-        await drain({
+        const stream = await LLM.stream({
           user,
           sessionID,
           model: resolved,
           agent,
           system: [],
+          abort: new AbortController().signal,
           messages: await MessageV2.toModelMessages(input as any, resolved),
           tools: {
             read: tool({
@@ -1481,6 +1482,9 @@ describe("session.llm.stream", () => {
             }),
           },
         })
+
+        for await (const _ of stream.fullStream) {
+        }
 
         const capture = await request
         const body = capture.body
