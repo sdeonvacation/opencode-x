@@ -158,7 +158,7 @@ export namespace Npm {
     const binDir = path.join(dir, "node_modules", ".bin")
 
     const pick = async () => {
-      const files = await readdir(binDir).catch(() => [])
+      const files = await readdir(binDir).catch((): string[] => [])
       if (files.length === 0) return undefined
       if (bin) return files.includes(bin) ? bin : undefined
       if (files.length === 1) return files[0]
