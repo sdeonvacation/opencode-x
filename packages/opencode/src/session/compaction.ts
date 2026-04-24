@@ -204,6 +204,9 @@ Rules:
   }
 
   export interface Interface {
+    readonly resolveModel: (input: {
+      model: { providerID: ProviderID; modelID: ModelID }
+    }) => Effect.Effect<Provider.Model>
     readonly isOverflow: (input: {
       tokens: MessageV2.Assistant["tokens"]
       model: Provider.Model
@@ -253,6 +256,17 @@ Rules:
         model: Provider.Model
       }) {
         return overflow({ cfg: yield* config.get(), tokens: input.tokens, model: input.model })
+      })
+
+      const resolveModel = Effect.fn("SessionCompaction.resolveModel")(function* (input: {
+        model: { providerID: ProviderID; modelID: ModelID }
+      }) {
+        const cfg = yield* config.get()
+        const agent = yield* agents.get("compaction")
+        return agent.model
+          ? yield* provider.getModel(agent.model.providerID, agent.model.modelID)
+          : ((yield* resolveLocal(provider, cfg, "compaction")) ??
+              (yield* provider.getModel(input.model.providerID, input.model.modelID)))
       })
 
       const estimate = Effect.fn("SessionCompaction.estimate")(function* (input: {
@@ -408,10 +422,7 @@ Rules:
 
         const cfg = yield* config.get()
         const agent = yield* agents.get("compaction")
-        const model = agent.model
-          ? yield* provider.getModel(agent.model.providerID, agent.model.modelID)
-          : ((yield* resolveLocal(provider, cfg, "compaction")) ??
-            (yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID)))
+        const model = yield* resolveModel({ model: userMessage.model })
         const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
         const prior = completedCompactions(history)
         const hidden = new Set(prior.flatMap((item) => [item.userIndex, item.assistantIndex]))
@@ -610,6 +621,7 @@ Rules:
       })
 
       return Service.of({
+        resolveModel,
         isOverflow,
         prune,
         process: processCompaction,
@@ -634,6 +646,10 @@ Rules:
 
   export async function isOverflow(input: { tokens: MessageV2.Assistant["tokens"]; model: Provider.Model }) {
     return runPromise((svc) => svc.isOverflow(input))
+  }
+
+  export async function resolveModel(input: { model: { providerID: ProviderID; modelID: ModelID } }) {
+    return runPromise((svc) => svc.resolveModel(input))
   }
 
   export async function prune(input: { sessionID: SessionID }): Promise<boolean> {

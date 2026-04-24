@@ -623,6 +623,63 @@ describe("session.compaction.prune", () => {
 })
 
 describe("session.compaction.process", () => {
+  test("resolveModel falls back to requested model when local hybrid model is unavailable", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const mdl = ProviderTest.model({
+          id: ModelID.make("test-model"),
+          providerID: ProviderID.make("test"),
+          limit: { context: 100_000, output: 32_000 },
+        })
+        const provider = ProviderTest.fake({
+          model: mdl,
+          getModel: Effect.fn("TestProvider.getModel")((providerID, modelID) => {
+            if (providerID === ProviderID.make("local") && modelID === ModelID.make("offline")) {
+              return Effect.die(new Error("local unreachable"))
+            }
+            if (providerID === ProviderID.make("test") && modelID === ModelID.make("test-model")) {
+              return Effect.succeed(mdl)
+            }
+            return Effect.die(new Error(`Unknown test model: ${providerID}/${modelID}`))
+          }),
+        })
+        const rt = runtime(
+          "continue",
+          Plugin.defaultLayer,
+          provider,
+          Layer.mock(Config.Service)({
+            get: () =>
+              Effect.succeed({
+                ...Config.Info.parse({}),
+                hybrid: {
+                  enabled: true,
+                  local_model: { providerID: "local", modelID: "offline" },
+                  log_routing: false,
+                  compression_threshold: 10,
+                  compression_timeout_ms: 5000,
+                },
+              }),
+          }),
+        )
+        try {
+          const resolved = await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.resolveModel({
+                model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+              }),
+            ),
+          )
+          expect(resolved.providerID).toBe(ProviderID.make("test"))
+          expect(resolved.id).toBe(ModelID.make("test-model"))
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
+
   test("throws when parent is not a user message", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({

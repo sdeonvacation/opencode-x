@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test"
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { Session } from "../../src/session"
@@ -11,8 +11,13 @@ import { Log } from "../../src/util/log"
 import { Instance } from "../../src/project/instance"
 import { MessageID, PartID } from "../../src/session/schema"
 import { tmpdir } from "../fixture/fixture"
+import { Server } from "../../src/server/server"
 
 Log.init({ print: false })
+
+afterEach(() => {
+  mock.restore()
+})
 
 function user(sessionID: string, agent = "default") {
   return Session.updateMessage({
@@ -346,6 +351,60 @@ describe("revert + compact workflow", () => {
 
         // Clean up
         await Session.remove(sessionID)
+      },
+    })
+  })
+
+  test("preserves revert state when summarize fails before compaction starts", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const sessionID = session.id
+
+        const u1 = await user(sessionID)
+        await text(sessionID, u1.id, "hello")
+        const a1 = await assistant(sessionID, u1.id, tmp.path)
+        await text(sessionID, a1.id, "hi")
+        const u2 = await user(sessionID)
+        await text(sessionID, u2.id, "second")
+        const a2 = await assistant(sessionID, u2.id, tmp.path)
+        await text(sessionID, a2.id, "later")
+
+        await SessionRevert.revert({
+          sessionID,
+          messageID: u2.id,
+        })
+
+        const app = Server.Default().app
+        const before = await Session.get(sessionID)
+        const msgs = await Session.messages({ sessionID })
+        const fail = spyOn(SessionCompaction, "resolveModel").mockRejectedValue(new Error("model unreachable"))
+        const cleanup = spyOn(SessionRevert, "cleanup")
+
+        const res = await app.request(`/session/${sessionID}/summarize`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            providerID: "openai",
+            modelID: "gpt-4",
+            auto: false,
+          }),
+        })
+
+        const after = await Session.get(sessionID)
+        const next = await Session.messages({ sessionID })
+
+        expect(res.status).toBe(500)
+        expect(fail).toHaveBeenCalledTimes(1)
+        expect(cleanup).not.toHaveBeenCalled()
+        expect(after.revert).toEqual(before.revert)
+        expect(next.map((msg) => msg.info.id)).toEqual(msgs.map((msg) => msg.info.id))
+        expect(next).toHaveLength(4)
+        expect(next.some((msg) => msg.parts.some((part) => part.type === "compaction"))).toBe(false)
       },
     })
   })
