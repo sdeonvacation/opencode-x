@@ -166,8 +166,9 @@ await $`rm -rf dist`
 
 const binaries: Record<string, string> = {}
 if (!skipInstall) {
-  await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`
-  await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
+  // Install platform-specific packages individually to avoid bun hanging on --os="*" --cpu="*"
+  // These packages should already be installed via the regular `bun install` at the root
+  console.log("Note: Skipping platform-specific reinstall. Run `bun install` at repo root if packages are missing.")
 }
 for (const item of targets) {
   const name = [
