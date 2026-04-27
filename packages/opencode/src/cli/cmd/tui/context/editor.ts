@@ -107,9 +107,11 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
         send({ id: requestID, method, params })
       }
 
-      const scheduleReconnect = (delay: number) => {
+      const scheduleReconnect = () => {
         if (closed) return
         if (reconnect) clearTimeout(reconnect)
+        attempt += 1
+        const delay = Math.min(1000 * 2 ** (attempt - 1), 10_000)
         reconnect = setTimeout(connect, delay)
       }
 
@@ -121,7 +123,7 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
           const dbPath = resolveZedDbPath()
           if (!dbPath) {
             setStore("status", "disabled")
-            scheduleReconnect(1000)
+            scheduleReconnect()
             return
           }
           zed ??= resolveZedSelection(dbPath)
@@ -141,7 +143,7 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
             .finally(() => {
               zed = undefined
             })
-          scheduleReconnect(1000)
+          scheduleReconnect()
           return
         }
 
@@ -202,13 +204,11 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
           if (closed) return
 
           setStore("status", "connecting")
-          attempt += 1
-          const delay = Math.min(1000 * 2 ** (attempt - 1), 30000)
-          scheduleReconnect(delay)
+          scheduleReconnect()
         })
       }
 
-      scheduleReconnect(0)
+      connect()
 
       onCleanup(() => {
         closed = true
@@ -226,6 +226,9 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
       },
       selection() {
         return store.selection
+      },
+      clearSelection() {
+        setStore("selection", undefined)
       },
       onMention(listener: (mention: EditorMention) => void) {
         mentions.add(listener)
