@@ -841,6 +841,13 @@ export namespace ProviderTransform {
   }): Record<string, any> {
     const result: Record<string, any> = {}
 
+    if (
+      input.model.api.npm === "@ai-sdk/google-vertex/anthropic" ||
+      (!input.model.api.id.includes("claude") && input.model.api.npm === "@ai-sdk/anthropic")
+    ) {
+      result["toolStreaming"] = false
+    }
+
     // openai and providers using openai package should set store to false by default.
     if (
       input.model.providerID === "openai" ||
