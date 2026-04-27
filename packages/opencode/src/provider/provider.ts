@@ -1148,7 +1148,17 @@ export namespace Provider {
                       model.modalities?.output?.includes("video") ?? existingModel?.capabilities.output.video ?? false,
                     pdf: model.modalities?.output?.includes("pdf") ?? existingModel?.capabilities.output.pdf ?? false,
                   },
-                  interleaved: model.interleaved ?? false,
+                  interleaved:
+                    model.interleaved ??
+                    existingModel?.capabilities.interleaved ??
+                    (!existingModel &&
+                    (model.provider?.npm ??
+                      provider.npm ??
+                      modelsDev[providerID]?.npm ??
+                      "@ai-sdk/openai-compatible") === "@ai-sdk/openai-compatible" &&
+                    (model.id ?? modelID).includes("deepseek")
+                      ? { field: "reasoning_content" }
+                      : false),
                 },
                 cost: {
                   input: model?.cost?.input ?? existingModel?.cost?.input ?? 0,
