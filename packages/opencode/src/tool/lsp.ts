@@ -34,9 +34,16 @@ export const LspTool = Tool.defineEffect(
         filePath: z.string().describe("The absolute or relative path to the file"),
         line: z.number().int().min(1).describe("The line number (1-based, as shown in editors)"),
         character: z.number().int().min(1).describe("The character offset (1-based, as shown in editors)"),
+        query: z.string().optional().describe("Search query for workspaceSymbol. Empty string requests all symbols."),
       }),
       execute: (
-        args: { operation: (typeof operations)[number]; filePath: string; line: number; character: number },
+        args: {
+          operation: (typeof operations)[number]
+          filePath: string
+          line: number
+          character: number
+          query?: string
+        },
         ctx: Tool.Context,
       ) =>
         Effect.gen(function* () {
@@ -68,7 +75,7 @@ export const LspTool = Tool.defineEffect(
               case "documentSymbol":
                 return lsp.documentSymbol(uri)
               case "workspaceSymbol":
-                return lsp.workspaceSymbol("")
+                return lsp.workspaceSymbol(args.query ?? "")
               case "goToImplementation":
                 return lsp.implementation(position)
               case "prepareCallHierarchy":

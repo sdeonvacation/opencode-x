@@ -9,6 +9,8 @@ import { Filesystem } from "@/util/filesystem"
 import { Flock } from "@/util/flock"
 import { Arborist } from "@npmcli/arborist"
 
+type SaveType = NonNullable<NonNullable<Parameters<(typeof Arborist)["prototype"]["reify"]>[0]>["omit"]>[number]
+
 export namespace Npm {
   const log = Log.create({ service: "npm" })
   const illegal = process.platform === "win32" ? new Set(["<", ">", ":", '"', "|", "?", "*"]) : undefined
@@ -39,6 +41,25 @@ export namespace Npm {
       entrypoint,
     }
     return result
+  }
+
+  async function loadOptions(dir: string) {
+    const text = await Filesystem.readText(path.join(dir, ".npmrc")).catch(() => "")
+    const omit = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#") && !line.startsWith(";"))
+      .flatMap((line) => {
+        const [key, ...rest] = line.split("=")
+        if (key?.trim() !== "omit") return []
+        return rest
+          .join("=")
+          .split(/[\s,]+/)
+          .map((item) => item.trim())
+          .filter((item): item is SaveType => item === "dev" || item === "optional" || item === "peer")
+      })
+
+    return omit.length > 0 ? { omit } : {}
   }
 
   export async function outdated(pkg: string, cachedVersion: string): Promise<boolean> {
@@ -108,14 +129,16 @@ export namespace Npm {
     log.info("checking dependencies", { dir })
 
     const reify = async () => {
+      const options = await loadOptions(dir)
       const arb = new Arborist({
+        ...options,
         path: dir,
         binLinks: true,
         progress: false,
         savePrefix: "",
         ignoreScripts: true,
       })
-      await arb.reify().catch(() => {})
+      await arb.reify(options).catch(() => {})
     }
 
     if (!(await Filesystem.exists(path.join(dir, "node_modules")))) {
