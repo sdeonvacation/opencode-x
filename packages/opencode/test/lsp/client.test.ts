@@ -286,6 +286,58 @@ describe("LSPClient interop", () => {
     })
   })
 
+  test("document mode wakes promptly on first typescript push diagnostics", async () => {
+    const handle = spawnFakeServer() as any
+    await using tmp = await tmpdir()
+    const file = path.join(tmp.path, "client.ts")
+    await Bun.write(file, "const x = 1\n")
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const client = await LSPClient.create({
+          serverID: "typescript",
+          server: handle as unknown as LSPServer.Handle,
+          root: tmp.path,
+          directory: tmp.path,
+        })
+
+        const version = await client.notify.open({ path: file })
+        const started = Date.now()
+        const wait = client
+          .waitForDiagnostics({ path: file, version, mode: "document" })
+          .then(() => Date.now() - started)
+        await client.connection.sendNotification("test/publish-diagnostics", {
+          uri: pathToFileURL(file).href,
+          version,
+          diagnostics: [
+            {
+              range: {
+                start: { line: 0, character: 0 },
+                end: { line: 0, character: 5 },
+              },
+              message: "push diagnostic",
+              severity: 1,
+            },
+          ],
+        })
+
+        const elapsed = await Promise.race([
+          wait,
+          new Promise<number>((resolve) => setTimeout(() => resolve(Number.POSITIVE_INFINITY), 1_000)),
+        ])
+        expect(elapsed).toBeLessThan(1_000)
+        await wait
+
+        const diagnostics = client.diagnostics.get(file) ?? []
+        expect(diagnostics).toHaveLength(1)
+        expect(diagnostics[0]?.message).toBe("push diagnostic")
+
+        await client.shutdown()
+      },
+    })
+  })
+
   test("document mode waits for pull diagnostics", async () => {
     const handle = spawnFakeServer() as any
     await using tmp = await tmpdir()

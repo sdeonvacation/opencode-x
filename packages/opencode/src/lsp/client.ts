@@ -178,7 +178,7 @@ export namespace LSPClient {
         version: typeof params.version === "number" ? params.version : undefined,
       })
       if (shouldSeedDiagnosticsOnFirstPush(input.serverID) && !pushDiagnostics.has(filePath)) {
-        pushDiagnostics.set(filePath, params.diagnostics)
+        updatePushDiagnostics(filePath, params.diagnostics)
         return
       }
       updatePushDiagnostics(filePath, params.diagnostics)
