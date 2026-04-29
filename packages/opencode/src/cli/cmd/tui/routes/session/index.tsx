@@ -1610,9 +1610,6 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "webfetch"}>
           <WebFetch {...toolprops} />
         </Match>
-        <Match when={props.part.tool === "codesearch"}>
-          <CodeSearch {...toolprops} />
-        </Match>
         <Match when={props.part.tool === "websearch"}>
           <WebSearch {...toolprops} />
         </Match>
@@ -2025,16 +2022,6 @@ function WebFetch(props: ToolProps<typeof WebFetchTool>) {
       part={props.part}
     >
       WebFetch {(props.input as any).url}
-    </InlineTool>
-  )
-}
-
-function CodeSearch(props: ToolProps<any>) {
-  const input = props.input as any
-  const metadata = props.metadata as any
-  return (
-    <InlineTool icon="◇" pending={SpinnerVerbs.forTool("codesearch")} complete={input.query} part={props.part}>
-      Exa Code Search "{input.query}" <Show when={metadata.results}>({metadata.results} results)</Show>
     </InlineTool>
   )
 }
