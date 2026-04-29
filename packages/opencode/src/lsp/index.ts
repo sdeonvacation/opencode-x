@@ -228,7 +228,7 @@ export namespace LSP {
       // Idle shutdown: when all sessions idle for 30 min, invalidate LSP state
       const dir = Instance.directory
       let idleTimer: ReturnType<typeof setTimeout> | undefined
-      const unsub = Bus.subscribe(SessionStatus.Event.Status, async () => {
+      const idle = async () => {
         const all = await SessionStatus.list()
         const anyBusy = [...all.values()].some((s) => s.type !== "idle")
         if (anyBusy) {
@@ -247,7 +247,9 @@ export namespace LSP {
             30 * 60 * 1000,
           )
         }
-      })
+      }
+      const unsub = Bus.subscribe(SessionStatus.Event.Status, idle)
+      void idle()
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           unsub()
