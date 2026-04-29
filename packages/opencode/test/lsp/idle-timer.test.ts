@@ -28,7 +28,7 @@ type IdleTimerState = {
 function makeIdleTimer(dir: string, invalidate: () => void, delay = 30 * 60 * 1000): IdleTimerState {
   const s: IdleTimerState = { timer: undefined, invalidated: false, unsub: () => {} }
 
-  s.unsub = Bus.subscribe(SessionStatus.Event.Status, async () => {
+  const idle = async () => {
     const all = await SessionStatus.list()
     const anyBusy = [...all.values()].some((v) => v.type !== "idle")
     if (anyBusy) {
@@ -45,9 +45,19 @@ function makeIdleTimer(dir: string, invalidate: () => void, delay = 30 * 60 * 10
         invalidate()
       }, delay)
     }
-  })
+  }
+
+  s.unsub = Bus.subscribe(SessionStatus.Event.Status, idle)
+  void idle()
 
   return s
+}
+
+function clear(s: IdleTimerState) {
+  s.unsub()
+  if (!s.timer) return
+  clearTimeout(s.timer)
+  s.timer = undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -81,8 +91,7 @@ describe("LSP idle timer", () => {
           expect(s.invalidated).toBe(true)
           expect(fired).toEqual(["invalidated"])
         } finally {
-          s.unsub()
-          if (s.timer) clearTimeout(s.timer)
+          clear(s)
         }
       },
     })
@@ -112,8 +121,7 @@ describe("LSP idle timer", () => {
           expect(s.invalidated).toBe(false)
           expect(fired).toEqual([])
         } finally {
-          s.unsub()
-          if (s.timer) clearTimeout(s.timer)
+          clear(s)
         }
       },
     })
@@ -142,8 +150,58 @@ describe("LSP idle timer", () => {
           await Bun.sleep(250)
           expect(count).toBe(1)
         } finally {
-          s.unsub()
-          if (s.timer) clearTimeout(s.timer)
+          clear(s)
+        }
+      },
+    })
+  })
+
+  test("starts timer when already idle at subscribe time", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const fired: string[] = []
+        await SessionStatus.set("s1" as any, { type: "idle" })
+        const s = makeIdleTimer(tmp.path, () => fired.push("invalidated"), 50)
+
+        try {
+          await Bun.sleep(10)
+          expect(s.timer).toBeDefined()
+          expect(s.invalidated).toBe(false)
+
+          await Bun.sleep(100)
+          expect(s.invalidated).toBe(true)
+          expect(fired).toEqual(["invalidated"])
+        } finally {
+          clear(s)
+        }
+      },
+    })
+  })
+
+  test("does not duplicate timer when subscribe starts idle then idle event arrives", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        let count = 0
+        await SessionStatus.set("s1" as any, { type: "idle" })
+        const s = makeIdleTimer(tmp.path, () => count++, 200)
+
+        try {
+          await Bun.sleep(10)
+          const first = s.timer
+          expect(first).toBeDefined()
+
+          await SessionStatus.set("s2" as any, { type: "idle" })
+          await Bun.sleep(10)
+          expect(s.timer).toBe(first)
+
+          await Bun.sleep(250)
+          expect(count).toBe(1)
+        } finally {
+          clear(s)
         }
       },
     })
@@ -178,8 +236,7 @@ describe("LSP idle timer", () => {
           expect(s.invalidated).toBe(true)
           expect(fired).toEqual(["invalidated"])
         } finally {
-          s.unsub()
-          if (s.timer) clearTimeout(s.timer)
+          clear(s)
         }
       },
     })
@@ -199,11 +256,7 @@ describe("LSP idle timer", () => {
         expect(s.timer).toBeDefined()
 
         // Dispose (mirrors Effect.addFinalizer)
-        s.unsub()
-        if (s.timer) {
-          clearTimeout(s.timer)
-          s.timer = undefined
-        }
+        clear(s)
 
         // Timer should be gone and invalidate never called
         await Bun.sleep(100)
@@ -232,8 +285,7 @@ describe("LSP idle timer", () => {
           await Bun.sleep(100)
           expect(fired).toEqual([])
         } finally {
-          s.unsub()
-          if (s.timer) clearTimeout(s.timer)
+          clear(s)
           // clean up busy session
           await SessionStatus.set("s2" as any, { type: "idle" })
         }
