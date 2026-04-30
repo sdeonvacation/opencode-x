@@ -12,7 +12,7 @@ import { Footer } from "~/component/footer"
 import { Header } from "~/component/header"
 import { config } from "~/config"
 import { getLastSeenWorkspaceID } from "../workspace/common"
-import { IconMiniMax, IconMiMo, IconZai, IconAlibaba, IconDeepSeek } from "~/component/icon"
+import { IconMiniMax, IconMiMo, IconZai, IconAlibaba } from "~/component/icon"
 import { useI18n } from "~/context/i18n"
 import { useLanguage } from "~/context/language"
 import { LocaleLinks } from "~/component/locale-links"
@@ -267,7 +267,7 @@ export default function Home() {
             <div data-component="desktop-app-banner">
               <span data-slot="badge">{i18n.t("home.banner.badge")}</span>
               <div data-slot="content">
-                <span data-slot="text">{i18n.t("go.banner.text")}</span>
+                <span data-slot="text">{i18n.t("home.banner.text")}</span>
               </div>
             </div>
             <div data-slot="hero-copy">
@@ -339,9 +339,6 @@ export default function Home() {
                 </div>
                 <div>
                   <IconAlibaba width="24" height="24" />
-                </div>
-                <div>
-                  <IconDeepSeek width="24" height="24" />
                 </div>
                 <div>
                   <IconMiMo width="24" height="24" />
