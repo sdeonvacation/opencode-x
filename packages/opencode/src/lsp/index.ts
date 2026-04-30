@@ -217,7 +217,16 @@ export namespace LSP {
 
           yield* Effect.addFinalizer(() =>
             Effect.promise(async () => {
-              await Promise.all(s.clients.map((client) => client.shutdown()))
+              const results = await Promise.allSettled(s.clients.map((client) => client.shutdown()))
+              results.forEach((result, index) => {
+                if (result.status === "fulfilled") return
+                const client = s.clients[index]
+                log.warn("failed to shutdown lsp client", {
+                  error: result.reason,
+                  serverID: client?.serverID,
+                  root: client?.root,
+                })
+              })
             }),
           )
 
@@ -242,7 +251,9 @@ export namespace LSP {
           idleTimer = setTimeout(
             () => {
               idleTimer = undefined
-              Effect.runPromise(ScopedCache.invalidate(state.cache, dir)).catch(() => {})
+              Effect.runPromise(ScopedCache.invalidate(state.cache, dir)).catch((error) => {
+                log.error("failed to invalidate idle lsp state", { error, directory: dir })
+              })
             },
             30 * 60 * 1000,
           )
