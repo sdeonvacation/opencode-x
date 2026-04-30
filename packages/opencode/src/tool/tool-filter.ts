@@ -1,7 +1,6 @@
 import { ProviderID, type ModelID } from "../provider/schema"
 import { Flag } from "../flag/flag"
 import { Env } from "../env"
-import { CodeSearchTool } from "./codesearch"
 import { WebSearchTool } from "./websearch"
 import { ApplyPatchTool } from "./apply_patch"
 import { EditTool } from "./edit"
@@ -18,7 +17,7 @@ export type ToolFilterInput = {
 /**
  * Filter a flat list of Tool.Info entries according to provider/model/feature-flag rules:
  *
- * - CodeSearch and WebSearch are only included for the `opencode` provider or when
+ * - WebSearch is only included for the `opencode` provider or when
  *   the `OPENCODE_ENABLE_EXA` flag is set.
  * - ApplyPatch replaces Edit/Write for GPT-4.1-class models (non-oss, non-gpt-4) and
  *   when the `OPENCODE_E2E_LLM_URL` env var is set.
@@ -29,7 +28,7 @@ export function filterTools(tools: Tool.Info[], input: ToolFilterInput): Tool.In
     !!Env.get("OPENCODE_E2E_LLM_URL") || (modelID.includes("gpt-") && !modelID.includes("oss") && modelID !== "gpt-4")
 
   return tools.filter((tool) => {
-    if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {
+    if (tool.id === WebSearchTool.id) {
       return input.providerID === ProviderID.opencode || Flag.OPENCODE_ENABLE_EXA
     }
     if (tool.id === ApplyPatchTool.id) return usePatch

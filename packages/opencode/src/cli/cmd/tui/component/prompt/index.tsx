@@ -182,8 +182,6 @@ export function Prompt(props: PromptProps) {
     const overlay = spec.tintStep === 1 ? RGBA.fromInts(255, 255, 255) : RGBA.fromInts(0, 0, 0)
     return tint(base, overlay, 0.35)
   })
-  const list = createMemo(() => props.placeholders?.normal ?? [])
-  const shell = createMemo(() => props.placeholders?.shell ?? [])
   const [auto, setAuto] = createSignal<AutocompleteRef>()
   const currentProviderLabel = createMemo(() => local.model.parsed().provider)
   const hasRightContent = createMemo(() => Boolean(props.right))

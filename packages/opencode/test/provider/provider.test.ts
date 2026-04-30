@@ -310,7 +310,7 @@ test("custom DeepSeek openai-compatible model defaults interleaved reasoning fie
   await Instance.provide({
     directory: tmp.path,
     fn: async () => {
-      const providers = await list()
+      const providers = await Provider.list()
       const provider = providers[ProviderID.make("custom-provider")]
       expect(provider.models["deepseek-r1"].capabilities.interleaved).toEqual({ field: "reasoning_content" })
       expect(provider.models["deepseek-details"].capabilities.interleaved).toEqual({ field: "reasoning_details" })

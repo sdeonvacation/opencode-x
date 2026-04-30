@@ -1894,6 +1894,11 @@ describe("ProviderTransform.message - cache control on gateway", () => {
           type: "ephemeral",
         },
       },
+      alibaba: {
+        cacheControl: {
+          type: "ephemeral",
+        },
+      },
     })
   })
 
@@ -1943,6 +1948,11 @@ describe("ProviderTransform.message - cache control on gateway", () => {
       },
       copilot: {
         copilot_cache_control: {
+          type: "ephemeral",
+        },
+      },
+      alibaba: {
+        cacheControl: {
           type: "ephemeral",
         },
       },

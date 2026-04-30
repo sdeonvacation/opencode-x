@@ -1,25 +1,17 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test"
 import { filterTools } from "../../src/tool/tool-filter"
 import { ProviderID, ModelID } from "../../src/provider/schema"
-import { CodeSearchTool } from "../../src/tool/codesearch"
 import { WebSearchTool } from "../../src/tool/websearch"
 import { ApplyPatchTool } from "../../src/tool/apply_patch"
 import { EditTool } from "../../src/tool/edit"
 import { WriteTool } from "../../src/tool/write"
 import { BashTool } from "../../src/tool/bash"
+import { Flag } from "../../src/flag/flag"
 import { Env } from "../../src/env"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 
 // Minimal Tool.Info stubs for the tools we care about
-const codeSearch = {
-  id: CodeSearchTool.id,
-  init: async () => ({
-    description: "",
-    parameters: {} as any,
-    execute: async () => ({ title: "", output: "", metadata: {} }),
-  }),
-}
 const webSearch = {
   id: WebSearchTool.id,
   init: async () => ({
@@ -61,14 +53,14 @@ const bash = {
   }),
 }
 
-const allTools = [codeSearch, webSearch, applyPatch, edit, write, bash]
+const allTools = [webSearch, applyPatch, edit, write, bash]
 
 afterEach(async () => {
   await Instance.disposeAll()
 })
 
 describe("tool/tool-filter", () => {
-  describe("CodeSearch / WebSearch visibility", () => {
+  describe("WebSearch visibility", () => {
     test("included for opencode provider", async () => {
       await using tmp = await tmpdir()
       await Instance.provide({
@@ -79,13 +71,12 @@ describe("tool/tool-filter", () => {
             modelID: ModelID.make("some-model"),
           })
           const ids = result.map((t) => t.id)
-          expect(ids).toContain(CodeSearchTool.id)
           expect(ids).toContain(WebSearchTool.id)
         },
       })
     })
 
-    test("excluded for non-opencode provider without EXA flag", async () => {
+    test("non-opencode provider follows EXA flag", async () => {
       await using tmp = await tmpdir()
       await Instance.provide({
         directory: tmp.path,
@@ -95,8 +86,7 @@ describe("tool/tool-filter", () => {
             modelID: ModelID.make("claude-3-5-sonnet"),
           })
           const ids = result.map((t) => t.id)
-          expect(ids).not.toContain(CodeSearchTool.id)
-          expect(ids).not.toContain(WebSearchTool.id)
+          expect(ids.includes(WebSearchTool.id)).toBe(Flag.OPENCODE_ENABLE_EXA)
         },
       })
     })

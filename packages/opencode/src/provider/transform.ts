@@ -643,7 +643,7 @@ export namespace ProviderTransform {
               {
                 thinking: {
                   type: "adaptive",
-                  ...(model.api.id.includes("opus-4.7") ? { display: "summarized" } : {}),
+                  ...(isOpus47 ? { display: "summarized" } : {}),
                 },
                 effort,
               },
