@@ -2,6 +2,7 @@ import { describe, expect, test, spyOn, beforeEach, afterEach } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
 import * as Lsp from "../../src/lsp/index"
+import { LSPClient } from "../../src/lsp/client"
 import { LSPServer } from "../../src/lsp/server"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
@@ -148,6 +149,53 @@ describe("LSP service lifecycle", () => {
       // Should not throw or create duplicate state
     }),
   )
+
+  test("dispose continues shutting down sibling clients after one failure", async () => {
+    const calls: string[] = []
+    const fail = new Error("shutdown failed")
+    const createSpy = spyOn(LSPClient, "create").mockImplementation(
+      async (input) =>
+        ({
+          serverID: input.serverID,
+          root: input.root,
+          notify: {
+            open: async () => 0,
+          },
+          waitForDiagnostics: async () => {},
+          diagnostics: new Map(),
+          connection: {} as any,
+          shutdown: async () => {
+            calls.push(input.serverID)
+            if (input.serverID === "typescript") throw fail
+          },
+        }) as any,
+    )
+    spawnSpy.mockResolvedValue({ process: {} as any })
+    const eslintSpy = spyOn(LSPServer.ESLint, "spawn").mockResolvedValue({ process: {} as any })
+
+    await using tmp = await tmpdir()
+    const file = path.join(tmp.path, "test.ts")
+    await Bun.write(path.join(tmp.path, "bun.lock"), "lock")
+    await Bun.write(path.join(tmp.path, "package.json"), "{}")
+    await Bun.write(path.join(tmp.path, "tsconfig.json"), "{}")
+    await Bun.write(file, "const x = 1\n")
+
+    try {
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await Lsp.LSP.touchFile(file)
+        },
+      })
+
+      await expect(Instance.disposeAll()).resolves.toBeUndefined()
+      expect(calls.sort()).toEqual(["eslint", "typescript"])
+    } finally {
+      eslintSpy.mockRestore()
+      createSpy.mockRestore()
+      await Instance.disposeAll().catch(() => undefined)
+    }
+  })
 })
 
 describe("LSP.Diagnostic", () => {

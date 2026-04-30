@@ -658,9 +658,19 @@ export namespace LSPClient {
         logger.info("shutting down")
         pushDiagnostics.clear()
         pullDiagnostics.clear()
-        connection.end()
-        connection.dispose()
-        await Process.stop(input.server.process)
+        let err: unknown
+        try {
+          connection.end()
+          connection.dispose()
+        } catch (error) {
+          err = error
+          logger.warn("failed to cleanup connection during shutdown", { error })
+        }
+        await Process.stop(input.server.process).catch((error) => {
+          if (err) throw new AggregateError([err, error], "Failed to shutdown LSP client")
+          throw error
+        })
+        if (err) throw err
         logger.info("shutdown")
       },
     }

@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, test } from "bun:test"
+import { beforeEach, describe, expect, test, spyOn } from "bun:test"
 import path from "path"
 import { pathToFileURL } from "url"
 import { LSPClient } from "../../src/lsp/client"
 import { LSPServer } from "../../src/lsp/server"
 import { Instance } from "../../src/project/instance"
+import { Process } from "../../src/util/process"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
 
@@ -565,5 +566,37 @@ describe("LSPClient interop", () => {
     await client.shutdown()
 
     expect(client.diagnostics.size).toBe(0)
+  })
+
+  test("shutdown still stops process when connection cleanup throws", async () => {
+    const handle = spawnFakeServer() as any
+
+    const client = await Instance.provide({
+      directory: process.cwd(),
+      fn: () =>
+        LSPClient.create({
+          serverID: "fake",
+          server: handle as unknown as LSPServer.Handle,
+          root: process.cwd(),
+          directory: process.cwd(),
+        }),
+    })
+
+    const stop = Process.stop
+    const cause = new Error("dispose failed")
+    const stopSpy = spyOn(Process, "stop").mockImplementation((proc, timeout) => stop(proc, timeout))
+    const disposeSpy = spyOn(client.connection, "dispose").mockImplementation(() => {
+      throw cause
+    })
+
+    try {
+      const err = await client.shutdown().catch((error) => error)
+      expect(stopSpy).toHaveBeenCalledTimes(1)
+      expect(err).toBe(cause)
+    } finally {
+      disposeSpy.mockRestore()
+      stopSpy.mockRestore()
+      await Process.stop(handle.process).catch(() => undefined)
+    }
   })
 })
