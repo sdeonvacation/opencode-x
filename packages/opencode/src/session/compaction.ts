@@ -44,38 +44,36 @@ export namespace SessionCompaction {
   const SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the section order unchanged:
 ---
 ## Goal
-- [single-sentence task summary]
+- [1-2 sentence summary of the overall session task — not just the first user message]
 
-## Constraints & Preferences
-- [user constraints, preferences, specs, or "(none)"]
+## What Happened
+- [chronological events, newest last, with category prefixes]
+- [FIXED: bug resolved, CONFIGURED: setup/install, BUILT: code written, TRIED: attempt failed, FOUND: discovery]
+- [or "(none)"]
 
-## Progress
-### Done
-- [completed work or "(none)"]
+## Active Errors / Blockers
+- [current errors with exact messages, unresolved issues, blockers]
+- [or "(none)"]
 
-### In Progress
-- [current work or "(none)"]
+## Key Technical Facts
+- [exact commands, error strings, API names, config keys, install paths, versions]
+- [preserve verbatim — do not paraphrase or summarize technical details]
+- [or "(none)"]
 
-### Blocked
-- [blockers or "(none)"]
-
-## Key Decisions
-- [decision and why, or "(none)"]
+## Files Touched
+- [path: what was done (edit, create, delete, config change) — not files only read]
+- [or "(none)"]
 
 ## Next Steps
-- [ordered next actions or "(none)"]
-
-## Critical Context
-- [important technical facts, errors, open questions, or "(none)"]
-
-## Relevant Files
-- [file or directory path: why it matters, or "(none)"]
+- [numbered, specific actions: file to edit, what to change, test to run]
+- [or "(none)"]
 ---
 
 Rules:
-- Keep every section, even when empty.
+- Keep every section, even when empty (use "(none)").
 - Use terse bullets, not prose paragraphs.
-- Preserve exact file paths, commands, error strings, and identifiers when known.
+- Preserve exact file paths, commands, error strings, and identifiers verbatim.
+- Prefix events with category: FIXED:, BROKEN:, BUILT:, CONFIGURED:, TRIED:, FOUND:.
 - Do not mention the summary process or that context was compacted.`
 
   type Turn = {
