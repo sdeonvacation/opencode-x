@@ -4,7 +4,7 @@ import { Cause, Effect, Layer, Record, ServiceMap } from "effect"
 import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, stepCountIs, type ModelMessage, type Tool, tool, jsonSchema } from "ai"
-import { mergeDeep, pipe } from "remeda"
+import { mergeDeep } from "remeda"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
 import { ProviderTransform } from "@/provider/transform"
 import { Config } from "@/config/config"
@@ -29,6 +29,10 @@ export namespace LLM {
   export type ToolMeta = {
     parallelSafe: boolean
   }
+
+  // Avoid re-instantiating remeda's deep merge types in this hot LLM path; the runtime behavior is still mergeDeep.
+  const mergeOptions = (target: Record<string, any>, source: Record<string, any> | undefined): Record<string, any> =>
+    mergeDeep(target, source ?? {}) as Record<string, any>
 
   export type StreamInput = {
     user: MessageV2.User
@@ -195,11 +199,9 @@ export namespace LLM {
           sessionID: input.sessionID,
           providerOptions: provider.options,
         })
-    const options: Record<string, any> = pipe(
-      base,
-      mergeDeep(model.options),
-      mergeDeep(input.agent.options),
-      mergeDeep(variant),
+    const options: Record<string, any> = mergeOptions(
+      mergeOptions(mergeOptions(base, model.options), input.agent.options),
+      variant,
     )
     if (isOpenaiOauth) {
       options.instructions = system.join("\n")
