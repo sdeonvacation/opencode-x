@@ -481,6 +481,7 @@ Rules:
           agent,
           sessionID: input.sessionID,
           tools: {},
+          toolChoice: "none",
           system: [],
           messages: [
             ...modelMessages,
