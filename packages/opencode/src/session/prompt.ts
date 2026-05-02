@@ -31,6 +31,7 @@ import { ConfigMarkdown } from "../config/markdown"
 import { Config } from "../config/config"
 import { resolveLocal, resolveLocalAsync } from "./resolve-local"
 import { SessionSummary } from "./summary"
+import { SlidingWindow } from "./sliding-window"
 import { NamedError } from "@opencode-ai/util/error"
 import { SessionProcessor } from "./processor"
 import { Tool } from "@/tool/tool"
@@ -1266,6 +1267,7 @@ export namespace SessionPrompt {
             }
 
             if (task?.type === "compaction") {
+              SlidingWindow.invalidate(sessionID)
               const result = yield* compaction.process({
                 messages: msgs,
                 parentID: lastUser.id,
@@ -1370,6 +1372,10 @@ export namespace SessionPrompt {
               }
 
               yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+              const cfg = yield* config.get()
+              const before = msgs.length
+              msgs = yield* SlidingWindow.compact({ msgs, model, provider, cfg, sessionID, agent })
+              log.info("compact", { sessionID, before, after: msgs.length })
 
               const [skills, env, instructions, modelMsgs] = yield* Effect.all([
                 Effect.promise(() => SystemPrompt.skills(agent)),

@@ -52,6 +52,7 @@ export namespace Flag {
   // Experimental
   export const OPENCODE_EXPERIMENTAL = truthy("OPENCODE_EXPERIMENTAL")
   export const OPENCODE_HYBRID_ROUTING = truthy("OPENCODE_HYBRID_ROUTING")
+  export const OPENCODE_EXPERIMENTAL_SLIDING_WINDOW = truthy("OPENCODE_EXPERIMENTAL_SLIDING_WINDOW")
   export const OPENCODE_EXPERIMENTAL_FILEWATCHER = Config.boolean("OPENCODE_EXPERIMENTAL_FILEWATCHER").pipe(
     Config.withDefault(false),
   )

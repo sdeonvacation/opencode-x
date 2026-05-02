@@ -1140,6 +1140,37 @@ export namespace Config {
             .min(0)
             .optional()
             .describe("Token buffer for compaction. Leaves enough window to avoid overflow during compaction."),
+          sliding_window: z
+            .object({
+              enabled: z.boolean().optional().default(false).describe("Enable proactive sliding-window compaction"),
+              threshold: z
+                .number()
+                .int()
+                .min(10000)
+                .optional()
+                .default(50_000)
+                .describe("Token count threshold to trigger sliding window (default: 50000)"),
+              tail_ratio: z
+                .number()
+                .min(0.2)
+                .max(0.9)
+                .optional()
+                .default(0.5)
+                .describe("Fraction of total context to preserve as verbatim tail (default: 0.5)"),
+              primary_only: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Only apply to primary agents (default: true)"),
+              timeout_ms: z
+                .number()
+                .int()
+                .min(1000)
+                .optional()
+                .default(30_000)
+                .describe("Timeout for summary generation call (default: 30000)"),
+            })
+            .optional(),
         })
         .optional(),
       experimental: z

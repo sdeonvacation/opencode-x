@@ -41,7 +41,7 @@ export namespace SessionCompaction {
   const DEFAULT_TAIL_TURNS = 2
   const MIN_PRESERVE_RECENT_TOKENS = 2_000
   const MAX_PRESERVE_RECENT_TOKENS = 8_000
-  const SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the section order unchanged:
+  export const SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the section order unchanged:
 ---
 ## Goal
 - [1-2 sentence summary of the overall session task — not just the first user message]
