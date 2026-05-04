@@ -219,12 +219,7 @@ describe("Vcs diff", () => {
     await fs.writeFile(path.join(tmp.path, "b.txt"), "new\n", "utf-8")
 
     await withVcsOnly(tmp.path, async () => {
-      const diff = await AppRuntime.runPromise(
-        Effect.gen(function* () {
-          const vcs = yield* Vcs.Service
-          return yield* vcs.diff("git")
-        }),
-      )
+      const diff = await Vcs.diff("git")
       const a = diff.find((item) => item.file === "a.txt")
       const b = diff.find((item) => item.file === "b.txt")
 
