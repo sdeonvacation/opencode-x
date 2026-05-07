@@ -450,6 +450,13 @@ export namespace MessageV2 {
         write: z.number(),
       }),
     }),
+    compaction: z
+      .object({
+        total: z.number(),
+        budget: z.number(),
+        msgs: z.number(),
+      })
+      .optional(),
     structured: z.any().optional(),
     variant: z.string().optional(),
     finish: z.string().optional(),

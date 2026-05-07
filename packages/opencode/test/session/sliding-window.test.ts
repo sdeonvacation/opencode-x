@@ -330,4 +330,47 @@ describe("sliding-window", () => {
     expect(result).toBe(msgs)
     expect(state.calls).toBe(1)
   })
+
+  test("getMetrics returns undefined before compaction", () => {
+    const sessionID = SessionID.make("session_sw_metrics_none")
+    expect(SlidingWindow.getMetrics(sessionID)).toBeUndefined()
+  })
+
+  test("getMetrics returns metrics after successful compaction", async () => {
+    const sessionID = SessionID.make("session_sw_metrics_ok")
+    const { msgs } = history(sessionID)
+    state.text = "summary"
+
+    await compact(input(sessionID, msgs))
+
+    const m = SlidingWindow.getMetrics(sessionID)
+    expect(m).toBeDefined()
+    expect(m!.total).toBeGreaterThan(0)
+    expect(m!.budget).toBeGreaterThan(0)
+    expect(m!.head).toBeGreaterThan(0)
+    expect(m!.msgs).toBeGreaterThan(0)
+    expect(m!.ts).toBeGreaterThan(0)
+    expect(m!.budget).toBeLessThanOrEqual(m!.total)
+  })
+
+  test("getMetrics cleared after invalidate", async () => {
+    const sessionID = SessionID.make("session_sw_metrics_inv")
+    const { msgs } = history(sessionID)
+    state.text = "summary"
+
+    await compact(input(sessionID, msgs))
+    expect(SlidingWindow.getMetrics(sessionID)).toBeDefined()
+
+    SlidingWindow.invalidate(sessionID)
+    expect(SlidingWindow.getMetrics(sessionID)).toBeUndefined()
+  })
+
+  test("getMetrics not set when compaction skipped", async () => {
+    const sessionID = SessionID.make("session_sw_metrics_skip")
+    const { msgs } = history(sessionID)
+
+    await compact(input(sessionID, msgs, "primary", { threshold: 1_000_000 }))
+
+    expect(SlidingWindow.getMetrics(sessionID)).toBeUndefined()
+  })
 })

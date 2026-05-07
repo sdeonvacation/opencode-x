@@ -17,6 +17,16 @@ export namespace SlidingWindow {
   const cache = new Map<SessionID, CacheEntry>()
   const inflight = new Set<SessionID>()
 
+  type Metrics = {
+    total: number
+    budget: number
+    tail: number
+    head: number
+    msgs: number
+    ts: number
+  }
+  const metrics = new Map<SessionID, Metrics>()
+
   type CacheEntry = {
     headEndID: MessageID
     summary: string
@@ -69,6 +79,7 @@ export namespace SlidingWindow {
     if (hit && hit.headEndID === headEndID) {
       log.info("cache_hit", { sessionID: input.sessionID, headEndID, total, budget, head: size })
       touch(input.sessionID, hit)
+      metrics.set(input.sessionID, { total, budget, tail, head: size, msgs: split.tail.length, ts: Date.now() })
       return [synthetic(hit.summary, input), ...split.tail]
     }
 
@@ -93,6 +104,7 @@ export namespace SlidingWindow {
     }
 
     store(input.sessionID, { headEndID, summary, ts: Date.now() })
+    metrics.set(input.sessionID, { total, budget, tail, head: size, msgs: split.tail.length, ts: Date.now() })
     log.info("compacted", {
       sessionID: input.sessionID,
       total,
@@ -106,6 +118,7 @@ export namespace SlidingWindow {
 
   export function invalidate(sessionID: SessionID) {
     cache.delete(sessionID)
+    metrics.delete(sessionID)
     log.info("invalidate", { sessionID })
   }
 
@@ -287,5 +300,14 @@ export namespace SlidingWindow {
       if (!key) break
       cache.delete(key)
     }
+    while (metrics.size > MAX) {
+      const key = metrics.keys().next().value as SessionID | undefined
+      if (!key) break
+      metrics.delete(key)
+    }
+  }
+
+  export function getMetrics(sessionID: SessionID) {
+    return metrics.get(sessionID)
   }
 }

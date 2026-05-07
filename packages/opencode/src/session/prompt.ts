@@ -1376,6 +1376,10 @@ export namespace SessionPrompt {
               const before = msgs.length
               msgs = yield* SlidingWindow.compact({ msgs, model, provider, cfg, sessionID, agent })
               log.info("compact", { sessionID, before, after: msgs.length })
+              const sw = SlidingWindow.getMetrics(sessionID)
+              if (sw) {
+                handle.message.compaction = { total: sw.total, budget: sw.budget, msgs: sw.msgs }
+              }
 
               const [skills, env, instructions, modelMsgs] = yield* Effect.all([
                 Effect.promise(() => SystemPrompt.skills(agent)),

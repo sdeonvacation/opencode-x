@@ -41,6 +41,13 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
     }
   })
 
+  const sw = createMemo(() => {
+    const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && !!item.compaction)
+    if (!last?.compaction) return null
+    const saved = Math.round(((last.compaction.total - last.compaction.budget) / last.compaction.total) * 100)
+    return { sent: last.compaction.budget, saved }
+  })
+
   return (
     <box>
       <text fg={theme().text}>
@@ -48,6 +55,11 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       </text>
       <text fg={theme().textMuted}>{state().tokens.toLocaleString()} tokens</text>
       <text fg={theme().textMuted}>{state().percent ?? 0}% used</text>
+      {sw() && (
+        <text fg={theme().textMuted}>
+          SW: {sw()!.sent.toLocaleString()} sent ({sw()!.saved}% saved)
+        </text>
+      )}
       <text fg={theme().textMuted}>{money.format(cost())} spent</text>
     </box>
   )

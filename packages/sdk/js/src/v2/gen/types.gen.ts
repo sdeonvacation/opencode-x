@@ -76,6 +76,35 @@ export type EventLspClientDiagnostics = {
   }
 }
 
+export type SessionStatus =
+  | {
+      type: "idle"
+    }
+  | {
+      type: "retry"
+      attempt: number
+      message: string
+      next: number
+    }
+  | {
+      type: "busy"
+    }
+
+export type EventSessionStatus = {
+  type: "session.status"
+  properties: {
+    sessionID: string
+    status: SessionStatus
+  }
+}
+
+export type EventSessionIdle = {
+  type: "session.idle"
+  properties: {
+    sessionID: string
+  }
+}
+
 export type EventLspUpdated = {
   type: "lsp.updated"
   properties: {
@@ -410,32 +439,17 @@ export type EventQuestionRejected = {
   }
 }
 
-export type SessionStatus =
-  | {
-      type: "idle"
-    }
-  | {
-      type: "retry"
-      attempt: number
-      message: string
-      next: number
-    }
-  | {
-      type: "busy"
-    }
-
-export type EventSessionStatus = {
-  type: "session.status"
+export type EventHybridCompressionEligible = {
+  type: "hybrid.compression.eligible"
   properties: {
     sessionID: string
-    status: SessionStatus
-  }
-}
-
-export type EventSessionIdle = {
-  type: "session.idle"
-  properties: {
-    sessionID: string
+    step: number
+    tool?: string
+    modelID: string
+    providerID: string
+    eligible: boolean
+    reason: string
+    lineCount?: number
   }
 }
 
@@ -443,6 +457,70 @@ export type EventSessionCompacted = {
   type: "session.compacted"
   properties: {
     sessionID: string
+  }
+}
+
+export type EventOrchestrationSpawn = {
+  type: "orchestration.spawn"
+  properties: {
+    sessionID: string
+    parentSessionID: string
+    agent: string
+    depth: number
+  }
+}
+
+export type EventOrchestrationSpawnRejected = {
+  type: "orchestration.spawn-rejected"
+  properties: {
+    sessionID: string
+    agent: string
+    reason: "max_depth" | "max_descendants"
+    limit: number
+    current: number
+  }
+}
+
+export type EventOrchestrationComplete = {
+  type: "orchestration.complete"
+  properties: {
+    sessionID: string
+    parentSessionID: string
+    agent: string
+    durationMs: number
+  }
+}
+
+export type EventOrchestrationAbort = {
+  type: "orchestration.abort"
+  properties: {
+    sessionID: string
+    reason: string
+  }
+}
+
+export type EventOrchestrationLoopDetected = {
+  type: "orchestration.loop-detected"
+  properties: {
+    sessionID: string
+    toolName: string
+    count: number
+  }
+}
+
+export type EventOrchestrationConcurrencyQueued = {
+  type: "orchestration.concurrency-queued"
+  properties: {
+    key: string
+    queueLength: number
+  }
+}
+
+export type EventOrchestrationConcurrencyReleased = {
+  type: "orchestration.concurrency-released"
+  properties: {
+    key: string
+    queueLength: number
   }
 }
 
@@ -600,6 +678,11 @@ export type AssistantMessage = {
       read: number
       write: number
     }
+  }
+  compaction?: {
+    total: number
+    budget: number
+    msgs: number
   }
   structured?: unknown
   variant?: string
@@ -870,6 +953,7 @@ export type CompactionPart = {
   type: "compaction"
   auto: boolean
   overflow?: boolean
+  tail_start_id?: string
 }
 
 export type Part =
@@ -979,6 +1063,8 @@ export type Event =
   | EventServerConnected
   | EventGlobalDisposed
   | EventLspClientDiagnostics
+  | EventSessionStatus
+  | EventSessionIdle
   | EventLspUpdated
   | EventMessagePartDelta
   | EventPermissionAsked
@@ -1001,9 +1087,15 @@ export type Event =
   | EventQuestionAsked
   | EventQuestionReplied
   | EventQuestionRejected
-  | EventSessionStatus
-  | EventSessionIdle
+  | EventHybridCompressionEligible
   | EventSessionCompacted
+  | EventOrchestrationSpawn
+  | EventOrchestrationSpawnRejected
+  | EventOrchestrationComplete
+  | EventOrchestrationAbort
+  | EventOrchestrationLoopDetected
+  | EventOrchestrationConcurrencyQueued
+  | EventOrchestrationConcurrencyReleased
   | EventTodoUpdated
   | EventPtyCreated
   | EventPtyUpdated
@@ -1180,6 +1272,7 @@ export type PermissionConfig =
       question?: PermissionActionConfig
       webfetch?: PermissionActionConfig
       websearch?: PermissionActionConfig
+      codesearch?: PermissionActionConfig
       lsp?: PermissionRuleConfig
       doom_loop?: PermissionActionConfig
       skill?: PermissionRuleConfig
@@ -1212,6 +1305,10 @@ export type AgentConfig = {
    * Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)
    */
   hidden?: boolean
+  /**
+   * Override safe parallel tool-call behavior for this agent
+   */
+  parallelToolCalls?: boolean
   options?: {
     [key: string]: unknown
   }
@@ -1263,6 +1360,10 @@ export type ProviderConfig = {
   npm?: string
   whitelist?: Array<string>
   blacklist?: Array<string>
+  /**
+   * Override safe parallel tool-call provider support for this provider
+   */
+  parallelToolCalls?: boolean
   options?: {
     apiKey?: string
     baseURL?: string
@@ -1426,6 +1527,61 @@ export type McpRemoteConfig = {
  */
 export type LayoutConfig = "auto" | "stretch"
 
+/**
+ * Cloud model override
+ */
+export type HybridModelRefConfig = {
+  providerID: string
+  modelID: string
+}
+
+/**
+ * Hybrid cloud/local model routing configuration
+ */
+export type HybridConfig = {
+  /**
+   * Enable hybrid cloud/local model routing
+   */
+  enabled?: boolean
+  local_model?: HybridModelRefConfig
+  cloud_model?: HybridModelRefConfig
+  /**
+   * Enable verbose routing decision logging
+   */
+  log_routing?: boolean
+  /**
+   * Line count threshold for compression (default: 10)
+   */
+  compression_threshold?: number
+  /**
+   * Per-tool template override map (optional)
+   */
+  compression_templates?: {
+    [key: string]: string
+  }
+  /**
+   * Timeout in ms for local model compression call (default: 5000)
+   */
+  compression_timeout_ms?: number
+  /**
+   * Per-tool line count thresholds for compression eligibility
+   */
+  compression_thresholds?: {
+    /**
+     * Line threshold for grep/glob output (default: 50)
+     */
+    grep?: number
+    /**
+     * Line threshold for webfetch/websearch output (default: 50)
+     */
+    webfetch?: number
+    /**
+     * Line threshold for bash output (default: 30)
+     */
+    bash?: number
+  }
+}
+
 export type Config = {
   /**
    * JSON schema reference for configuration validation
@@ -1585,6 +1741,7 @@ export type Config = {
   instructions?: Array<string>
   layout?: LayoutConfig
   permission?: PermissionConfig
+  hybrid?: HybridConfig
   tools?: {
     [key: string]: boolean
   }
@@ -1607,6 +1764,28 @@ export type Config = {
      * Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
      */
     reserved?: number
+    sliding_window?: {
+      /**
+       * Enable proactive sliding-window compaction
+       */
+      enabled?: boolean
+      /**
+       * Token count threshold to trigger sliding window (default: 50000)
+       */
+      threshold?: number
+      /**
+       * Fraction of total context to preserve as verbatim tail (default: 0.5)
+       */
+      tail_ratio?: number
+      /**
+       * Only apply to primary agents (default: true)
+       */
+      primary_only?: boolean
+      /**
+       * Timeout for summary generation call (default: 30000)
+       */
+      timeout_ms?: number
+    }
   }
   experimental?: {
     disable_paste_summary?: boolean
@@ -1614,6 +1793,14 @@ export type Config = {
      * Enable the batch tool
      */
     batch_tool?: boolean
+    /**
+     * Enable safe parallel tool calls when all active tools are pre-approved and parallel-safe
+     */
+    parallel_tool_calls?: boolean
+    /**
+     * Allow the read tool to participate in parallel tool calls
+     */
+    parallel_read?: boolean
     /**
      * Enable OpenTelemetry spans for AI SDK calls (using the 'experimental_telemetry' flag)
      */
@@ -1630,6 +1817,52 @@ export type Config = {
      * Timeout in milliseconds for model context protocol (MCP) requests
      */
     mcp_timeout?: number
+    /**
+     * Timeout in milliseconds for subagent task execution (default: 900000 / 15 minutes)
+     */
+    subagent_timeout?: number
+    /**
+     * Timeout in milliseconds for permission prompts
+     */
+    permission_ask_timeout?: number
+    /**
+     * Timeout in milliseconds for question prompts
+     */
+    question_ask_timeout?: number
+    /**
+     * Consecutive identical tool calls before loop detection triggers (default: 5)
+     */
+    loop_detector_threshold?: number
+    /**
+     * Maximum subagent nesting depth (default: 3)
+     */
+    max_subagent_depth?: number
+    /**
+     * Maximum total subagent descendants per root session (default: 50)
+     */
+    max_subagent_descendants?: number
+    /**
+     * Per-model concurrency limits keyed by 'providerID:modelID' (default: 5 for all)
+     */
+    model_concurrency?: {
+      [key: string]: number
+    }
+    /**
+     * Map task category names to specific provider/model combos
+     */
+    task_categories?: {
+      [key: string]: {
+        providerID: string
+        modelID: string
+      }
+    }
+    /**
+     * Model override used for keyword-triggered ultrawork routing, or when task.use_ultrawork is explicitly set to true
+     */
+    ultrawork_model?: {
+      providerID: string
+      modelID: string
+    }
   }
 }
 
@@ -2058,6 +2291,7 @@ export type Agent = {
   }
   variant?: string
   prompt?: string
+  parallelToolCalls?: boolean
   options: {
     [key: string]: unknown
   }
