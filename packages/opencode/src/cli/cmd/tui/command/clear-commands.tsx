@@ -8,6 +8,7 @@ type Message = {
     role: string
     cost?: number
     summary?: unknown
+    error?: unknown
   }
 }
 
@@ -152,7 +153,9 @@ export function createClearCommands(deps: ClearCommandsDeps): CommandOption[] {
 
           const updatedResponse = await deps.sdk.client.session.messages({ sessionID })
           const updatedMessages = updatedResponse.data || []
-          const summaryMessage = updatedMessages.findLast((m) => m.info.role === "assistant" && Boolean(m.info.summary))
+          const summaryMessage = updatedMessages.findLast(
+            (m) => m.info.role === "assistant" && Boolean(m.info.summary) && !m.info.error,
+          )
 
           if (!summaryMessage) {
             deps.toast.show({
