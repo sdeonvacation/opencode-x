@@ -44,10 +44,10 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const sw = createMemo(() => {
     const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && !!item.compaction)
     if (!last?.compaction) return null
-    const tail = last.compaction.tail ?? last.compaction.budget
-    if (!tail || !last.compaction.total) return null
-    const saved = Math.round(((last.compaction.total - tail) / last.compaction.total) * 100)
-    return { sent: tail, saved }
+    const sent = last.compaction.sent ?? last.compaction.tail ?? last.compaction.budget
+    if (!sent || !last.compaction.total) return null
+    const saved = Math.round(((last.compaction.total - sent) / last.compaction.total) * 100)
+    return { sent, saved }
   })
 
   return (

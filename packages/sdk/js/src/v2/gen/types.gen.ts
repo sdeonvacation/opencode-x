@@ -681,6 +681,7 @@ export type AssistantMessage = {
   }
   compaction?: {
     total: number
+    sent?: number
     tail?: number
     budget?: number
     msgs: number
