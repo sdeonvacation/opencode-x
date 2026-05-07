@@ -453,7 +453,8 @@ export namespace MessageV2 {
     compaction: z
       .object({
         total: z.number(),
-        budget: z.number(),
+        tail: z.number().optional(),
+        budget: z.number().optional(),
         msgs: z.number(),
       })
       .optional(),
