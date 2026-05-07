@@ -1,0 +1,190 @@
+diff --git a/index-ekbq0zm9.js b/index-ekbq0zm9.js
+--- a/index-ekbq0zm9.js
++++ b/index-ekbq0zm9.js
+@@ -9310,8 +9310,9 @@
+   set streaming(value) {
+     if (this.isDestroyed)
+       return;
+     if (this._streaming !== value) {
+       this._streaming = value;
+       this.updateBlocks(true);
++      this.requestRender();
+     }
+   }
+@@ -9484,7 +9485,7 @@
+       bg: this._bg,
+       conceal: this._conceal,
+-      drawUnstyledText: false,
+-      streaming: true,
++      drawUnstyledText: !this._conceal,
++      streaming: this._streaming,
+       onChunks: this._linkifyMarkdownChunks,
+       treeSitterClient: this._treeSitterClient,
+       width: "100%",
+@@ -9510,11 +9511,11 @@
+   applyMarkdownCodeRenderable(renderable, content, marginBottom) {
+-    renderable.content = content;
+-    renderable.filetype = "markdown";
++    renderable.streaming = this._streaming;
++    renderable.content = content;
++    renderable.filetype = "markdown";
+     renderable.syntaxStyle = this._syntaxStyle;
+     renderable.fg = this._fg;
+     renderable.bg = this._bg;
+     renderable.conceal = this._conceal;
+-    renderable.drawUnstyledText = false;
+-    renderable.streaming = true;
++    renderable.drawUnstyledText = !this._conceal;
+     renderable.marginBottom = marginBottom;
+   }
+diff --git a/index-xsfpee0k.js b/index-xsfpee0k.js
+--- a/index-xsfpee0k.js
++++ b/index-xsfpee0k.js
+@@ -8196,7 +8196,8 @@
+        const [, , group, meta] = highlights[idx];
+        activeGroups.push({ group, meta, index: idx });
+      }
+-      const concealHighlight = concealEnabled ? activeGroups.find((h) => h.meta?.conceal !== undefined || h.group === "conceal" || h.group.startsWith("conceal.")) : undefined;
++      const concealHeadingMarker = concealEnabled && activeGroups.some((h) => h.group.startsWith("markup.heading.")) && (currentOffset === 0 || content[currentOffset - 1] === "\n") && /^#{1,6} ?$/.test(segmentText);
++      const concealHighlight = !concealHeadingMarker && concealEnabled ? activeGroups.find((h) => h.meta?.conceal !== undefined || h.group === "conceal" || h.group.startsWith("conceal.")) : undefined;
+      if (concealHighlight) {
+        let replacementText = "";
+        if (concealHighlight.meta?.conceal !== undefined) {
+@@ -8218,8 +8219,8 @@
+            }) : 0
+          });
+        }
+-      } else {
++      } else if (!concealHeadingMarker) {
+        const insideInjectionContainer = injectionContainerRanges.some((range) => currentOffset >= range.start && currentOffset < range.end);
+        const validGroups = activeGroups.filter((h) => {
+          if (insideInjectionContainer && shouldSuppressInInjection(h.group, h.meta)) {
+            return false;
+@@ -8269,15 +8270,115 @@
+         const finalStyle = Object.keys(mergedStyle).length > 0 ? mergedStyle : defaultStyle;
+-        chunks.push({
+-          __isChunk: true,
+-          text: segmentText,
+-          fg: finalStyle?.fg,
+-          bg: finalStyle?.bg,
+-          attributes: finalStyle ? createTextAttributes({
+-            bold: finalStyle.bold,
+-            italic: finalStyle.italic,
+-            underline: finalStyle.underline,
+-            dim: finalStyle.dim
+-          }) : 0
+-        });
++        if (concealEnabled && segmentText.length > 1 && !activeGroups.some((h) => h.group === "conceal" || h.meta?.conceal !== undefined)) {
++          const _mkChunk = (text) => ({
++            __isChunk: true,
++            text,
++            fg: finalStyle?.fg,
++            bg: finalStyle?.bg,
++            attributes: finalStyle ? createTextAttributes({
++              bold: finalStyle.bold,
++              italic: finalStyle.italic,
++              underline: finalStyle.underline,
++              dim: finalStyle.dim
++            }) : 0
++          });
++          const _headingBoldRe = /(?:^|\n)(#{1,6}) |\*\*|`/g;
++          let _hasMarkers = false;
++          _headingBoldRe.lastIndex = 0;
++          if (_headingBoldRe.test(segmentText)) { _hasMarkers = true; }
++          if (_hasMarkers) {
++            const _parts = [];
++            let _last = 0;
++            const _re = /(^|\n)(#{1,6}) /gm;
++            let _m;
++            while ((_m = _re.exec(segmentText)) !== null) {
++              const _prefix = _m[1];
++              const _hashes = _m[2];
++              const _markerStart = _m.index + _prefix.length;
++              const _markerEnd = _markerStart + _hashes.length + 1;
++              if (_markerStart > _last) {
++                _parts.push({ text: segmentText.slice(_last, _markerStart), conceal: false });
++              }
++              _parts.push({ text: _hashes + " ", conceal: true });
++              _last = _markerEnd;
++            }
++            const _boldRe = /\*\*/g;
++            const _intermediate = _parts.length > 0 ? _parts : [{ text: segmentText, conceal: false }];
++            const _final = [];
++            for (const _seg of _intermediate) {
++              if (_seg.conceal) { _final.push(_seg); continue; }
++              let _bLast = 0;
++              _boldRe.lastIndex = 0;
++              let _bm;
++              const _txt = _seg.text;
++              let _found = false;
++              while ((_bm = _boldRe.exec(_txt)) !== null) {
++                _found = true;
++                if (_bm.index > _bLast) {
++                  _final.push({ text: _txt.slice(_bLast, _bm.index), conceal: false });
++                }
++                _final.push({ text: "**", conceal: true });
++                _bLast = _bm.index + 2;
++              }
++              if (_found) {
++                if (_bLast < _txt.length) _final.push({ text: _txt.slice(_bLast), conceal: false });
++              } else {
++                _final.push(_seg);
++              }
++            }
++            const _final2 = [];
++            for (const _seg of _final) {
++              if (_seg.conceal) { _final2.push(_seg); continue; }
++              let _cLast = 0;
++              const _txt = _seg.text;
++              let _found = false;
++              for (let _ci = 0; _ci < _txt.length; _ci++) {
++                if (_txt[_ci] === '`') {
++                  _found = true;
++                  if (_ci > _cLast) {
++                    _final2.push({ text: _txt.slice(_cLast, _ci), conceal: false });
++                  }
++                  _final2.push({ text: '`', conceal: true });
++                  _cLast = _ci + 1;
++                }
++              }
++              if (_found) {
++                if (_cLast < _txt.length) _final2.push({ text: _txt.slice(_cLast), conceal: false });
++              } else {
++                _final2.push(_seg);
++              }
++            }
++            for (const _seg of _final2) {
++              if (!_seg.conceal && _seg.text.length > 0) {
++                chunks.push(_mkChunk(_seg.text));
++              }
++            }
++          } else {
++            chunks.push({
++              __isChunk: true,
++              text: segmentText,
++              fg: finalStyle?.fg,
++              bg: finalStyle?.bg,
++              attributes: finalStyle ? createTextAttributes({
++                bold: finalStyle.bold,
++                italic: finalStyle.italic,
++                underline: finalStyle.underline,
++                dim: finalStyle.dim
++              }) : 0
++            });
++          }
++        } else {
++          chunks.push({
++            __isChunk: true,
++            text: segmentText,
++            fg: finalStyle?.fg,
++            bg: finalStyle?.bg,
++            attributes: finalStyle ? createTextAttributes({
++              bold: finalStyle.bold,
++              italic: finalStyle.italic,
++              underline: finalStyle.underline,
++              dim: finalStyle.dim
++            }) : 0
++          });
++        }
+       }
+     } else if (currentOffset < boundary.offset) {
