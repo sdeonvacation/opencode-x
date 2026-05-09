@@ -249,7 +249,7 @@ export namespace LLM {
     )
 
     const tools = all
-    const visible = { ...all }
+    const visible = Object.fromEntries(Object.entries(all).toSorted(([a], [b]) => a.localeCompare(b)))
     const toolMeta = resolveToolMeta(input, all)
     const parallelToolCalls = parallelGate({
       agent: input.agent,
