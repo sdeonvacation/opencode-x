@@ -493,7 +493,7 @@ export namespace LSPClient {
           const hit = published.get(request.path)
           if (!hit) return
           if (typeof hit.version === "number" && hit.version !== request.version) return
-          if (hit.at < request.after && hit.version !== request.version) return
+          if (hit.at < request.after) return
           if (debounceTimer) clearTimeout(debounceTimer)
           debounceTimer = setTimeout(() => finish(true), Math.max(0, DIAGNOSTICS_DEBOUNCE_MS - (Date.now() - hit.at)))
         }
@@ -570,6 +570,8 @@ export namespace LSPClient {
 
           const document = files[request.path]
           if (document !== undefined) {
+            pushDiagnostics.delete(request.path)
+            pullDiagnostics.delete(request.path)
             logger.info("workspace/didChangeWatchedFiles", request)
             await connection.sendNotification("workspace/didChangeWatchedFiles", {
               changes: [
