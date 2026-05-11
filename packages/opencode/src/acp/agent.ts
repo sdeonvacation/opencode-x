@@ -46,7 +46,14 @@ import { Config } from "@/config/config"
 import { Todo } from "@/session/todo"
 import { z } from "zod"
 import { LoadAPIKeyError } from "ai"
-import type { AssistantMessage, Event, OpencodeClient, SessionMessageResponse, ToolPart } from "@opencode-ai/sdk/v2"
+import type {
+  AssistantMessage,
+  Event,
+  OpencodeClient,
+  SessionMessageResponse,
+  ToolPart,
+  ToolStateCompleted,
+} from "@opencode-ai/sdk/v2"
 import { applyPatch } from "diff"
 
 type ModeOption = { id: string; name: string; description?: string }
@@ -346,33 +353,7 @@ export namespace ACP {
                 this.toolStarts.delete(part.callID)
                 this.bashSnapshots.delete(part.callID)
                 const kind = toToolKind(part.tool)
-                const content: ToolCallContent[] = [
-                  {
-                    type: "content",
-                    content: {
-                      type: "text",
-                      text: part.state.output,
-                    },
-                  },
-                ]
-
-                if (kind === "edit") {
-                  const input = part.state.input
-                  const filePath = typeof input["filePath"] === "string" ? input["filePath"] : ""
-                  const oldText = typeof input["oldString"] === "string" ? input["oldString"] : ""
-                  const newText =
-                    typeof input["newString"] === "string"
-                      ? input["newString"]
-                      : typeof input["content"] === "string"
-                        ? input["content"]
-                        : ""
-                  content.push({
-                    type: "diff",
-                    path: filePath,
-                    oldText,
-                    newText,
-                  })
-                }
+                const content = completedToolContent(part as ToolPart & { state: ToolStateCompleted }, kind)
 
                 if (part.tool === "todowrite") {
                   const parsedTodos = z.array(Todo.Info).safeParse(JSON.parse(part.state.output))
@@ -412,10 +393,7 @@ export namespace ACP {
                       content,
                       title: part.state.title,
                       rawInput: part.state.input,
-                      rawOutput: {
-                        output: part.state.output,
-                        metadata: part.state.metadata,
-                      },
+                      rawOutput: completedToolRawOutput(part as ToolPart & { state: ToolStateCompleted }),
                     },
                   })
                   .catch((error) => {
@@ -882,33 +860,7 @@ export namespace ACP {
               this.toolStarts.delete(part.callID)
               this.bashSnapshots.delete(part.callID)
               const kind = toToolKind(part.tool)
-              const content: ToolCallContent[] = [
-                {
-                  type: "content",
-                  content: {
-                    type: "text",
-                    text: part.state.output,
-                  },
-                },
-              ]
-
-              if (kind === "edit") {
-                const input = part.state.input
-                const filePath = typeof input["filePath"] === "string" ? input["filePath"] : ""
-                const oldText = typeof input["oldString"] === "string" ? input["oldString"] : ""
-                const newText =
-                  typeof input["newString"] === "string"
-                    ? input["newString"]
-                    : typeof input["content"] === "string"
-                      ? input["content"]
-                      : ""
-                content.push({
-                  type: "diff",
-                  path: filePath,
-                  oldText,
-                  newText,
-                })
-              }
+              const content = completedToolContent(part as ToolPart & { state: ToolStateCompleted }, kind)
 
               if (part.tool === "todowrite") {
                 const parsedTodos = z.array(Todo.Info).safeParse(JSON.parse(part.state.output))
@@ -948,10 +900,7 @@ export namespace ACP {
                     content,
                     title: part.state.title,
                     rawInput: part.state.input,
-                    rawOutput: {
-                      output: part.state.output,
-                      metadata: part.state.metadata,
-                    },
+                    rawOutput: completedToolRawOutput(part as ToolPart & { state: ToolStateCompleted }),
                   },
                 })
                 .catch((err) => {
@@ -1848,5 +1797,65 @@ export namespace ACP {
       })
     }
     return options
+  }
+
+  function imageContents(attachments: Array<{ mime: string; url: string }>): ToolCallContent[] {
+    return attachments
+      .filter((a) => a.mime.startsWith("image/"))
+      .map((a) => {
+        const match = a.url.match(/^data:([^;]+);base64,(.*)$/)
+        const data = match?.[2] ?? ""
+        return {
+          type: "content" as const,
+          content: {
+            type: "image" as const,
+            mimeType: a.mime,
+            data,
+          },
+        }
+      })
+  }
+
+  function completedToolContent(part: ToolPart & { state: ToolStateCompleted }, kind: ToolKind): ToolCallContent[] {
+    const content: ToolCallContent[] = [
+      {
+        type: "content",
+        content: {
+          type: "text",
+          text: part.state.output,
+        },
+      },
+    ]
+
+    if (kind === "edit") {
+      const input = part.state.input
+      const filePath = typeof input["filePath"] === "string" ? input["filePath"] : ""
+      const oldText = typeof input["oldString"] === "string" ? input["oldString"] : ""
+      const newText =
+        typeof input["newString"] === "string"
+          ? input["newString"]
+          : typeof input["content"] === "string"
+            ? input["content"]
+            : ""
+      content.push({
+        type: "diff",
+        path: filePath,
+        oldText,
+        newText,
+      })
+    }
+
+    if (part.state.attachments?.length) {
+      content.push(...imageContents(part.state.attachments))
+    }
+
+    return content
+  }
+
+  function completedToolRawOutput(part: ToolPart & { state: ToolStateCompleted }) {
+    return {
+      output: part.state.output,
+      metadata: part.state.metadata,
+    }
   }
 }

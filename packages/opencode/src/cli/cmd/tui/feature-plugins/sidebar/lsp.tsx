@@ -7,7 +7,7 @@ function View(props: { api: TuiPluginApi }) {
   const [open, setOpen] = createSignal(true)
   const theme = () => props.api.theme.current
   const list = createMemo(() => props.api.state.lsp())
-  const off = createMemo(() => !props.api.state.config.lsp)
+  const off = createMemo(() => props.api.state.config.lsp === false)
 
   return (
     <box>

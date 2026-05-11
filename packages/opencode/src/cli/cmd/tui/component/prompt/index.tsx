@@ -1101,7 +1101,7 @@ export function Prompt(props: PromptProps) {
                 if (store.mode === "normal") autocomplete.onKeyDown(e)
                 if (!autocomplete.visible) {
                   if (keybind.match("history_previous", e)) {
-                    if (input.visualCursor.visualRow === 0) input.cursorOffset = 0
+                    if (input.scrollY + input.visualCursor.visualRow === 0) input.cursorOffset = 0
                     const item = history.move(-1, input.plainText)
                     if (item) {
                       input.setText(item.input)
@@ -1114,7 +1114,11 @@ export function Prompt(props: PromptProps) {
                     return false
                   }
                   if (keybind.match("history_next", e)) {
-                    if (input.visualCursor.visualRow === input.height - 1) input.cursorOffset = input.plainText.length
+                    if (
+                      input.scrollY + input.visualCursor.visualRow ===
+                      Math.max(0, input.editorView.getTotalVirtualLineCount() - 1)
+                    )
+                      input.cursorOffset = input.plainText.length
                     const item = history.move(1, input.plainText)
                     if (item) {
                       input.setText(item.input)
