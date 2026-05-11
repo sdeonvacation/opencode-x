@@ -757,7 +757,7 @@ export function Session() {
       value: "session.line.up",
       keybind: "messages_line_up",
       category: "Session",
-      disabled: true,
+      hidden: true,
       onSelect: (dialog) => {
         scroll.scrollBy(-1)
         dialog.clear()
@@ -768,7 +768,7 @@ export function Session() {
       value: "session.line.down",
       keybind: "messages_line_down",
       category: "Session",
-      disabled: true,
+      hidden: true,
       onSelect: (dialog) => {
         scroll.scrollBy(1)
         dialog.clear()
