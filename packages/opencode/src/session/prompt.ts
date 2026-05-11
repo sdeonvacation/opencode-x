@@ -15,6 +15,7 @@ import { Bus } from "../bus"
 import { ProviderTransform } from "../provider/transform"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
+import { Memory } from "../memory/memory"
 import { Plugin } from "../plugin"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
 import { ToolRegistry } from "../tool/registry"
@@ -1388,6 +1389,12 @@ export namespace SessionPrompt {
                 MessageV2.toModelMessagesEffect(msgs, model),
               ])
               const system = [...env, ...(skills ? [skills] : []), ...instructions]
+              if (agent.mode === "primary") {
+                const memory = yield* Effect.promise(() => Memory.list(sessionID)).pipe(
+                  Effect.orElseSucceed(() => [] as Awaited<ReturnType<typeof Memory.list>>),
+                )
+                if (memory.length > 0) system.push("Session Memory:\n" + memory.map((m) => `- ${m.content}`).join("\n"))
+              }
               const format = lastUser.format ?? { type: "text" as const }
               if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
               const result = yield* handle.process({

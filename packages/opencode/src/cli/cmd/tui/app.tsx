@@ -2,6 +2,7 @@ import { onFocus, render, TimeToFirstDraw, useKeyboard, useRenderer, useTerminal
 import { Clipboard } from "@tui/util/clipboard"
 import { createCliRenderer, type CliRendererConfig } from "@opentui/core"
 import { createBtwCommand } from "@tui/command/btw-command"
+import { createMemoryCommands } from "@tui/command/memory-commands"
 import { createClearCommands } from "@tui/command/clear-commands"
 import { createGotoCommand } from "@tui/command/goto-command"
 import { useTerminalTitle } from "@tui/component/terminal-title"
@@ -548,6 +549,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       category: "System",
     },
     createBtwCommand({ dialog, local, toast, sync, sdk, route }),
+    ...createMemoryCommands({ dialog, toast, sdk: { url: sdk.url, fetch: sdk.fetch }, route }),
     {
       title: "Open docs",
       value: "docs.open",

@@ -21,6 +21,7 @@ import { PermissionRoutes } from "./routes/permission"
 import { Snapshot } from "@/snapshot"
 import { ProjectRoutes } from "./routes/project"
 import { SessionRoutes } from "./routes/session"
+import { MemoryRoutes } from "./routes/memory"
 import { PtyRoutes } from "./routes/pty"
 import { McpRoutes } from "./routes/mcp"
 import { FileRoutes } from "./routes/file"
@@ -52,6 +53,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
     .route("/config", ConfigRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/session", SessionRoutes())
+    .route("/session", MemoryRoutes())
     .route("/permission", PermissionRoutes())
     .route("/question", QuestionRoutes())
     .route("/provider", ProviderRoutes())
