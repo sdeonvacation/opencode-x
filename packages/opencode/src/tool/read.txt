@@ -2,7 +2,7 @@ Read a file or directory from the local filesystem. If the path does not exist, 
 
 Usage:
 - The filePath parameter should be an absolute path.
-- By default, this tool returns up to 2000 lines from the start of the file.
+- By default, this tool returns up to 300 lines from the start of the file.
 - The offset parameter is the line number to start from (1-indexed).
 - To read later sections, call this tool again with a larger offset.
 - Use the grep tool to find specific content in large files or files with long lines.
@@ -13,3 +13,4 @@ Usage:
 - Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.
 - Always specify offset and limit when reading a known section to avoid reading the entire file.
 - This tool can read image files and PDFs and return them as file attachments.
+- For files exceeding the default limit, the output shows the first 300 lines + last 50 lines with a gap indicator. Use offset+limit to read specific middle sections.

@@ -13,16 +13,17 @@ import { Instance } from "../project/instance"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { Instruction } from "../session/instruction"
 
-const DEFAULT_READ_LIMIT = 2000
+const DEFAULT_READ_LIMIT = 300
 const MAX_LINE_LENGTH = 2000
 const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`
 const MAX_BYTES = 50 * 1024
 const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`
+const TAIL_LINES = 50
 
 const parameters = z.object({
   filePath: z.string().describe("The absolute path to the file or directory to read"),
   offset: z.coerce.number().describe("The line number to start reading from (1-indexed)").optional(),
-  limit: z.coerce.number().describe("The maximum number of lines to read (defaults to 2000)").optional(),
+  limit: z.coerce.number().describe("The maximum number of lines to read (defaults to 300)").optional(),
 })
 
 export const ReadTool = Tool.defineEffect(
@@ -174,22 +175,41 @@ export const ReadTool = Tool.defineEffect(
         return yield* Effect.fail(new Error(`Cannot read binary file: ${filepath}`))
       }
 
-      const file = yield* Effect.promise(() =>
-        lines(filepath, { limit: params.limit ?? DEFAULT_READ_LIMIT, offset: params.offset ?? 1 }),
-      )
+      const limit = params.limit ?? DEFAULT_READ_LIMIT
+      const offset = params.offset ?? 1
+      const explicit = params.limit !== undefined || params.offset !== undefined
+
+      const file = yield* Effect.promise(() => lines(filepath, { limit, offset }))
       if (file.count < file.offset && !(file.count === 0 && file.offset === 1)) {
         return yield* Effect.fail(
           new Error(`Offset ${file.offset} is out of range for this file (${file.count} lines)`),
         )
       }
 
-      let output = [`<path>${filepath}</path>`, `<type>file</type>`, "<content>" + "\n"].join("\n")
+      // Head+tail: when file is bigger than default limit and caller didn't specify explicit params
+      let tail: string[] | undefined
+      if (!explicit && file.more && file.count > limit && file.count > TAIL_LINES) {
+        const tailResult = yield* Effect.promise(() =>
+          lines(filepath, { limit: TAIL_LINES, offset: file.count - TAIL_LINES + 1 }),
+        )
+        tail = tailResult.raw
+      }
+
+      const meta = `<file_info lines="${file.count}" bytes="${stat.size}"/>`
+      let output = [`<path>${filepath}</path>`, `<type>file</type>`, meta, "<content>" + "\n"].join("\n")
       output += file.raw.map((line, i) => `${i + file.offset}: ${line}`).join("\n")
 
       const last = file.offset + file.raw.length - 1
       const next = last + 1
       const truncated = file.more || file.cut
-      if (file.cut) {
+
+      if (tail) {
+        const gapStart = last + 1
+        const gapEnd = file.count - TAIL_LINES
+        output += `\n\n... (lines ${gapStart}-${gapEnd} omitted — use offset+limit to read specific sections) ...\n\n`
+        output += tail.map((line, i) => `${file.count - TAIL_LINES + 1 + i}: ${line}`).join("\n")
+        output += `\n\n(Showing first ${file.raw.length} + last ${TAIL_LINES} of ${file.count} lines)`
+      } else if (file.cut) {
         output += `\n\n(Output capped at ${MAX_BYTES_LABEL}. Showing lines ${file.offset}-${last}. Use offset=${next} to continue.)`
       } else if (file.more) {
         output += `\n\n(Showing lines ${file.offset}-${last} of ${file.count}. Use offset=${next} to continue.)`
