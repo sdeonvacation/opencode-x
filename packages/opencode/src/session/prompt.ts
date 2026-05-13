@@ -1379,7 +1379,7 @@ export namespace SessionPrompt {
               log.info("compact", { sessionID, before, after: msgs.length })
               const sw = SlidingWindow.getMetrics(sessionID)
               if (sw) {
-                handle.message.compaction = { total: sw.total, sent: sw.sent, msgs: sw.msgs }
+                handle.message.compaction = { total: sw.total, savings: sw.savings, msgs: sw.msgs }
               }
 
               const [skills, env, instructions, modelMsgs] = yield* Effect.all([

@@ -29,25 +29,26 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       return {
         tokens: 0,
         percent: null,
+        sw: null,
       }
     }
 
     const tokens =
       last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
     const model = props.api.state.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
+
+    let sw: { sent: number; total: number; saved: number } | null = null
+    if (last.compaction?.savings && last.compaction.savings > 0) {
+      const sent = last.tokens.input
+      const total = sent + last.compaction.savings
+      sw = { sent, total, saved: Math.round((last.compaction.savings / total) * 100) }
+    }
+
     return {
       tokens,
       percent: model?.limit.context ? Math.round((tokens / model.limit.context) * 100) : null,
+      sw,
     }
-  })
-
-  const sw = createMemo(() => {
-    const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && !!item.compaction)
-    if (!last?.compaction) return null
-    const sent = last.compaction.sent ?? last.compaction.tail ?? last.compaction.budget
-    if (!sent || !last.compaction.total) return null
-    const saved = Math.round(((last.compaction.total - sent) / last.compaction.total) * 100)
-    return { sent, saved }
   })
 
   return (
@@ -57,9 +58,9 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       </text>
       <text fg={theme().textMuted}>{state().tokens.toLocaleString()} tokens</text>
       <text fg={theme().textMuted}>{state().percent ?? 0}% used</text>
-      {sw() && (
+      {state().sw && (
         <text fg={theme().textMuted}>
-          SW: {sw()!.sent.toLocaleString()} sent ({sw()!.saved}% saved)
+          SW: {state().sw!.sent.toLocaleString()} / {state().sw!.total.toLocaleString()} ({state().sw!.saved}% saved)
         </text>
       )}
       <text fg={theme().textMuted}>{money.format(cost())} spent</text>

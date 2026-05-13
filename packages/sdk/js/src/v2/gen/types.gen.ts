@@ -460,6 +460,19 @@ export type EventSessionCompacted = {
   }
 }
 
+export type EventMemoryUpdated = {
+  type: "memory.updated"
+  properties: {
+    sessionID: string
+    entries: Array<{
+      id: string
+      session_id: string
+      content: string
+      position: number
+    }>
+  }
+}
+
 export type EventOrchestrationSpawn = {
   type: "orchestration.spawn"
   properties: {
@@ -681,6 +694,7 @@ export type AssistantMessage = {
   }
   compaction?: {
     total: number
+    savings?: number
     sent?: number
     tail?: number
     budget?: number
@@ -1091,6 +1105,7 @@ export type Event =
   | EventQuestionRejected
   | EventHybridCompressionEligible
   | EventSessionCompacted
+  | EventMemoryUpdated
   | EventOrchestrationSpawn
   | EventOrchestrationSpawnRejected
   | EventOrchestrationComplete
@@ -4405,6 +4420,163 @@ export type PermissionRespondResponses = {
 }
 
 export type PermissionRespondResponse = PermissionRespondResponses[keyof PermissionRespondResponses]
+
+export type SessionMemoryListData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/memory"
+}
+
+export type SessionMemoryListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionMemoryListError = SessionMemoryListErrors[keyof SessionMemoryListErrors]
+
+export type SessionMemoryListResponses = {
+  /**
+   * Memory entries
+   */
+  200: Array<{
+    id: string
+    session_id: string
+    content: string
+    position: number
+  }>
+}
+
+export type SessionMemoryListResponse = SessionMemoryListResponses[keyof SessionMemoryListResponses]
+
+export type SessionMemoryCreateData = {
+  body?: {
+    content: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/memory"
+}
+
+export type SessionMemoryCreateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionMemoryCreateError = SessionMemoryCreateErrors[keyof SessionMemoryCreateErrors]
+
+export type SessionMemoryCreateResponses = {
+  /**
+   * Created memory entry
+   */
+  200: {
+    id: string
+    session_id: string
+    content: string
+    position: number
+  }
+}
+
+export type SessionMemoryCreateResponse = SessionMemoryCreateResponses[keyof SessionMemoryCreateResponses]
+
+export type SessionMemoryDeleteData = {
+  body?: never
+  path: {
+    sessionID: string
+    memoryID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/memory/{memoryID}"
+}
+
+export type SessionMemoryDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionMemoryDeleteError = SessionMemoryDeleteErrors[keyof SessionMemoryDeleteErrors]
+
+export type SessionMemoryDeleteResponses = {
+  /**
+   * Memory entry deleted
+   */
+  200: boolean
+}
+
+export type SessionMemoryDeleteResponse = SessionMemoryDeleteResponses[keyof SessionMemoryDeleteResponses]
+
+export type SessionMemoryUpdateData = {
+  body?: {
+    content: string
+  }
+  path: {
+    sessionID: string
+    memoryID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/memory/{memoryID}"
+}
+
+export type SessionMemoryUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionMemoryUpdateError = SessionMemoryUpdateErrors[keyof SessionMemoryUpdateErrors]
+
+export type SessionMemoryUpdateResponses = {
+  /**
+   * Updated memory entry
+   */
+  200: {
+    id: string
+    session_id: string
+    content: string
+    position: number
+  }
+}
+
+export type SessionMemoryUpdateResponse = SessionMemoryUpdateResponses[keyof SessionMemoryUpdateResponses]
 
 export type PermissionReplyData = {
   body?: {

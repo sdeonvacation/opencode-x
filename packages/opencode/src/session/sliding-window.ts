@@ -22,7 +22,7 @@ export namespace SlidingWindow {
     budget: number
     tail: number
     head: number
-    sent: number
+    savings: number
     msgs: number
     ts: number
   }
@@ -68,7 +68,6 @@ export namespace SlidingWindow {
     }
 
     const size = yield* estimate(split.head, input.model)
-    const sent = yield* estimate(split.tail, input.model)
     if (size < MIN) {
       log.info("skip_small_head", { sessionID: input.sessionID, head: size, min: MIN, total, budget, tail })
       return input.msgs
@@ -81,16 +80,18 @@ export namespace SlidingWindow {
     if (hit && hit.headEndID === headEndID) {
       log.info("cache_hit", { sessionID: input.sessionID, headEndID, total, budget, head: size })
       touch(input.sessionID, hit)
+      const result = [synthetic(hit.summary, input), ...split.tail]
+      const actual = yield* estimate(result, input.model)
       metrics.set(input.sessionID, {
         total,
         budget,
         tail,
         head: size,
-        sent,
+        savings: total - actual,
         msgs: split.tail.length,
         ts: Date.now(),
       })
-      return [synthetic(hit.summary, input), ...split.tail]
+      return result
     }
 
     log.info("cache_miss", { sessionID: input.sessionID, headEndID, total, budget, head: size })
@@ -114,12 +115,14 @@ export namespace SlidingWindow {
     }
 
     store(input.sessionID, { headEndID, summary, ts: Date.now() })
+    const result = [synthetic(summary, input), ...split.tail]
+    const actual = yield* estimate(result, input.model)
     metrics.set(input.sessionID, {
       total,
       budget,
       tail,
       head: size,
-      sent,
+      savings: total - actual,
       msgs: split.tail.length,
       ts: Date.now(),
     })
@@ -131,7 +134,7 @@ export namespace SlidingWindow {
       head: size,
       tail_msgs: split.tail.length,
     })
-    return [synthetic(summary, input), ...split.tail]
+    return result
   })
 
   export function invalidate(sessionID: SessionID) {
