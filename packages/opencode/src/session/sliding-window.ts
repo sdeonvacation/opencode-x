@@ -198,8 +198,7 @@ export namespace SlidingWindow {
       if (!msg) continue
       acc += yield* estimate([msg], model)
       if (acc < budget) continue
-      let cut = i
-      while (cut > 0 && msgs[cut]?.info.role !== "user") cut--
+      const cut = i
       if (cut === 0) return undefined
       const head = msgs.slice(0, cut)
       const tail = msgs.slice(cut)
