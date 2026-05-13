@@ -60,7 +60,7 @@ export namespace SlidingWindow {
     }
 
     const tail = yield* last(input.msgs, input.model)
-    const budget = Math.max(Math.floor(total * (opts?.tail_ratio ?? 0.5)), tail)
+    const budget = Math.min(Math.max(Math.floor(total * (opts?.tail_ratio ?? 0.5)), tail), total - MIN)
     const split = yield* divide(input.msgs, input.model, budget)
     if (!split) {
       log.info("skip_no_split", { sessionID: input.sessionID, total, budget, tail })
