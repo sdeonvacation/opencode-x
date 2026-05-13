@@ -4,6 +4,8 @@ import { useTheme } from "../context/theme"
 import { useDialog } from "@tui/ui/dialog"
 import { useSync } from "@tui/context/sync"
 import { useRoute } from "@tui/context/route"
+import { Clipboard } from "@tui/util/clipboard"
+import { useToast } from "@tui/ui/toast"
 import { For, Match, Switch, Show, createMemo } from "solid-js"
 
 export type DialogStatusProps = {}
@@ -13,6 +15,7 @@ export function DialogStatus() {
   const { theme } = useTheme()
   const dialog = useDialog()
   const route = useRoute()
+  const toast = useToast()
   const sid = createMemo(() => (route.data.type === "session" ? route.data.sessionID : undefined))
 
   const enabledFormatters = createMemo(() => sync.data.formatter.filter((f) => f.enabled))
@@ -57,7 +60,16 @@ export function DialogStatus() {
         {(id) => (
           <box flexDirection="row" gap={1}>
             <text fg={theme.text}>Session</text>
-            <text fg={theme.textMuted}>{id()}</text>
+            <text
+              fg={theme.textMuted}
+              onMouseUp={() =>
+                Clipboard.copy(id())
+                  .then(() => toast.show({ message: "Session ID copied", variant: "info" }))
+                  .catch(toast.error)
+              }
+            >
+              {id()}
+            </text>
           </box>
         )}
       </Show>
