@@ -20,7 +20,6 @@ import {
   Show,
   on,
 } from "solid-js"
-import { fileURLToPath } from "bun"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { Flag } from "@/flag/flag"
 import { DialogProvider, useDialog, type DialogContext } from "@tui/ui/dialog"
@@ -422,40 +421,6 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       onSelect: () => {
         dialog.replace(() => <DialogMcp />)
-      },
-    },
-    {
-      title: "List plugins",
-      value: "plugin.list",
-      category: "Plugin",
-      slash: {
-        name: "plugins",
-      },
-      onSelect: () => {
-        const list = sync.data.config.plugin ?? []
-        if (list.length === 0) {
-          toast.show({ title: "Plugins", message: "No plugins loaded", variant: "info", duration: 8000 })
-          dialog.clear()
-          return
-        }
-        const names = list.map((item) => {
-          const spec = typeof item === "string" ? item : item[0]
-          if (spec.startsWith("file://")) {
-            const parts = fileURLToPath(spec).split("/")
-            const filename = parts.pop() || spec
-            if (!filename.includes(".")) return filename
-            const base = filename.split(".")[0]
-            if (base === "index") return parts.pop() || base
-            return base
-          }
-          const idx = spec.lastIndexOf("@")
-          return idx <= 0 ? spec : spec.substring(0, idx)
-        })
-        const shown = names.slice(0, 10)
-        const rest = names.length - shown.length
-        const message = shown.join("\n") + (rest > 0 ? `\n... and ${rest} more` : "")
-        toast.show({ title: "Plugins", message, variant: "info", duration: 8000 })
-        dialog.clear()
       },
     },
     {
