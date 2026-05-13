@@ -12,6 +12,7 @@ import { Flag } from "@/flag/flag"
 import { writeHeapSnapshot } from "node:v8"
 import { Heap } from "@/cli/heap"
 import { SessionStatus } from "@/session/status"
+import { LSP } from "@/lsp"
 
 // Wire up the busy-check so Instance.waitIdle can poll session status
 // without creating a circular dependency in instance.ts itself.
@@ -44,6 +45,11 @@ process.on("uncaughtException", (e) => {
   Log.Default.error("exception", {
     e: e instanceof Error ? e.message : e,
   })
+})
+
+// Backstop: kill any surviving LSP processes on worker exit
+process.on("exit", () => {
+  LSP.killAll()
 })
 
 // Subscribe to global events and forward them via RPC

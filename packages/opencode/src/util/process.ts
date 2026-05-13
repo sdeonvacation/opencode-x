@@ -17,6 +17,7 @@ export namespace Process {
     abort?: AbortSignal
     kill?: NodeJS.Signals | number
     timeout?: number
+    detached?: boolean
   }
 
   export interface RunOptions extends Omit<Options, "stdout" | "stderr"> {
@@ -63,6 +64,7 @@ export namespace Process {
     const proc = launch(cmd[0], cmd.slice(1), {
       cwd: opts.cwd,
       shell: opts.shell,
+      detached: opts.detached,
       env: opts.env === null ? {} : opts.env ? { ...process.env, ...opts.env } : undefined,
       stdio: [opts.stdin ?? "ignore", opts.stdout ?? "ignore", opts.stderr ?? "ignore"],
       windowsHide: process.platform === "win32",
@@ -155,10 +157,32 @@ export namespace Process {
       })
       if (out.code !== 0) proc.kill()
     } else {
-      proc.kill()
+      // Kill process group to catch child processes (e.g. Java sub-workers)
+      if (proc.pid) {
+        try {
+          process.kill(-proc.pid, "SIGTERM")
+        } catch {
+          proc.kill()
+        }
+      } else {
+        proc.kill()
+      }
     }
 
-    const timer = timeout > 0 ? setTimeout(() => proc.kill("SIGKILL"), timeout) : undefined
+    const timer =
+      timeout > 0
+        ? setTimeout(() => {
+            if (proc.pid) {
+              try {
+                process.kill(-proc.pid, "SIGKILL")
+              } catch {
+                proc.kill("SIGKILL")
+              }
+            } else {
+              proc.kill("SIGKILL")
+            }
+          }, timeout)
+        : undefined
     await exited
     if (timer) clearTimeout(timer)
   }

@@ -19,6 +19,22 @@ import { SessionStatus } from "@/session/status"
 export namespace LSP {
   const log = Log.create({ service: "lsp" })
 
+  // Backstop: track all spawned LSP PIDs for emergency cleanup
+  const pids = new Set<number>()
+
+  export function killAll() {
+    for (const pid of pids) {
+      try {
+        process.kill(-pid, "SIGKILL")
+      } catch {
+        try {
+          process.kill(pid, "SIGKILL")
+        } catch {}
+      }
+    }
+    pids.clear()
+  }
+
   export const Event = {
     Updated: BusEvent.define("lsp.updated", z.object({})),
   }
@@ -138,6 +154,7 @@ export namespace LSP {
     servers: Record<string, LSPServer.Info>
     broken: Set<string>
     spawning: Map<string, Promise<LSPClient.Info | undefined>>
+    disposing: boolean
   }
 
   export interface Interface {
@@ -213,10 +230,24 @@ export namespace LSP {
             servers,
             broken: new Set(),
             spawning: new Map(),
+            disposing: false,
           }
 
           yield* Effect.addFinalizer(() =>
             Effect.promise(async () => {
+              s.disposing = true
+              // Wait for in-flight spawns to settle so their processes don't leak
+              if (s.spawning.size > 0) {
+                const inflight = [...s.spawning.values()]
+                const spawned = await Promise.allSettled(inflight)
+                // Any successfully spawned clients not yet in s.clients need shutdown too
+                for (const result of spawned) {
+                  if (result.status !== "fulfilled" || !result.value) continue
+                  if (!s.clients.includes(result.value)) {
+                    s.clients.push(result.value)
+                  }
+                }
+              }
               const results = await Promise.allSettled(s.clients.map((client) => client.shutdown()))
               results.forEach((result, index) => {
                 if (result.status === "fulfilled") return
@@ -274,6 +305,7 @@ export namespace LSP {
       const getClients = Effect.fnUntraced(function* (file: string) {
         if (!Instance.containsPath(file)) return [] as LSPClient.Info[]
         const s = yield* InstanceState.get(state)
+        if (s.disposing) return [] as LSPClient.Info[]
         return yield* Effect.promise(async () => {
           const extension = path.parse(file).ext || file
           const result: LSPClient.Info[] = []
@@ -292,6 +324,11 @@ export namespace LSP {
               })
 
             if (!handle) return undefined
+            if (handle.process.pid) {
+              const pid = handle.process.pid
+              pids.add(pid)
+              handle.process.once("exit", () => pids.delete(pid))
+            }
             log.info("spawned lsp server", { serverID: server.id, root })
 
             const client = await LSPClient.create({
