@@ -24,7 +24,9 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const cost = createMemo(() => messageCost() + clearedCost())
 
   const state = createMemo(() => {
-    const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.input > 0)
+    const last = msg().findLast(
+      (item): item is AssistantMessage => item.role === "assistant" && !item.summary && !!item.time.completed,
+    )
     if (!last) {
       return {
         tokens: 0,
@@ -34,13 +36,13 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
     }
 
     const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
+      last.tokens.input + last.tokens.cache.read + last.tokens.cache.write + last.tokens.output + last.tokens.reasoning
     const model = props.api.state.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
 
     let sw: { sent: number; total: number; saved: number } | null = null
     if (last.compaction?.savings && last.compaction.savings > 0) {
-      const sent = last.tokens.input
-      const total = sent + last.compaction.savings
+      const sent = last.compaction.total - last.compaction.savings
+      const total = last.compaction.total
       sw = { sent, total, saved: Math.round((last.compaction.savings / total) * 100) }
     }
 
