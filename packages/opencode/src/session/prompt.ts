@@ -1375,7 +1375,17 @@ export namespace SessionPrompt {
               yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
               const cfg = yield* config.get()
               const before = msgs.length
-              msgs = yield* SlidingWindow.compact({ msgs, model, provider, cfg, sessionID, agent })
+              msgs = yield* SlidingWindow.compact({
+                msgs,
+                model,
+                provider,
+                cfg,
+                sessionID,
+                agent,
+                hint: lastFinished?.tokens
+                  ? lastFinished.tokens.input + lastFinished.tokens.cache.read + lastFinished.tokens.cache.write
+                  : undefined,
+              })
               log.info("compact", { sessionID, before, after: msgs.length })
               const sw = SlidingWindow.getMetrics(sessionID)
               if (sw) {

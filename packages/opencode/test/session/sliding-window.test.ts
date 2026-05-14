@@ -174,7 +174,7 @@ function input(
   sessionID: SessionID,
   msgs: MessageV2.WithParts[],
   mode: "primary" | "subagent" | "all" = "primary",
-  opts?: { provider?: Provider.Interface; threshold?: number },
+  opts?: { provider?: Provider.Interface; threshold?: number; hint?: number },
 ) {
   const svc = opts?.provider ?? provider()
   return {
@@ -192,6 +192,7 @@ function input(
     }),
     sessionID,
     agent: { name: mode === "primary" ? "build" : "general", mode } as const,
+    hint: opts?.hint,
   }
 }
 
@@ -372,5 +373,71 @@ describe("sliding-window", () => {
     await compact(input(sessionID, msgs, "primary", { threshold: 1_000_000 }))
 
     expect(SlidingWindow.getMetrics(sessionID)).toBeUndefined()
+  })
+
+  test("hint overrides estimate when hint exceeds threshold", async () => {
+    // msgs are small (below threshold), but hint reports large real token count
+    const sessionID = SessionID.make("session_sw_hint_triggers")
+    const first = user(sessionID, 4_000)
+    const second = assistant(sessionID, first.info.id, 4_000)
+    const third = user(sessionID, 4_000)
+    const fourth = assistant(sessionID, third.info.id, 4_000)
+    const fifth = user(sessionID, 20_000)
+    const sixth = assistant(sessionID, fifth.info.id, 4_000)
+    const msgs = [first, second, third, fourth, fifth, sixth]
+    state.text = "hint-triggered"
+
+    // threshold=50_000, estimated chars/4 ~10k (below threshold), but hint=60_000 forces compaction
+    const result = await compact(input(sessionID, msgs, "primary", { threshold: 50_000, hint: 60_000 }))
+
+    expect(state.calls).toBe(1)
+    expect(result[0]?.parts[0]).toMatchObject({
+      type: "text",
+      synthetic: true,
+      text: "<context-summary>\nhint-triggered\n</context-summary>",
+    })
+  })
+
+  test("hint below threshold still skips when both hint and estimate are below", async () => {
+    const sessionID = SessionID.make("session_sw_hint_skip")
+    const { msgs } = history(sessionID)
+
+    // threshold=1_000_000, hint=100 — both below threshold
+    const result = await compact(input(sessionID, msgs, "primary", { threshold: 1_000_000, hint: 100 }))
+
+    expect(result).toBe(msgs)
+    expect(state.calls).toBe(0)
+  })
+
+  test("hint undefined falls back to estimate", async () => {
+    const sessionID = SessionID.make("session_sw_hint_undefined")
+    const { msgs } = history(sessionID)
+    state.text = "no-hint"
+
+    // no hint — behaves same as before (estimate drives threshold)
+    const result = await compact(input(sessionID, msgs, "primary", { threshold: 10_000 }))
+
+    expect(state.calls).toBe(1)
+    expect(result[0]?.parts[0]).toMatchObject({
+      type: "text",
+      synthetic: true,
+      text: "<context-summary>\nno-hint\n</context-summary>",
+    })
+  })
+
+  test("hint smaller than estimate uses estimate (Math.max)", async () => {
+    const sessionID = SessionID.make("session_sw_hint_smaller")
+    const { msgs } = history(sessionID)
+    state.text = "estimate-wins"
+
+    // hint=1 is tiny, estimate from large msgs should still exceed threshold=10_000
+    const result = await compact(input(sessionID, msgs, "primary", { threshold: 10_000, hint: 1 }))
+
+    expect(state.calls).toBe(1)
+    expect(result[0]?.parts[0]).toMatchObject({
+      type: "text",
+      synthetic: true,
+      text: "<context-summary>\nestimate-wins\n</context-summary>",
+    })
   })
 })

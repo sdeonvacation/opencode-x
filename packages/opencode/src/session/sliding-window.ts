@@ -41,6 +41,7 @@ export namespace SlidingWindow {
     cfg: Config.Info
     sessionID: SessionID
     agent: { name: string; mode: "primary" | "subagent" | "all" }
+    hint?: number
   }
 
   type Split = {
@@ -51,16 +52,17 @@ export namespace SlidingWindow {
   export const compact = Effect.fn("SlidingWindow.compact")(function* (input: CompactInput) {
     if (!should(input)) return input.msgs
 
-    const total = yield* estimate(input.msgs, input.model)
+    const estimated = yield* estimate(input.msgs, input.model)
+    const total = input.hint !== undefined ? Math.max(input.hint, estimated) : estimated
     const opts = input.cfg.compaction?.sliding_window
     const threshold = opts?.threshold ?? 50_000
     if (total < threshold) {
-      log.info("skip_below_threshold", { sessionID: input.sessionID, total, threshold })
+      log.info("skip_below_threshold", { sessionID: input.sessionID, total, estimated, hint: input.hint, threshold })
       return input.msgs
     }
 
     const tail = yield* last(input.msgs, input.model)
-    const budget = Math.min(Math.max(Math.floor(total * (opts?.tail_ratio ?? 0.5)), tail), total - MIN)
+    const budget = Math.min(Math.max(Math.floor(estimated * (opts?.tail_ratio ?? 0.5)), tail), estimated - MIN)
     const split = yield* divide(input.msgs, input.model, budget)
     if (!split) {
       log.info("skip_no_split", { sessionID: input.sessionID, total, budget, tail })
@@ -129,6 +131,8 @@ export namespace SlidingWindow {
     log.info("compacted", {
       sessionID: input.sessionID,
       total,
+      estimated,
+      hint: input.hint,
       budget,
       tail,
       head: size,
