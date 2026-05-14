@@ -28,6 +28,7 @@ import { Flag } from "@/flag/flag"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
+  const DOOM_LOOP_HARD_CAP = 3
   const log = Log.create({ service: "session.processor" })
 
   export type Result = "compact" | "stop" | "continue"
@@ -81,6 +82,7 @@ export namespace SessionProcessor {
     compressionThreshold: number
     compressionTimeout: number
     compressionThresholds?: CompressionThresholds
+    doom: Map<string, number>
   }
 
   type StreamEvent = Event
@@ -139,6 +141,7 @@ export namespace SessionProcessor {
           compressionThreshold: cfg.hybrid?.compression_threshold ?? 10,
           compressionTimeout: cfg.hybrid?.compression_timeout_ms ?? 5000,
           compressionThresholds: cfg.hybrid?.compression_thresholds,
+          doom: new Map(),
         }
         let aborted = false
 
@@ -382,6 +385,20 @@ export namespace SessionProcessor {
                     JSON.stringify(part.state.input) === JSON.stringify(value.input),
                 )
               ) {
+                return
+              }
+
+              const key = value.toolName + JSON.stringify(value.input)
+              const count = (ctx.doom.get(key) ?? 0) + 1
+              ctx.doom.set(key, count)
+
+              if (count > DOOM_LOOP_HARD_CAP) {
+                yield* failToolCall(
+                  value.toolCallId,
+                  `Doom loop detected: tool '${value.toolName}' called ${count * DOOM_LOOP_THRESHOLD} times with identical input. Aborting.`,
+                )
+                ctx.shouldBreak = true
+                ctx.blocked = true
                 return
               }
 
