@@ -766,6 +766,27 @@ export namespace Config {
       tips_toggle: z.string().optional().default("<leader>h").describe("Toggle tips on home screen"),
       plugin_manager: z.string().optional().default("none").describe("Open plugin manager dialog"),
       display_thinking: z.string().optional().default("none").describe("Toggle thinking blocks visibility"),
+      session_pin_toggle: z.string().optional().default("ctrl+f").describe("Pin or unpin session in the session list"),
+      session_toggle_recent: z
+        .string()
+        .optional()
+        .default("ctrl+h")
+        .describe("Show or hide session in the Recent group"),
+      session_cycle_recent: z.string().optional().default("<leader>]").describe("Cycle to the previous recent session"),
+      session_cycle_recent_reverse: z
+        .string()
+        .optional()
+        .default("<leader>[")
+        .describe("Cycle to the next recent session"),
+      session_quick_switch_1: z.string().optional().default("<leader>1").describe("Switch to session in quick slot 1"),
+      session_quick_switch_2: z.string().optional().default("<leader>2").describe("Switch to session in quick slot 2"),
+      session_quick_switch_3: z.string().optional().default("<leader>3").describe("Switch to session in quick slot 3"),
+      session_quick_switch_4: z.string().optional().default("<leader>4").describe("Switch to session in quick slot 4"),
+      session_quick_switch_5: z.string().optional().default("<leader>5").describe("Switch to session in quick slot 5"),
+      session_quick_switch_6: z.string().optional().default("<leader>6").describe("Switch to session in quick slot 6"),
+      session_quick_switch_7: z.string().optional().default("<leader>7").describe("Switch to session in quick slot 7"),
+      session_quick_switch_8: z.string().optional().default("<leader>8").describe("Switch to session in quick slot 8"),
+      session_quick_switch_9: z.string().optional().default("<leader>9").describe("Switch to session in quick slot 9"),
     })
     .strict()
     .meta({

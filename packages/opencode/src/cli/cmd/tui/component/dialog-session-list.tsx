@@ -15,6 +15,7 @@ import { createDebouncedSignal } from "../util/signal"
 import { useToast } from "../ui/toast"
 import { DialogWorkspaceCreate, openWorkspaceSession } from "./dialog-workspace-create"
 import { Spinner } from "./spinner"
+import { useLocal } from "../context/local"
 
 type WorkspaceStatus = "connected" | "connecting" | "disconnected" | "error"
 
@@ -27,6 +28,8 @@ export function DialogSessionList() {
   const { theme } = useTheme()
   const sdk = useSDK()
   const toast = useToast()
+  const local = useLocal()
+  const RECENT_LIMIT = 5
   const [toDelete, setToDelete] = createSignal<string>()
   const [search, setSearch] = createDebouncedSignal("", 150)
 
@@ -57,69 +60,104 @@ export function DialogSessionList() {
   }
 
   const options = createMemo(() => {
+    const enabled = Flag.OPENCODE_EXPERIMENTAL_SESSION_SWITCHING
     const today = new Date().toDateString()
-    return sessions()
-      .filter((x) => x.parentID === undefined)
+    const rootSessions = sessions().filter((x) => x.parentID === undefined)
+    const sessionMap = new Map(rootSessions.map((x) => [x.id, x]))
+
+    const displayOrder = rootSessions
       .toSorted((a, b) => {
         const updatedDay = new Date(b.time.updated).setHours(0, 0, 0, 0) - new Date(a.time.updated).setHours(0, 0, 0, 0)
         if (updatedDay !== 0) return updatedDay
         return b.time.created - a.time.created
       })
-      .map((x) => {
-        const workspace = x.workspaceID ? project.workspace.get(x.workspaceID) : undefined
+      .map((x) => x.id)
 
-        let workspaceStatus: WorkspaceStatus | null = null
+    const dismissed = enabled ? new Set(local.session.dismissedRecent()) : new Set<string>()
+    const pinned: string[] = enabled ? local.session.pinned().filter((id: string) => sessionMap.has(id)) : []
+    const pinnedSet = new Set(pinned)
+    const slotByID = enabled
+      ? new Map<string, number>(local.session.slots().map((id: string, i: number) => [id, i + 1]))
+      : new Map<string, number>()
+
+    const recent = enabled
+      ? displayOrder.filter((id) => !pinnedSet.has(id) && !dismissed.has(id)).slice(0, RECENT_LIMIT)
+      : []
+    const recentSet = new Set(recent)
+
+    function dateCategory(id: string) {
+      const x = sessionMap.get(id)
+      if (!x) return ""
+      const date = new Date(x.time.updated)
+      const cat = date.toDateString()
+      return cat === today ? "Today" : cat
+    }
+
+    function buildOption(id: string, category: string) {
+      const x = sessionMap.get(id)
+      if (!x) return undefined
+      const workspace = x.workspaceID ? project.workspace.get(x.workspaceID) : undefined
+
+      let workspaceStatus: WorkspaceStatus | null = null
+      if (x.workspaceID) {
+        workspaceStatus = project.workspace.status(x.workspaceID) || "error"
+      }
+
+      let footer = ""
+      if (Flag.OPENCODE_EXPERIMENTAL_WORKSPACES) {
         if (x.workspaceID) {
-          workspaceStatus = project.workspace.status(x.workspaceID) || "error"
-        }
-
-        let footer = ""
-        if (Flag.OPENCODE_EXPERIMENTAL_WORKSPACES) {
-          if (x.workspaceID) {
-            let desc = "unknown"
-            if (workspace) {
-              desc = `${workspace.type}: ${workspace.name}`
-            }
-
-            footer = (
-              <>
-                {desc}{" "}
-                <span
-                  style={{
-                    fg:
-                      workspaceStatus === "error"
-                        ? theme.error
-                        : workspaceStatus === "disconnected"
-                          ? theme.textMuted
-                          : theme.success,
-                  }}
-                >
-                  ■
-                </span>
-              </>
-            )
+          let desc = "unknown"
+          if (workspace) {
+            desc = `${workspace.type}: ${workspace.name}`
           }
-        } else {
-          footer = Locale.time(x.time.updated)
+          footer = (
+            <>
+              {desc}{" "}
+              <span
+                style={{
+                  fg:
+                    workspaceStatus === "error"
+                      ? theme.error
+                      : workspaceStatus === "disconnected"
+                        ? theme.textMuted
+                        : theme.success,
+                }}
+              >
+                ■
+              </span>
+            </>
+          )
         }
+      } else {
+        footer = Locale.time(x.time.updated)
+      }
 
-        const date = new Date(x.time.updated)
-        let category = date.toDateString()
-        if (category === today) {
-          category = "Today"
-        }
-        const isDeleting = toDelete() === x.id
-        const status = sync.data.session_status?.[x.id]
-        const isWorking = status?.type === "busy"
-        return {
-          title: isDeleting ? `Press ${keybind.print("session_delete")} again to confirm` : x.title,
-          bg: isDeleting ? theme.error : undefined,
-          value: x.id,
-          category,
-          footer,
-          gutter: isWorking ? <Spinner /> : undefined,
-        }
-      })
+      const isDeleting = toDelete() === x.id
+      const status = sync.data.session_status?.[x.id]
+      const isWorking = status?.type === "busy"
+      const slot = slotByID.get(x.id)
+      const gutter = isWorking ? <Spinner /> : slot !== undefined ? <text fg={theme.accent}>{slot}</text> : undefined
+      return {
+        title: isDeleting ? `Press ${keybind.print("session_delete")} again to confirm` : x.title,
+        bg: isDeleting ? theme.error : undefined,
+        value: x.id,
+        category,
+        footer,
+        gutter,
+      }
+    }
+
+    if (!enabled) {
+      return displayOrder.map((id) => buildOption(id, dateCategory(id))).filter((x) => x !== undefined)
+    }
+
+    const remaining = displayOrder.filter((id) => !pinnedSet.has(id) && !recentSet.has(id))
+
+    return [
+      ...pinned.map((id) => buildOption(id, "Pinned")),
+      ...recent.map((id) => buildOption(id, "Recent")),
+      ...remaining.map((id) => buildOption(id, dateCategory(id))),
+    ].filter((x) => x !== undefined)
   })
 
   onMount(() => {
@@ -174,6 +212,32 @@ export function DialogSessionList() {
             createWorkspace()
           },
         },
+        ...(Flag.OPENCODE_EXPERIMENTAL_SESSION_SWITCHING
+          ? [
+              {
+                keybind: keybind.all.session_pin_toggle?.[0],
+                title: "pin/unpin",
+                onTrigger: (option: { value: string }) => {
+                  local.session.togglePin(option.value)
+                },
+              },
+              {
+                keybind: keybind.all.session_toggle_recent?.[0],
+                title: "toggle recent",
+                onTrigger: (option: { value: string }) => {
+                  if (local.session.isPinned(option.value)) {
+                    toast.show({
+                      variant: "info",
+                      message: "Unpin the session first to toggle it in Recent",
+                      duration: 3000,
+                    })
+                    return
+                  }
+                  local.session.toggleRecent(option.value)
+                },
+              },
+            ]
+          : []),
       ]}
     />
   )
