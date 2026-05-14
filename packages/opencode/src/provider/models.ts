@@ -28,11 +28,23 @@ export namespace ModelsDev {
     z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(JsonValue), z.record(z.string(), JsonValue)]),
   )
 
+  const CostTier = z.object({
+    input: z.number(),
+    output: z.number(),
+    cache_read: z.number().optional(),
+    cache_write: z.number().optional(),
+    tier: z.object({
+      type: z.literal("context"),
+      size: z.number(),
+    }),
+  })
+
   const Cost = z.object({
     input: z.number(),
     output: z.number(),
     cache_read: z.number().optional(),
     cache_write: z.number().optional(),
+    tiers: z.array(CostTier).optional(),
     context_over_200k: z
       .object({
         input: z.number(),

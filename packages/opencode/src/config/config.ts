@@ -816,6 +816,7 @@ export namespace Config {
           output: z.number(),
           cache_read: z.number().optional(),
           cache_write: z.number().optional(),
+          tiers: z.array(z.any()).optional(),
           context_over_200k: z
             .object({
               input: z.number(),
@@ -837,7 +838,7 @@ export namespace Config {
           output: z.array(z.enum(["text", "audio", "image", "video", "pdf"])),
         })
         .optional(),
-      experimental: z.boolean().optional(),
+      experimental: z.any().optional(),
       status: z.enum(["alpha", "beta", "deprecated"]).optional(),
       provider: z.object({ npm: z.string().optional(), api: z.string().optional() }).optional(),
       options: z.record(z.string(), z.any()),

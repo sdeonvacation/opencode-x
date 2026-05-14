@@ -1780,4 +1780,83 @@ describe("session.getUsage", () => {
     expect(result.tokens.cache.read).toBe(200)
     expect(result.tokens.cache.write).toBe(300)
   })
+
+  test("uses matching context cost tier before over-200k fallback", () => {
+    const model = createModel({
+      context: 1_000_000,
+      output: 32_000,
+      cost: {
+        input: 1,
+        output: 2,
+        cache: { read: 0.1, write: 0.5 },
+        tiers: [
+          {
+            input: 3,
+            output: 4,
+            cache: { read: 0.3, write: 1.5 },
+            tier: { type: "context", size: 200_000 },
+          },
+          {
+            input: 5,
+            output: 6,
+            cache: { read: 0.5, write: 2.5 },
+            tier: { type: "context", size: 500_000 },
+          },
+        ],
+        experimentalOver200K: {
+          input: 100,
+          output: 100,
+          cache: { read: 100, write: 100 },
+        },
+      },
+    })
+    const result = Session.getUsage({
+      model,
+      usage: {
+        inputTokens: 650_000,
+        outputTokens: 100_000,
+        totalTokens: 750_000,
+        cachedInputTokens: 100_000,
+      },
+    })
+
+    expect(result.tokens.input).toBe(550_000)
+    expect(result.cost).toBe(2.75 + 0.6 + 0.05)
+  })
+
+  test("falls back to over-200k pricing when no cost tier matches", () => {
+    const model = createModel({
+      context: 1_000_000,
+      output: 32_000,
+      cost: {
+        input: 1,
+        output: 2,
+        cache: { read: 0.1, write: 0.5 },
+        tiers: [
+          {
+            input: 5,
+            output: 6,
+            cache: { read: 0.5, write: 2.5 },
+            tier: { type: "context", size: 500_000 },
+          },
+        ],
+        experimentalOver200K: {
+          input: 3,
+          output: 4,
+          cache: { read: 0.3, write: 1.5 },
+        },
+      },
+    })
+    const result = Session.getUsage({
+      model,
+      usage: {
+        inputTokens: 300_000,
+        outputTokens: 100_000,
+        totalTokens: 400_000,
+      },
+    })
+
+    expect(result.tokens.input).toBe(300_000)
+    expect(result.cost).toBe((300_000 * 3) / 1_000_000 + (100_000 * 4) / 1_000_000)
+  })
 })

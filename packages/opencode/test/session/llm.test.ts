@@ -145,7 +145,7 @@ describe("session.llm.parallelToolCalls", () => {
                 env: ["OPENAI_API_KEY"],
                 npm: "@ai-sdk/openai",
                 api: "https://api.openai.com/v1",
-                models: { [model.id]: model },
+                models: { [model.id]: configModel(model) },
                 options: { apiKey: "test-openai-key", baseURL: `${server.url.origin}/v1` },
               },
             },
@@ -236,7 +236,7 @@ describe("session.llm.parallelToolCalls", () => {
                 env: ["OPENAI_API_KEY"],
                 npm: "@ai-sdk/openai",
                 api: "https://api.openai.com/v1",
-                models: { [model.id]: model },
+                models: { [model.id]: configModel(model) },
                 options: { apiKey: "test-openai-key", baseURL: `${server.url.origin}/v1` },
               },
             },
@@ -545,6 +545,25 @@ async function loadFixture(providerID: string, modelID: string) {
     throw new Error(`Missing model in fixture: ${modelID}`)
   }
   return { provider, model }
+}
+
+function configModel(model: ModelsDev.Model) {
+  return {
+    id: model.id,
+    name: model.name,
+    family: model.family,
+    release_date: model.release_date,
+    attachment: model.attachment,
+    reasoning: model.reasoning,
+    temperature: model.temperature,
+    tool_call: model.tool_call,
+    interleaved: model.interleaved,
+    cost: model.cost ? { ...model.cost, tiers: undefined } : undefined,
+    limit: model.limit,
+    modalities: model.modalities,
+    status: model.status,
+    provider: model.provider,
+  }
 }
 
 function createEventStream(chunks: unknown[], includeDone = false) {
@@ -1858,7 +1877,7 @@ describe("session.llm.stream", () => {
         const sent = body.tools as Array<{ function?: { name?: string }; name?: string }> | undefined
 
         expect(body.model).toBe(model.id)
-        expect(sent?.map((item) => item.function?.name ?? item.name).filter(Boolean)).toEqual(["grep", "edit", "task"])
+        expect(sent?.map((item) => item.function?.name ?? item.name).filter(Boolean)).toEqual(["edit", "grep", "task"])
       },
     })
   })

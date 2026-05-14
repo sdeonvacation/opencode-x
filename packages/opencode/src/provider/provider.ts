@@ -863,6 +863,22 @@ export namespace Provider {
           read: z.number(),
           write: z.number(),
         }),
+        tiers: z
+          .array(
+            z.object({
+              input: z.number(),
+              output: z.number(),
+              cache: z.object({
+                read: z.number(),
+                write: z.number(),
+              }),
+              tier: z.object({
+                type: z.literal("context"),
+                size: z.number(),
+              }),
+            }),
+          )
+          .optional(),
         experimentalOver200K: z
           .object({
             input: z.number(),
@@ -936,6 +952,17 @@ export namespace Provider {
         read: c?.cache_read ?? 0,
         write: c?.cache_write ?? 0,
       },
+    }
+    if (c?.tiers) {
+      result.tiers = c.tiers.map((item) => ({
+        input: item.input,
+        output: item.output,
+        cache: {
+          read: item.cache_read ?? 0,
+          write: item.cache_write ?? 0,
+        },
+        tier: item.tier,
+      }))
     }
     if (c?.context_over_200k) {
       result.experimentalOver200K = {
