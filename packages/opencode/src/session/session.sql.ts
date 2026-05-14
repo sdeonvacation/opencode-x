@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, primaryKey } from "drizzle-orm/sqlite-core"
+import { sqliteTable, text, integer, real, index, primaryKey } from "drizzle-orm/sqlite-core"
 import { ProjectTable } from "../project/project.sql"
 import type { MessageV2 } from "./message-v2"
 import type { Snapshot } from "../snapshot"
@@ -35,6 +35,12 @@ export const SessionTable = sqliteTable(
     ...Timestamps,
     time_compacting: integer(),
     time_archived: integer(),
+    cost: real().notNull().default(0),
+    tokens_input: integer().notNull().default(0),
+    tokens_output: integer().notNull().default(0),
+    tokens_reasoning: integer().notNull().default(0),
+    tokens_cache_read: integer().notNull().default(0),
+    tokens_cache_write: integer().notNull().default(0),
   },
   (table) => [
     index("session_project_idx").on(table.project_id),

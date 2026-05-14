@@ -2550,6 +2550,9 @@
                   "title": {
                     "type": "string"
                   },
+                  "permission": {
+                    "$ref": "#/components/schemas/PermissionRuleset"
+                  },
                   "time": {
                     "type": "object",
                     "properties": {
@@ -3907,6 +3910,134 @@
         ]
       }
     },
+    "/session/{sessionID}/complete": {
+      "post": {
+        "operationId": "session.complete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Complete message",
+        "description": "Create and complete a message directly without agent loop overhead.",
+        "responses": {
+          "200": {
+            "description": "Created message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "info": {
+                      "$ref": "#/components/schemas/AssistantMessage"
+                    },
+                    "parts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Part"
+                      }
+                    }
+                  },
+                  "required": ["info", "parts"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "providerID": {
+                        "type": "string"
+                      },
+                      "modelID": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["providerID", "modelID"]
+                  },
+                  "small": {
+                    "type": "boolean"
+                  },
+                  "parts": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/TextPartInput"
+                        },
+                        {
+                          "$ref": "#/components/schemas/FilePartInput"
+                        },
+                        {
+                          "$ref": "#/components/schemas/AgentPartInput"
+                        },
+                        {
+                          "$ref": "#/components/schemas/SubtaskPartInput"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": ["parts"]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.complete({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/session/{sessionID}/prompt_async": {
       "post": {
         "operationId": "session.prompt_async",
@@ -4556,6 +4687,387 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.permission.respond({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/memory": {
+      "get": {
+        "operationId": "session.memory.list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "List memory entries",
+        "description": "Retrieve all memory entries associated with a specific session.",
+        "responses": {
+          "200": {
+            "description": "Memory entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "session_id": {
+                        "type": "string",
+                        "pattern": "^ses.*"
+                      },
+                      "content": {
+                        "type": "string"
+                      },
+                      "position": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": ["id", "session_id", "content", "position"]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.memory.list({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "operationId": "session.memory.create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Create memory entry",
+        "description": "Create a new memory entry for a specific session.",
+        "responses": {
+          "200": {
+            "description": "Created memory entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "session_id": {
+                      "type": "string",
+                      "pattern": "^ses.*"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["id", "session_id", "content", "position"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["content"]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.memory.create({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/memory/{memoryID}": {
+      "put": {
+        "operationId": "session.memory.update",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "memoryID",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Update memory entry",
+        "description": "Update the content of an existing memory entry.",
+        "responses": {
+          "200": {
+            "description": "Updated memory entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "session_id": {
+                      "type": "string",
+                      "pattern": "^ses.*"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["id", "session_id", "content", "position"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["content"]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.memory.update({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "session.memory.delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "memoryID",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Delete memory entry",
+        "description": "Delete a specific memory entry from a session.",
+        "responses": {
+          "200": {
+            "description": "Memory entry deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.memory.delete({\n  ...\n})"
           }
         ]
       }
@@ -7402,6 +7914,92 @@
         },
         "required": ["type", "properties"]
       },
+      "SessionStatus": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "idle"
+              }
+            },
+            "required": ["type"]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "retry"
+              },
+              "attempt": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              },
+              "next": {
+                "type": "number"
+              }
+            },
+            "required": ["type", "attempt", "message", "next"]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "busy"
+              }
+            },
+            "required": ["type"]
+          }
+        ]
+      },
+      "Event.session.status": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "session.status"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "status": {
+                "$ref": "#/components/schemas/SessionStatus"
+              }
+            },
+            "required": ["sessionID", "status"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.session.idle": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "session.idle"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              }
+            },
+            "required": ["sessionID"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
       "Event.lsp.updated": {
         "type": "object",
         "properties": {
@@ -8269,88 +8867,42 @@
         },
         "required": ["type", "properties"]
       },
-      "SessionStatus": {
-        "anyOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "idle"
-              }
-            },
-            "required": ["type"]
+      "Event.hybrid.compression.eligible": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "hybrid.compression.eligible"
           },
-          {
+          "properties": {
             "type": "object",
             "properties": {
-              "type": {
-                "type": "string",
-                "const": "retry"
-              },
-              "attempt": {
-                "type": "number"
-              },
-              "message": {
+              "sessionID": {
                 "type": "string"
               },
-              "next": {
+              "step": {
+                "type": "number"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "modelID": {
+                "type": "string"
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "eligible": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "lineCount": {
                 "type": "number"
               }
             },
-            "required": ["type", "attempt", "message", "next"]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "busy"
-              }
-            },
-            "required": ["type"]
-          }
-        ]
-      },
-      "Event.session.status": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "session.status"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "status": {
-                "$ref": "#/components/schemas/SessionStatus"
-              }
-            },
-            "required": ["sessionID", "status"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.session.idle": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "session.idle"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              }
-            },
-            "required": ["sessionID"]
+            "required": ["sessionID", "step", "modelID", "providerID", "eligible", "reason"]
           }
         },
         "required": ["type", "properties"]
@@ -8371,6 +8923,229 @@
               }
             },
             "required": ["sessionID"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.memory.updated": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "memory.updated"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "entries": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "session_id": {
+                      "type": "string",
+                      "pattern": "^ses.*"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["id", "session_id", "content", "position"]
+                }
+              }
+            },
+            "required": ["sessionID", "entries"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.orchestration.spawn": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "orchestration.spawn"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string"
+              },
+              "parentSessionID": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "depth": {
+                "type": "number"
+              }
+            },
+            "required": ["sessionID", "parentSessionID", "agent", "depth"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.orchestration.spawn-rejected": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "orchestration.spawn-rejected"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["max_depth", "max_descendants"]
+              },
+              "limit": {
+                "type": "number"
+              },
+              "current": {
+                "type": "number"
+              }
+            },
+            "required": ["sessionID", "agent", "reason", "limit", "current"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.orchestration.complete": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "orchestration.complete"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string"
+              },
+              "parentSessionID": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "durationMs": {
+                "type": "number"
+              }
+            },
+            "required": ["sessionID", "parentSessionID", "agent", "durationMs"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.orchestration.abort": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "orchestration.abort"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["sessionID", "reason"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.orchestration.loop-detected": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "orchestration.loop-detected"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string"
+              },
+              "toolName": {
+                "type": "string"
+              },
+              "count": {
+                "type": "number"
+              }
+            },
+            "required": ["sessionID", "toolName", "count"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.orchestration.concurrency-queued": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "orchestration.concurrency-queued"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "queueLength": {
+                "type": "number"
+              }
+            },
+            "required": ["key", "queueLength"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.orchestration.concurrency-released": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "orchestration.concurrency-released"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "queueLength": {
+                "type": "number"
+              }
+            },
+            "required": ["key", "queueLength"]
           }
         },
         "required": ["type", "properties"]
@@ -8812,6 +9587,30 @@
               }
             },
             "required": ["input", "output", "reasoning", "cache"]
+          },
+          "compaction": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "number"
+              },
+              "savings": {
+                "type": "number"
+              },
+              "sent": {
+                "type": "number"
+              },
+              "tail": {
+                "type": "number"
+              },
+              "budget": {
+                "type": "number"
+              },
+              "msgs": {
+                "type": "number"
+              }
+            },
+            "required": ["total", "msgs"]
           },
           "structured": {},
           "variant": {
@@ -9638,6 +10437,10 @@
           },
           "overflow": {
             "type": "boolean"
+          },
+          "tail_start_id": {
+            "type": "string",
+            "pattern": "^msg.*"
           }
         },
         "required": ["id", "sessionID", "messageID", "type", "auto"]
@@ -9861,9 +10664,39 @@
               }
             },
             "required": ["messageID"]
+          },
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"]
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"]
           }
         },
-        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"]
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time", "cost", "tokens"]
       },
       "Event.session.created": {
         "type": "object",
@@ -9958,6 +10791,12 @@
             "$ref": "#/components/schemas/Event.lsp.client.diagnostics"
           },
           {
+            "$ref": "#/components/schemas/Event.session.status"
+          },
+          {
+            "$ref": "#/components/schemas/Event.session.idle"
+          },
+          {
             "$ref": "#/components/schemas/Event.lsp.updated"
           },
           {
@@ -10024,13 +10863,34 @@
             "$ref": "#/components/schemas/Event.question.rejected"
           },
           {
-            "$ref": "#/components/schemas/Event.session.status"
-          },
-          {
-            "$ref": "#/components/schemas/Event.session.idle"
+            "$ref": "#/components/schemas/Event.hybrid.compression.eligible"
           },
           {
             "$ref": "#/components/schemas/Event.session.compacted"
+          },
+          {
+            "$ref": "#/components/schemas/Event.memory.updated"
+          },
+          {
+            "$ref": "#/components/schemas/Event.orchestration.spawn"
+          },
+          {
+            "$ref": "#/components/schemas/Event.orchestration.spawn-rejected"
+          },
+          {
+            "$ref": "#/components/schemas/Event.orchestration.complete"
+          },
+          {
+            "$ref": "#/components/schemas/Event.orchestration.abort"
+          },
+          {
+            "$ref": "#/components/schemas/Event.orchestration.loop-detected"
+          },
+          {
+            "$ref": "#/components/schemas/Event.orchestration.concurrency-queued"
+          },
+          {
+            "$ref": "#/components/schemas/Event.orchestration.concurrency-released"
           },
           {
             "$ref": "#/components/schemas/Event.todo.updated"
@@ -10468,6 +11328,50 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "cost": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "tokens": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "input": {
+                            "type": "number"
+                          },
+                          "output": {
+                            "type": "number"
+                          },
+                          "reasoning": {
+                            "type": "number"
+                          },
+                          "cache": {
+                            "type": "object",
+                            "properties": {
+                              "read": {
+                                "type": "number"
+                              },
+                              "write": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["read", "write"]
+                          }
+                        },
+                        "required": ["input", "output", "reasoning", "cache"]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -10481,7 +11385,9 @@
                   "title",
                   "version",
                   "permission",
-                  "revert"
+                  "revert",
+                  "cost",
+                  "tokens"
                 ]
               }
             },
@@ -10633,6 +11539,9 @@
               "websearch": {
                 "$ref": "#/components/schemas/PermissionActionConfig"
               },
+              "codesearch": {
+                "$ref": "#/components/schemas/PermissionActionConfig"
+              },
               "lsp": {
                 "$ref": "#/components/schemas/PermissionRuleConfig"
               },
@@ -10694,6 +11603,10 @@
           },
           "hidden": {
             "description": "Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)",
+            "type": "boolean"
+          },
+          "parallelToolCalls": {
+            "description": "Override safe parallel tool-call behavior for this agent",
             "type": "boolean"
           },
           "options": {
@@ -10766,6 +11679,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "parallelToolCalls": {
+            "description": "Override safe parallel tool-call provider support for this provider",
+            "type": "boolean"
           },
           "options": {
             "type": "object",
@@ -10875,6 +11792,10 @@
                     "cache_write": {
                       "type": "number"
                     },
+                    "tiers": {
+                      "type": "array",
+                      "items": {}
+                    },
                     "context_over_200k": {
                       "type": "object",
                       "properties": {
@@ -10931,9 +11852,7 @@
                   },
                   "required": ["input", "output"]
                 },
-                "experimental": {
-                  "type": "boolean"
-                },
+                "experimental": {},
                 "status": {
                   "type": "string",
                   "enum": ["alpha", "beta", "deprecated"]
@@ -11101,6 +12020,94 @@
         "description": "@deprecated Always uses stretch layout.",
         "type": "string",
         "enum": ["auto", "stretch"]
+      },
+      "HybridModelRefConfig": {
+        "description": "Cloud model override",
+        "type": "object",
+        "properties": {
+          "providerID": {
+            "type": "string"
+          },
+          "modelID": {
+            "type": "string"
+          }
+        },
+        "required": ["providerID", "modelID"],
+        "additionalProperties": false
+      },
+      "HybridConfig": {
+        "description": "Hybrid cloud/local model routing configuration",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "description": "Enable hybrid cloud/local model routing",
+            "default": false,
+            "type": "boolean"
+          },
+          "local_model": {
+            "$ref": "#/components/schemas/HybridModelRefConfig"
+          },
+          "cloud_model": {
+            "$ref": "#/components/schemas/HybridModelRefConfig"
+          },
+          "log_routing": {
+            "description": "Enable verbose routing decision logging",
+            "default": false,
+            "type": "boolean"
+          },
+          "compression_threshold": {
+            "description": "Line count threshold for compression (default: 10)",
+            "default": 10,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "compression_templates": {
+            "description": "Per-tool template override map (optional)",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "compression_timeout_ms": {
+            "description": "Timeout in ms for local model compression call (default: 5000)",
+            "default": 5000,
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 9007199254740991
+          },
+          "compression_thresholds": {
+            "description": "Per-tool line count thresholds for compression eligibility",
+            "type": "object",
+            "properties": {
+              "grep": {
+                "description": "Line threshold for grep/glob output (default: 50)",
+                "default": 50,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "webfetch": {
+                "description": "Line threshold for webfetch/websearch output (default: 50)",
+                "default": 50,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "bash": {
+                "description": "Line threshold for bash output (default: 30)",
+                "default": 30,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "Config": {
         "type": "object",
@@ -11461,6 +12468,9 @@
           "permission": {
             "$ref": "#/components/schemas/PermissionConfig"
           },
+          "hybrid": {
+            "$ref": "#/components/schemas/HybridConfig"
+          },
           "tools": {
             "type": "object",
             "propertyNames": {
@@ -11495,6 +12505,42 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "sliding_window": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "description": "Enable proactive sliding-window compaction",
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "threshold": {
+                    "description": "Token count threshold to trigger sliding window (default: 50000)",
+                    "default": 50000,
+                    "type": "integer",
+                    "minimum": 10000,
+                    "maximum": 9007199254740991
+                  },
+                  "tail_ratio": {
+                    "description": "Fraction of total context to preserve as verbatim tail (default: 0.5)",
+                    "default": 0.5,
+                    "type": "number",
+                    "minimum": 0.2,
+                    "maximum": 0.9
+                  },
+                  "primary_only": {
+                    "description": "Only apply to primary agents (default: true)",
+                    "default": true,
+                    "type": "boolean"
+                  },
+                  "timeout_ms": {
+                    "description": "Timeout for summary generation call (default: 30000)",
+                    "default": 30000,
+                    "type": "integer",
+                    "minimum": 1000,
+                    "maximum": 9007199254740991
+                  }
+                }
               }
             }
           },
@@ -11506,6 +12552,14 @@
               },
               "batch_tool": {
                 "description": "Enable the batch tool",
+                "type": "boolean"
+              },
+              "parallel_tool_calls": {
+                "description": "Enable safe parallel tool calls when all active tools are pre-approved and parallel-safe",
+                "type": "boolean"
+              },
+              "parallel_read": {
+                "description": "Allow the read tool to participate in parallel tool calls",
                 "type": "boolean"
               },
               "openTelemetry": {
@@ -11528,6 +12582,86 @@
                 "type": "integer",
                 "exclusiveMinimum": 0,
                 "maximum": 9007199254740991
+              },
+              "subagent_timeout": {
+                "description": "Timeout in milliseconds for subagent task execution (default: 900000 / 15 minutes)",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "permission_ask_timeout": {
+                "description": "Timeout in milliseconds for permission prompts",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "question_ask_timeout": {
+                "description": "Timeout in milliseconds for question prompts",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "loop_detector_threshold": {
+                "description": "Consecutive identical tool calls before loop detection triggers (default: 5)",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "max_subagent_depth": {
+                "description": "Maximum subagent nesting depth (default: 3)",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "max_subagent_descendants": {
+                "description": "Maximum total subagent descendants per root session (default: 50)",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "model_concurrency": {
+                "description": "Per-model concurrency limits keyed by 'providerID:modelID' (default: 5 for all)",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "task_categories": {
+                "description": "Map task category names to specific provider/model combos",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "providerID": {
+                      "type": "string"
+                    },
+                    "modelID": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["providerID", "modelID"]
+                }
+              },
+              "ultrawork_model": {
+                "description": "Model override used for keyword-triggered ultrawork routing, or when task.use_ultrawork is explicitly set to true",
+                "type": "object",
+                "properties": {
+                  "providerID": {
+                    "type": "string"
+                  },
+                  "modelID": {
+                    "type": "string"
+                  }
+                },
+                "required": ["providerID", "modelID"]
               }
             }
           }
@@ -11777,6 +12911,46 @@
                   }
                 },
                 "required": ["read", "write"]
+              },
+              "tiers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "input": {
+                      "type": "number"
+                    },
+                    "output": {
+                      "type": "number"
+                    },
+                    "cache": {
+                      "type": "object",
+                      "properties": {
+                        "read": {
+                          "type": "number"
+                        },
+                        "write": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["read", "write"]
+                    },
+                    "tier": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "context"
+                        },
+                        "size": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["type", "size"]
+                    }
+                  },
+                  "required": ["input", "output", "cache", "tier"]
+                }
               },
               "experimentalOver200K": {
                 "type": "object",
@@ -12152,6 +13326,36 @@
             },
             "required": ["messageID"]
           },
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"]
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"]
+          },
           "project": {
             "anyOf": [
               {
@@ -12163,7 +13367,7 @@
             ]
           }
         },
-        "required": ["id", "slug", "projectID", "directory", "title", "version", "time", "project"]
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time", "cost", "tokens", "project"]
       },
       "McpResource": {
         "type": "object",
@@ -12839,6 +14043,9 @@
           },
           "prompt": {
             "type": "string"
+          },
+          "parallelToolCalls": {
+            "type": "boolean"
           },
           "options": {
             "type": "object",

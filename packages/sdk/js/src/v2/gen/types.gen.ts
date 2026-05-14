@@ -1045,6 +1045,16 @@ export type Session = {
     snapshot?: string
     diff?: string
   }
+  cost: number
+  tokens: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
 }
 
 export type EventSessionCreated = {
@@ -1218,6 +1228,16 @@ export type SyncEventSessionUpdated = {
         snapshot?: string
         diff?: string
       } | null
+      cost: number | null
+      tokens: {
+        input: number
+        output: number
+        reasoning: number
+        cache: {
+          read: number
+          write: number
+        }
+      } | null
     }
   }
 }
@@ -1289,6 +1309,7 @@ export type PermissionConfig =
       question?: PermissionActionConfig
       webfetch?: PermissionActionConfig
       websearch?: PermissionActionConfig
+      codesearch?: PermissionActionConfig
       lsp?: PermissionRuleConfig
       doom_loop?: PermissionActionConfig
       skill?: PermissionRuleConfig
@@ -1421,6 +1442,7 @@ export type ProviderConfig = {
         output: number
         cache_read?: number
         cache_write?: number
+        tiers?: Array<unknown>
         context_over_200k?: {
           input: number
           output: number
@@ -1437,7 +1459,7 @@ export type ProviderConfig = {
         input: Array<"text" | "audio" | "image" | "video" | "pdf">
         output: Array<"text" | "audio" | "image" | "video" | "pdf">
       }
-      experimental?: boolean
+      experimental?: unknown
       status?: "alpha" | "beta" | "deprecated"
       provider?: {
         npm?: string
@@ -1964,6 +1986,18 @@ export type Model = {
       read: number
       write: number
     }
+    tiers?: Array<{
+      input: number
+      output: number
+      cache: {
+        read: number
+        write: number
+      }
+      tier: {
+        type: "context"
+        size: number
+      }
+    }>
     experimentalOver200K?: {
       input: number
       output: number
@@ -2085,6 +2119,16 @@ export type GlobalSession = {
     partID?: string
     snapshot?: string
     diff?: string
+  }
+  cost: number
+  tokens: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
   }
   project: ProjectSummary | null
 }

@@ -17,11 +17,7 @@ export function getUsedTokens(msg: AssistantMessage) {
 function View(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
   const msg = createMemo(() => props.api.state.session.messages(props.session_id))
-  const messageCost = createMemo(() =>
-    msg().reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0),
-  )
-  const clearedCost = createMemo(() => props.api.kv.get(`cleared_cost_${props.session_id}`, 0))
-  const cost = createMemo(() => messageCost() + clearedCost())
+  const cost = createMemo(() => props.api.state.session.get(props.session_id)?.cost ?? 0)
 
   const state = createMemo(() => {
     const last = msg().findLast(

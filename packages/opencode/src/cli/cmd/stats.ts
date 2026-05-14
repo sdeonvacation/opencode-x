@@ -169,8 +169,6 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
     const batchPromises = batch.map(async (session) => {
       const messages = await Session.messages({ sessionID: session.id })
 
-      let sessionCost = 0
-      let sessionTokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
       let sessionToolUsage: Record<string, number> = {}
       let sessionModelUsage: Record<
         string,
@@ -190,8 +188,6 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
 
       for (const message of messages) {
         if (message.info.role === "assistant") {
-          sessionCost += message.info.cost || 0
-
           const modelKey = `${message.info.providerID}/${message.info.modelID}`
           if (!sessionModelUsage[modelKey]) {
             sessionModelUsage[modelKey] = {
@@ -201,15 +197,10 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
             }
           }
           sessionModelUsage[modelKey].messages++
+          // per-model cost from message-level data; session-level totalCost uses session.cost
           sessionModelUsage[modelKey].cost += message.info.cost || 0
 
           if (message.info.tokens) {
-            sessionTokens.input += message.info.tokens.input || 0
-            sessionTokens.output += message.info.tokens.output || 0
-            sessionTokens.reasoning += message.info.tokens.reasoning || 0
-            sessionTokens.cache.read += message.info.tokens.cache?.read || 0
-            sessionTokens.cache.write += message.info.tokens.cache?.write || 0
-
             sessionModelUsage[modelKey].tokens.input += message.info.tokens.input || 0
             sessionModelUsage[modelKey].tokens.output +=
               (message.info.tokens.output || 0) + (message.info.tokens.reasoning || 0)
@@ -225,16 +216,15 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
         }
       }
 
+      const tok = session.tokens
+      const sessionTotalTok =
+        (tok.input ?? 0) + (tok.output ?? 0) + (tok.reasoning ?? 0) + (tok.cache?.read ?? 0) + (tok.cache?.write ?? 0)
+
       return {
         messageCount: messages.length,
-        sessionCost,
-        sessionTokens,
-        sessionTotalTokens:
-          sessionTokens.input +
-          sessionTokens.output +
-          sessionTokens.reasoning +
-          sessionTokens.cache.read +
-          sessionTokens.cache.write,
+        sessionCost: session.cost ?? 0,
+        sessionTokens: tok,
+        sessionTotalTokens: sessionTotalTok,
         sessionToolUsage,
         sessionModelUsage,
         earliestTime: cutoffTime > 0 ? session.time.updated : session.time.created,
@@ -251,11 +241,11 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
 
       stats.totalMessages += result.messageCount
       stats.totalCost += result.sessionCost
-      stats.totalTokens.input += result.sessionTokens.input
-      stats.totalTokens.output += result.sessionTokens.output
-      stats.totalTokens.reasoning += result.sessionTokens.reasoning
-      stats.totalTokens.cache.read += result.sessionTokens.cache.read
-      stats.totalTokens.cache.write += result.sessionTokens.cache.write
+      stats.totalTokens.input += result.sessionTokens.input ?? 0
+      stats.totalTokens.output += result.sessionTokens.output ?? 0
+      stats.totalTokens.reasoning += result.sessionTokens.reasoning ?? 0
+      stats.totalTokens.cache.read += result.sessionTokens.cache?.read ?? 0
+      stats.totalTokens.cache.write += result.sessionTokens.cache?.write ?? 0
 
       for (const [tool, count] of Object.entries(result.sessionToolUsage)) {
         stats.toolUsage[tool] = (stats.toolUsage[tool] || 0) + count

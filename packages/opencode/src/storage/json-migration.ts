@@ -219,6 +219,12 @@ export namespace JsonMigration {
           time_updated: data.time?.updated ?? now,
           time_compacting: data.time?.compacting ?? null,
           time_archived: data.time?.archived ?? null,
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
         })
       }
       stats.sessions += insert(sessionValues, SessionTable, "session")

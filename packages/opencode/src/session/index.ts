@@ -81,6 +81,16 @@ export namespace Session {
         compacting: row.time_compacting ?? undefined,
         archived: row.time_archived ?? undefined,
       },
+      cost: row.cost ?? 0,
+      tokens: {
+        input: row.tokens_input ?? 0,
+        output: row.tokens_output ?? 0,
+        reasoning: row.tokens_reasoning ?? 0,
+        cache: {
+          read: row.tokens_cache_read ?? 0,
+          write: row.tokens_cache_write ?? 0,
+        },
+      },
     }
   }
 
@@ -105,6 +115,12 @@ export namespace Session {
       time_updated: info.time.updated,
       time_compacting: info.time.compacting,
       time_archived: info.time.archived,
+      cost: info.cost,
+      tokens_input: info.tokens.input,
+      tokens_output: info.tokens.output,
+      tokens_reasoning: info.tokens.reasoning,
+      tokens_cache_read: info.tokens.cache.read,
+      tokens_cache_write: info.tokens.cache.write,
     }
   }
 
@@ -156,6 +172,20 @@ export namespace Session {
           diff: z.string().optional(),
         })
         .optional(),
+      cost: z.number().default(0),
+      tokens: z
+        .object({
+          input: z.number().default(0),
+          output: z.number().default(0),
+          reasoning: z.number().default(0),
+          cache: z
+            .object({
+              read: z.number().default(0),
+              write: z.number().default(0),
+            })
+            .default({ read: 0, write: 0 }),
+        })
+        .default({ input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }),
     })
     .meta({
       ref: "Session",
@@ -392,6 +422,13 @@ export namespace Session {
           time: {
             created: Date.now(),
             updated: Date.now(),
+          },
+          cost: 0,
+          tokens: {
+            input: 0,
+            output: 0,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
           },
         }
         log.info("created", result)

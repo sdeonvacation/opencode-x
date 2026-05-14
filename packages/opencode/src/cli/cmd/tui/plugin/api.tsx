@@ -151,6 +151,9 @@ function stateApi(sync: ReturnType<typeof useSync>): TuiPluginApi["state"] {
       count() {
         return sync.data.session.length
       },
+      get(sessionID) {
+        return sync.session.get(sessionID)
+      },
       children(sessionID) {
         return sync.data.session.filter((item) => item.parentID === sessionID)
       },

@@ -31,6 +31,8 @@ function makeSession(id: string): Session.Info {
     version: "1",
     permission: [],
     time: { created: Date.now(), updated: Date.now() },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   }
 }
 
