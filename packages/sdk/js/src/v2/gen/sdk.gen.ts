@@ -134,6 +134,14 @@ import type {
   SessionInitErrors,
   SessionInitResponses,
   SessionListResponses,
+  SessionMemoryCreateErrors,
+  SessionMemoryCreateResponses,
+  SessionMemoryDeleteErrors,
+  SessionMemoryDeleteResponses,
+  SessionMemoryListErrors,
+  SessionMemoryListResponses,
+  SessionMemoryUpdateErrors,
+  SessionMemoryUpdateResponses,
   SessionMessageErrors,
   SessionMessageResponses,
   SessionMessagesErrors,
@@ -1542,6 +1550,160 @@ export class Worktree extends HeyApiClient {
   }
 }
 
+export class Memory extends HeyApiClient {
+  /**
+   * List memory entries
+   *
+   * Retrieve all memory entries associated with a specific session.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionMemoryListResponses, SessionMemoryListErrors, ThrowOnError>({
+      url: "/session/{sessionID}/memory",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Create memory entry
+   *
+   * Create a new memory entry for a specific session.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      content?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "content" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionMemoryCreateResponses, SessionMemoryCreateErrors, ThrowOnError>(
+      {
+        url: "/session/{sessionID}/memory",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+
+  /**
+   * Delete memory entry
+   *
+   * Delete a specific memory entry from a session.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      memoryID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "memoryID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      SessionMemoryDeleteResponses,
+      SessionMemoryDeleteErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/memory/{memoryID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update memory entry
+   *
+   * Update the content of an existing memory entry.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      memoryID: string
+      directory?: string
+      workspace?: string
+      content?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "memoryID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "content" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<SessionMemoryUpdateResponses, SessionMemoryUpdateErrors, ThrowOnError>({
+      url: "/session/{sessionID}/memory/{memoryID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Session2 extends HeyApiClient {
   /**
    * List sessions
@@ -2565,6 +2727,11 @@ export class Session2 extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  private _memory?: Memory
+  get memory(): Memory {
+    return (this._memory ??= new Memory({ client: this.client }))
   }
 }
 
