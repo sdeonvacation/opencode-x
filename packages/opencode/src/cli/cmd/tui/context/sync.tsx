@@ -382,15 +382,10 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     const args = useArgs()
 
     const fullSyncedSessions = new Set<string>()
-    let syncedWorkspace = project.workspace.current()
 
     async function bootstrap(input: { fatal?: boolean } = {}) {
       const fatal = input.fatal ?? true
       const workspace = project.workspace.current()
-      if (workspace !== syncedWorkspace) {
-        fullSyncedSessions.clear()
-        syncedWorkspace = workspace
-      }
       const start = Date.now() - 30 * 24 * 60 * 60 * 1000
       const sessionListPromise = sdk.client.session
         .list({ start: start })
