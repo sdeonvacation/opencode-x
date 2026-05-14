@@ -1,4 +1,3 @@
-import { Player } from "cli-sound"
 import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
@@ -17,14 +16,14 @@ const DIR = join(tmpdir(), "opencode-sfx")
 const LIST = [
   "ffplay",
   "mpv",
-  "mpg123",
-  "mpg321",
-  "mplayer",
   "afplay",
-  "play",
   "omxplayer",
   "aplay",
   "cmdmp3",
+  "mpg123",
+  "mpg321",
+  "mplayer",
+  "play",
   "cvlc",
   "powershell.exe",
 ] as const
@@ -44,23 +43,12 @@ function args(kind: Kind, file: string, volume: number) {
 }
 
 export namespace Sound {
-  let item: Player | null | undefined
   let kind: Kind | null | undefined
   let proc: Process.Child | undefined
   let tail: ReturnType<typeof setTimeout> | undefined
   let cache: Promise<{ hum: string; pulse: string[] }> | undefined
   let seq = 0
   let shot = 0
-
-  function load() {
-    if (item !== undefined) return item
-    try {
-      item = new Player({ volume: 0.35 })
-    } catch {
-      item = null
-    }
-    return item
-  }
 
   async function file(path: string) {
     mkdirSync(DIR, { recursive: true })
@@ -82,10 +70,10 @@ export namespace Sound {
     return kind
   }
 
-  function run(file: string, volume: number) {
+  function run(path: string, volume: number) {
     const kind = pick()
     if (!kind) return
-    return Process.spawn(args(kind, file, volume), {
+    return Process.spawn(args(kind, path, volume), {
       stdin: "ignore",
       stdout: "ignore",
       stderr: "ignore",
@@ -98,10 +86,8 @@ export namespace Sound {
     tail = undefined
   }
 
-  function play(file: string, volume: number) {
-    const item = load()
-    if (!item) return run(file, volume)?.exited
-    return item.play(file, { volume }).catch(() => run(file, volume)?.exited)
+  function play(path: string, volume: number) {
+    return run(path, volume)?.exited
   }
 
   export function start() {
