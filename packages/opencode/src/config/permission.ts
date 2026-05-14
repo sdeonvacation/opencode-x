@@ -63,7 +63,6 @@ const InfoZod = z
           question: zod(Action).optional(),
           webfetch: zod(Action).optional(),
           websearch: zod(Action).optional(),
-          codesearch: zod(Action).optional(),
           lsp: zod(Rule).optional(),
           doom_loop: zod(Action).optional(),
           skill: zod(Rule).optional(),
