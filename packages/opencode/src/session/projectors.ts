@@ -105,7 +105,7 @@ export function usage(data: unknown): Usage {
 function applyUsage(db: Database.TxOrDb, sessionID: string, u: Usage, sign: 1 | -1) {
   db.update(SessionTable)
     .set({
-      cost: sql`${SessionTable.cost} + ${sign * u.cost}`,
+      cost: sign === 1 ? sql`${SessionTable.cost} + ${u.cost}` : undefined,
       tokens_input: sql`${SessionTable.tokens_input} + ${sign * u.tokens_input}`,
       tokens_output: sql`${SessionTable.tokens_output} + ${sign * u.tokens_output}`,
       tokens_reasoning: sql`${SessionTable.tokens_reasoning} + ${sign * u.tokens_reasoning}`,
