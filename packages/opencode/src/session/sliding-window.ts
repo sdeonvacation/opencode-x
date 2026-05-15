@@ -89,12 +89,14 @@ export namespace SlidingWindow {
       touch(input.sessionID, hit)
       const result = [synthetic(hit.summary, input), ...split.tail]
       const actual = yield* estimate(result, input.model)
+      const ratio = estimated > 0 ? actual / estimated : 1
+      const sent = Math.round(total * ratio)
       metrics.set(input.sessionID, {
         total,
         budget,
         tail,
         head: size,
-        savings: total - actual,
+        savings: total - sent,
         msgs: split.tail.length,
         ts: Date.now(),
       })
@@ -124,12 +126,14 @@ export namespace SlidingWindow {
     store(input.sessionID, { headEndID, summary, ts: Date.now() })
     const result = [synthetic(summary, input), ...split.tail]
     const actual = yield* estimate(result, input.model)
+    const ratio = estimated > 0 ? actual / estimated : 1
+    const sent = Math.round(total * ratio)
     metrics.set(input.sessionID, {
       total,
       budget,
       tail,
       head: size,
-      savings: total - actual,
+      savings: total - sent,
       msgs: split.tail.length,
       ts: Date.now(),
     })
