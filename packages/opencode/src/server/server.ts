@@ -294,8 +294,8 @@ export namespace Server {
           resolve(server)
         }
         const cleanup = () => {
-          server.off("error", fail)
-          server.off("listening", ready)
+          ;(server as import("node:http").Server).off("error", fail)
+          ;(server as import("node:http").Server).off("listening", ready)
         }
         server.once("error", fail)
         server.once("listening", ready)
