@@ -98,7 +98,6 @@ const taskMetadata = {
     providerID: String(model.providerID),
     modelID: String(model.id),
   },
-  background: false,
 }
 const agentList: Agent.Info[] = [
   { name: "build", permission: [], hidden: false, mode: "primary", options: {} },

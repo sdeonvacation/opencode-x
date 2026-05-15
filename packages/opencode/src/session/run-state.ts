@@ -1,7 +1,6 @@
 import { InstanceState } from "@/effect/instance-state"
 import { Runner } from "@/effect/runner"
 import { makeRuntime } from "@/effect/run-service"
-import { BackgroundJob } from "@/background/job"
 import { Effect, Layer, Scope, ServiceMap } from "effect"
 import { Session } from "."
 import { MessageV2 } from "./message-v2"
@@ -29,7 +28,6 @@ export namespace SessionRunState {
   export const layer = Layer.effect(
     Service,
     Effect.gen(function* () {
-      const background = yield* BackgroundJob.Service
       const status = yield* SessionStatus.Service
 
       const state = yield* InstanceState.make(
@@ -78,7 +76,6 @@ export namespace SessionRunState {
       })
 
       const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
-        yield* cancelBackgroundJobs(background, sessionID)
         const data = yield* InstanceState.get(state)
         const existing = data.runners.get(sessionID)
         if (!existing || !existing.busy) {
@@ -108,47 +105,10 @@ export namespace SessionRunState {
     }),
   )
 
-  export const defaultLayer = layer.pipe(
-    Layer.provide(BackgroundJob.defaultLayer),
-    Layer.provide(SessionStatus.defaultLayer),
-  )
+  export const defaultLayer = layer.pipe(Layer.provide(SessionStatus.defaultLayer))
   const { runPromise } = makeRuntime(Service, defaultLayer)
 
   export async function assertNotBusy(sessionID: SessionID) {
     return runPromise((svc) => svc.assertNotBusy(sessionID))
   }
 }
-
-const cancelBackgroundJobs = Effect.fn("SessionRunState.cancelBackgroundJobs")(function* (
-  background: BackgroundJob.Interface,
-  sessionID: SessionID,
-) {
-  const jobs = yield* background.list()
-  const pending = new Set<string>([sessionID])
-  const cancelled = new Set<string>()
-  const matches = (job: BackgroundJob.Info) => {
-    if (job.status !== "running") return false
-    if (cancelled.has(job.id)) return false
-    if (pending.has(job.id)) return true
-    if (typeof job.metadata?.sessionId === "string" && pending.has(job.metadata.sessionId)) return true
-    return typeof job.metadata?.parentSessionId === "string" && pending.has(job.metadata.parentSessionId)
-  }
-  let batch = jobs.filter(matches)
-  while (batch.length > 0) {
-    yield* Effect.forEach(
-      batch,
-      (job) =>
-        background.cancel(job.id).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              cancelled.add(job.id)
-              pending.add(job.id)
-              if (typeof job.metadata?.sessionId === "string") pending.add(job.metadata.sessionId)
-            }),
-          ),
-        ),
-      { concurrency: "unbounded", discard: true },
-    )
-    batch = jobs.filter(matches)
-  }
-})

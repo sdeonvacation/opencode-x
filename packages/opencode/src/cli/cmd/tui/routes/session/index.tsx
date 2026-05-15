@@ -1239,9 +1239,6 @@ export function Session() {
               <Show when={session()?.parentID}>
                 <SubagentFooter />
               </Show>
-              <Show when={!session()?.parentID}>
-                <BackgroundTasksBadge />
-              </Show>
               <Show when={visible()}>
                 <Prompt
                   visible={visible()}
@@ -2184,51 +2181,6 @@ function Task(props: ToolProps<typeof TaskTool>) {
     >
       {content()}
     </InlineTool>
-  )
-}
-
-function BackgroundTasksBadge() {
-  const { navigate } = useRoute()
-  const sync = useSync()
-  const ctx = use()
-  const { theme } = useTheme()
-
-  const running = createMemo(() => {
-    const children = sync.data.session.filter((s) => s.parentID === ctx.sessionID)
-    return children.filter((s) => {
-      const msgs = sync.data.message[s.id] ?? []
-      const last = msgs.findLast((m) => m.role === "assistant")
-      if (!last) return false
-      return !last.time?.completed
-    })
-  })
-
-  return (
-    <Show when={running().length > 0}>
-      <box flexDirection="row" gap={1} paddingLeft={2} paddingRight={2} paddingTop={0} paddingBottom={0}>
-        <For each={running()}>
-          {(s) => {
-            const [hover, setHover] = createSignal(false)
-            const label = createMemo(() => {
-              const match = s.title.match(/@(\w+) subagent/)
-              return match ? match[1] : "background task"
-            })
-            return (
-              <box
-                onMouseOver={() => setHover(true)}
-                onMouseOut={() => setHover(false)}
-                onMouseUp={() => navigate({ type: "session", sessionID: s.id })}
-                backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
-                paddingLeft={1}
-                paddingRight={1}
-              >
-                <text fg={theme.accent ?? theme.text}>⟳ {label()} running</text>
-              </box>
-            )
-          }}
-        </For>
-      </box>
-    </Show>
   )
 }
 

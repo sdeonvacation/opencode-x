@@ -28,7 +28,6 @@ import { Todo } from "../../src/session/todo"
 import { Question } from "../../src/question"
 import { Truncate } from "../../src/tool/truncate"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
-import { BackgroundJob } from "../../src/background/job"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
@@ -117,7 +116,6 @@ function makeHttp() {
   const question = Question.layer.pipe(Layer.provideMerge(deps))
   const todo = Todo.layer.pipe(Layer.provideMerge(deps))
   const registry = ToolRegistry.layer.pipe(
-    Layer.provide(BackgroundJob.defaultLayer),
     Layer.provideMerge(todo),
     Layer.provideMerge(question),
     Layer.provideMerge(deps),
@@ -125,7 +123,7 @@ function makeHttp() {
   const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
   const proc = SessionProcessor.layer.pipe(Layer.provideMerge(deps))
   const compact = SessionCompaction.layer.pipe(Layer.provideMerge(proc), Layer.provideMerge(deps))
-  const runState = SessionRunState.layer.pipe(Layer.provide(BackgroundJob.defaultLayer), Layer.provideMerge(deps))
+  const runState = SessionRunState.layer.pipe(Layer.provideMerge(deps))
   const revert = SessionRevert.defaultLayer
   return Layer.mergeAll(
     TestLLMServer.layer,
