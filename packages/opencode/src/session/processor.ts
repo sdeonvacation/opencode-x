@@ -81,6 +81,7 @@ export namespace SessionProcessor {
     localModel?: Provider.Model
     compressionThreshold: number
     compressionTimeout: number
+    compressionMaxTokens: number
     compressionThresholds?: CompressionThresholds
     doom: Map<string, number>
   }
@@ -140,6 +141,7 @@ export namespace SessionProcessor {
           localModel: Option.getOrUndefined(local),
           compressionThreshold: cfg.hybrid?.compression_threshold ?? 10,
           compressionTimeout: cfg.hybrid?.compression_timeout_ms ?? 5000,
+          compressionMaxTokens: cfg.hybrid?.compression_max_tokens ?? 4096,
           compressionThresholds: cfg.hybrid?.compression_thresholds,
           doom: new Map(),
         }
@@ -220,6 +222,7 @@ export namespace SessionProcessor {
               model: ctx.localModel,
               threshold: ctx.compressionThreshold,
               timeout: ctx.compressionTimeout,
+              maxTokens: ctx.compressionMaxTokens,
             })
             yield* session.updatePart({
               ...match.part,

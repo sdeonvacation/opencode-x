@@ -16,6 +16,7 @@ export namespace LLMCompress {
     model: Provider.Model
     threshold: number
     timeout: number
+    maxTokens: number
   }
 
   export type Stats = {
@@ -71,7 +72,7 @@ export namespace LLMCompress {
         },
       ],
       temperature: 0,
-      maxOutputTokens: 1024,
+      maxOutputTokens: input.maxTokens,
       abortSignal: AbortSignal.timeout(input.timeout),
     })
 

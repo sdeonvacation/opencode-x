@@ -967,6 +967,13 @@ export namespace Config {
         .optional()
         .default(5000)
         .describe("Timeout in ms for local model compression call (default: 5000)"),
+      compression_max_tokens: z
+        .number()
+        .int()
+        .min(256)
+        .optional()
+        .default(4096)
+        .describe("Max output tokens for local model compression call (default: 4096)"),
       compression_thresholds: z
         .object({
           grep: z
