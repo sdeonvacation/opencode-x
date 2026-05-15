@@ -352,6 +352,13 @@ export namespace SessionProcessor {
               return
 
             case "tool-input-delta":
+              yield* updateToolCall(value.id, (match) => ({
+                ...match,
+                state: {
+                  ...match.state,
+                  raw: (match.state.status === "pending" ? match.state.raw : "") + value.delta,
+                },
+              }))
               return
 
             case "tool-input-end":
@@ -365,8 +372,7 @@ export namespace SessionProcessor {
                 ...match,
                 tool: value.toolName,
                 state: {
-                  ...match.state,
-                  status: "running",
+                  status: "running" as const,
                   input: value.input,
                   time: { start: Date.now() },
                 },

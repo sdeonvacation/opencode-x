@@ -1687,6 +1687,12 @@ function GenericTool(props: ToolProps<any>) {
   )
 }
 
+function tokens(n: number): string {
+  const t = Math.ceil(n / 4)
+  if (t < 1000) return `~${t} tok`
+  return `~${(t / 1000).toFixed(1)}k tok`
+}
+
 function InlineTool(props: {
   icon: string
   iconColor?: RGBA
@@ -1703,6 +1709,25 @@ function InlineTool(props: {
   const sync = useSync()
   const renderer = useRenderer()
   const [hover, setHover] = createSignal(false)
+
+  // Live token counter from streaming data
+  const tok = createMemo(() => {
+    const state = props.part.state
+    if (state.status === "pending") {
+      const len = state.raw?.length ?? 0
+      return len > 0 ? tokens(len) : undefined
+    }
+    if (state.status === "running") {
+      const meta = state.metadata as Record<string, unknown> | undefined
+      const output = meta?.output
+      if (typeof output === "string" && output.length > 0) return tokens(output.length)
+      return undefined
+    }
+    if (state.status === "completed") {
+      return tokens(state.output.length)
+    }
+    return undefined
+  })
 
   const permission = createMemo(() => {
     const callID = sync.data.permission[ctx.sessionID]?.at(0)?.tool?.callID
@@ -1762,14 +1787,41 @@ function InlineTool(props: {
     >
       <Switch>
         <Match when={props.spinner}>
-          <Spinner color={fg()} children={props.children} />
+          <Spinner color={fg()}>
+            {props.children}
+            <Show when={tok()}>
+              <span style={{ fg: theme.textMuted }}> · {tok()}</span>
+            </Show>
+          </Spinner>
         </Match>
         <Match when={true}>
-          <text paddingLeft={3} fg={fg()} attributes={denied() ? TextAttributes.STRIKETHROUGH : undefined}>
-            <Show fallback={<>~ {props.pending}</>} when={props.complete}>
+          <Show
+            fallback={
+              <Show
+                when={!error()}
+                fallback={
+                  <text paddingLeft={3} fg={theme.textMuted}>
+                    {props.pending}
+                  </text>
+                }
+              >
+                <Spinner color={fg()}>
+                  {props.pending}
+                  <Show when={tok()}>
+                    <span style={{ fg: theme.textMuted }}> · {tok()}</span>
+                  </Show>
+                </Spinner>
+              </Show>
+            }
+            when={props.complete}
+          >
+            <text paddingLeft={3} fg={fg()} attributes={denied() ? TextAttributes.STRIKETHROUGH : undefined}>
               <span style={{ fg: props.iconColor }}>{props.icon}</span> {props.children}
-            </Show>
-          </text>
+              <Show when={tok()}>
+                <span style={{ fg: theme.textMuted }}> · {tok()}</span>
+              </Show>
+            </text>
+          </Show>
         </Match>
       </Switch>
       <Show when={error() && !denied()}>
@@ -1859,9 +1911,13 @@ function Bash(props: ToolProps<typeof BashTool>) {
   const title = createMemo(() => {
     const desc = props.input.description ?? "Shell"
     const wd = workdirDisplay()
-    if (!wd) return `# ${desc}`
-    if (desc.includes(wd)) return `# ${desc}`
-    return `# ${desc} in ${wd}`
+    let base = wd && !desc.includes(wd) ? `# ${desc} in ${wd}` : `# ${desc}`
+    if (isRunning() && props.metadata.output) {
+      base += ` · ${tokens(props.metadata.output.length)}`
+    } else if (!isRunning() && props.output) {
+      base += ` · ${tokens(props.output.length)}`
+    }
+    return base
   })
 
   return (
