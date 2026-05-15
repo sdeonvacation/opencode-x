@@ -1,5 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
+import { BackgroundJob } from "../../src/background/job"
 import { expect, spyOn } from "bun:test"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import path from "path"
@@ -147,7 +148,7 @@ const filetime = Layer.succeed(
 )
 
 const status = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
-const run = SessionRunState.layer.pipe(Layer.provide(status))
+const run = SessionRunState.layer.pipe(Layer.provide(BackgroundJob.defaultLayer), Layer.provide(status))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
 function makeHttp() {
   const deps = Layer.mergeAll(
@@ -171,6 +172,7 @@ function makeHttp() {
   const registry = ToolRegistry.layer.pipe(
     Layer.provide(Skill.defaultLayer),
     Layer.provide(FetchHttpClient.layer),
+    Layer.provide(BackgroundJob.defaultLayer),
     Layer.provideMerge(todo),
     Layer.provideMerge(question),
     Layer.provideMerge(deps),
@@ -780,6 +782,7 @@ it.live(
               metadata: {
                 sessionId: SessionID.make("task"),
                 model: ref,
+                background: false,
               },
               output: "",
             }

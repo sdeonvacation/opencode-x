@@ -1240,6 +1240,17 @@ export namespace SessionPrompt {
             const hasToolCalls =
               lastAssistantMsg?.parts.some((part) => part.type === "tool" && !part.metadata?.providerExecuted) ?? false
 
+            const allBackground =
+              hasToolCalls &&
+              (lastAssistantMsg?.parts.every(
+                (part) => part.type !== "tool" || part.metadata?.providerExecuted || part.metadata?.background === true,
+              ) ??
+                false)
+            if (allBackground) {
+              log.info("exiting loop: all tool calls are background tasks", { sessionID })
+              break
+            }
+
             if (
               lastAssistant?.finish &&
               !["tool-calls"].includes(lastAssistant.finish) &&

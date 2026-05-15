@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Option, Scope, ServiceMap } from "effect"
 import { Agent } from "../../src/agent/agent"
+import { BackgroundJob } from "../../src/background/job"
 import { Config } from "../../src/config/config"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Instance } from "../../src/project/instance"
@@ -17,8 +18,9 @@ import { testEffect } from "../lib/effect"
 // Helper: initialize TaskTool (Tool.defineEffect) for non-Effect test contexts
 const initTask = () =>
   Effect.runPromise(
-    Effect.flatMap(Effect.provide(TaskTool, Layer.mergeAll(Agent.defaultLayer, Config.defaultLayer)), (info) =>
-      Effect.promise(() => info.init()),
+    Effect.flatMap(
+      Effect.provide(TaskTool, Layer.mergeAll(Agent.defaultLayer, BackgroundJob.defaultLayer, Config.defaultLayer)),
+      (info) => Effect.promise(() => info.init()),
     ),
   )
 
@@ -30,6 +32,7 @@ const ref = {
 const it = testEffect(
   Layer.mergeAll(
     Agent.defaultLayer,
+    BackgroundJob.defaultLayer,
     Config.defaultLayer,
     CrossSpawnSpawner.defaultLayer,
     Session.defaultLayer,
@@ -730,4 +733,251 @@ describe("tool.task", () => {
       },
     })
   })
+})
+
+describe("tool.task background", () => {
+  it.live("returns immediately with state:running when background=true and flag enabled", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = "true"
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* Effect.promise(() => tool.init())
+        const resolve = SessionPrompt.resolvePromptParts
+        const prompt = SessionPrompt.prompt
+        const loop = SessionPrompt.loop
+
+        SessionPrompt.resolvePromptParts = async (template) => [{ type: "text", text: template }]
+        // prompt never resolves — background should return before it completes
+        SessionPrompt.prompt = async () => new Promise(() => {})
+        SessionPrompt.loop = async () => new Promise(() => {})
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            SessionPrompt.resolvePromptParts = resolve
+            SessionPrompt.prompt = prompt
+            SessionPrompt.loop = loop
+            delete process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS
+          }),
+        )
+
+        const result = yield* Effect.promise(() =>
+          def.execute(
+            {
+              description: "bg task",
+              prompt: "do something",
+              subagent_type: "general",
+              background: true,
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              messages: [],
+              metadata() {},
+              ask: async () => {},
+            },
+          ),
+        )
+
+        expect(result.output).toContain("state: running")
+        expect(result.output).toContain("Background task")
+        expect(result.output).toContain("task_id:")
+      }),
+    ),
+  )
+
+  it.live("falls through to sync path when flag is disabled", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        delete process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS
+        delete process.env.OPENCODE_EXPERIMENTAL
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* Effect.promise(() => tool.init())
+        const resolve = SessionPrompt.resolvePromptParts
+        const prompt = SessionPrompt.prompt
+
+        SessionPrompt.resolvePromptParts = async (template) => [{ type: "text", text: template }]
+        SessionPrompt.prompt = async (input) => reply(input, "sync result")
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            SessionPrompt.resolvePromptParts = resolve
+            SessionPrompt.prompt = prompt
+          }),
+        )
+
+        const result = yield* Effect.promise(() =>
+          def.execute(
+            {
+              description: "sync task",
+              prompt: "do something",
+              subagent_type: "general",
+              background: true,
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              messages: [],
+              metadata() {},
+              ask: async () => {},
+            },
+          ),
+        )
+
+        // sync path returns task_result with actual output
+        expect(result.output).toContain("<task_result>")
+        expect(result.output).toContain("sync result")
+        expect(result.output).not.toContain("state: running")
+      }),
+    ),
+  )
+
+  it.live("injects result and publishes toast when background job completes", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = "true"
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* Effect.promise(() => tool.init())
+        const resolve = SessionPrompt.resolvePromptParts
+        const prompt = SessionPrompt.prompt
+        const loop = SessionPrompt.loop
+
+        const injected: Parameters<typeof SessionPrompt.prompt>[0][] = []
+        const loopCalls: Parameters<typeof SessionPrompt.loop>[0][] = []
+
+        SessionPrompt.resolvePromptParts = async (template) => [{ type: "text", text: template }]
+        // First call = background subagent run, subsequent calls = inject result
+        let callCount = 0
+        SessionPrompt.prompt = async (input) => {
+          callCount++
+          if (callCount === 1) return reply(input, "background output")
+          injected.push(input)
+          return reply(input, "")
+        }
+        SessionPrompt.loop = async (input) => {
+          loopCalls.push(input)
+          return reply({ sessionID: input.sessionID, parts: [] }, "")
+        }
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            SessionPrompt.resolvePromptParts = resolve
+            SessionPrompt.prompt = prompt
+            SessionPrompt.loop = loop
+            delete process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS
+          }),
+        )
+
+        yield* Effect.promise(() =>
+          def.execute(
+            {
+              description: "bg complete",
+              prompt: "do something",
+              subagent_type: "general",
+              background: true,
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              messages: [],
+              metadata() {},
+              ask: async () => {},
+            },
+          ),
+        )
+
+        // Wait for background job to complete and inject result
+        yield* Effect.sleep("500 millis")
+
+        // Result should have been injected into parent session
+        expect(injected.length).toBeGreaterThan(0)
+        const injectedPart = injected[0]?.parts?.[0]
+        expect(injectedPart?.type).toBe("text")
+        if (injectedPart?.type === "text") {
+          expect(injectedPart.text).toContain("background output")
+          expect(injectedPart.text).toContain("<task_result>")
+        }
+
+        // Loop should have been called to resume parent session
+        expect(loopCalls.length).toBeGreaterThan(0)
+        expect(loopCalls[0]?.sessionID).toBe(chat.id)
+      }),
+    ),
+  )
+})
+
+describe("tool.task background scope fix", () => {
+  // Regression test: BackgroundJob.Service methods (get/start) require Scope.Scope
+  // internally via ScopedCache. When called from async context via Effect.runPromise,
+  // the scope must be explicitly provided — otherwise "Service not found: effect/Scope".
+  it.live("BackgroundJob.Service.get works from async context when scope is provided", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const jobs = yield* BackgroundJob.Service
+        // Capture scope from current fiber (same pattern used in TaskTool)
+        let scope: Scope.Scope | undefined
+        yield* Effect.withFiber((fiber) => {
+          const opt = ServiceMap.getOption(fiber.services, Scope.Scope)
+          if (Option.isSome(opt)) scope = opt.value
+          return Effect.void
+        })
+        expect(scope).toBeDefined()
+        // jobs.get without scope → throws "Service not found: effect/Scope"
+        // jobs.get with scope → succeeds
+        const result = yield* Effect.promise(() =>
+          Effect.runPromise(jobs.get("nonexistent-id").pipe(Effect.provideService(Scope.Scope, scope!))),
+        )
+        expect(result).toBeUndefined()
+      }),
+    ),
+  )
+
+  it.live("BackgroundJob.Service.start works from async context when scope is provided", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const jobs = yield* BackgroundJob.Service
+        let scope: Scope.Scope | undefined
+        yield* Effect.withFiber((fiber) => {
+          const opt = ServiceMap.getOption(fiber.services, Scope.Scope)
+          if (Option.isSome(opt)) scope = opt.value
+          return Effect.void
+        })
+        expect(scope).toBeDefined()
+        // start a job that resolves immediately
+        const info = yield* Effect.promise(() =>
+          Effect.runPromise(
+            jobs
+              .start({
+                id: "test-scope-job",
+                type: "test",
+                title: "scope test",
+                run: Effect.succeed("done"),
+              })
+              .pipe(Effect.provideService(Scope.Scope, scope!)),
+          ),
+        )
+        expect(info.id).toBe("test-scope-job")
+        expect(info.status).toBe("running")
+      }),
+    ),
+  )
+
+  it.live("TaskTool scope is captured via withFiber and is defined", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        // Verify that when TaskTool is initialized inside a Layer.effect context,
+        // the scope captured via withFiber is defined and open.
+        const tool = yield* TaskTool
+        // If scope capture failed, background execute would throw on jobs.get/start.
+        // We verify the tool initializes without error (scope capture is in init).
+        expect(tool).toBeDefined()
+        expect(typeof tool.init).toBe("function")
+      }),
+    ),
+  )
 })

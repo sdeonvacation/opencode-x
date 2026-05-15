@@ -9,13 +9,24 @@ import { Bus } from "../bus"
 import { ModelID, ProviderID } from "../provider/schema"
 import { SessionPrompt } from "../session/prompt"
 import { Config } from "../config/config"
-import { Effect } from "effect"
+import { Effect, Option, Scope, ServiceMap } from "effect"
 import { acquire, release } from "../orchestration/concurrency"
 import { OrchestrationEvent } from "../orchestration/events"
 import { create as createGuard } from "../orchestration/tool-guard"
 import { withTimeout } from "@/util/timeout"
 import { spawnSubagent } from "../orchestration/task-spawn"
 import { resolveTaskModel } from "../orchestration/task-model-resolver"
+import { BackgroundJob } from "@/background/job"
+import { SessionStatus } from "../session/status"
+import { Flag } from "@/flag/flag"
+import { TuiEvent } from "../cli/cmd/tui/event"
+
+export interface TaskPromptOps {
+  cancel(sessionID: SessionID): Effect.Effect<void>
+  resolvePromptParts(template: string): Effect.Effect<SessionPrompt.PromptInput["parts"]>
+  prompt(input: SessionPrompt.PromptInput): Effect.Effect<MessageV2.WithParts>
+  loop(input: z.infer<typeof SessionPrompt.LoopInput>): Effect.Effect<MessageV2.WithParts>
+}
 
 const id = "task"
 const SUBAGENT_TIMEOUT = 900_000
@@ -36,11 +47,26 @@ const parameters = z.object({
     )
     .optional(),
   command: z.string().describe("The command that triggered this task").optional(),
+  background: z
+    .boolean()
+    .describe("When true, launch the subagent in the background and return immediately")
+    .optional(),
 })
 
 export const TaskTool = Tool.defineEffect(
   id,
   Effect.gen(function* () {
+    const jobs = yield* BackgroundJob.Service
+    // Capture the layer scope so Effect calls on `jobs.*` can be run from async context.
+    // `jobs.*` methods internally use ScopedCache which requires Scope.Scope.
+    // Using withFiber avoids adding Scope to the Effect's type requirements.
+    let scope: Scope.Scope | undefined
+    yield* Effect.withFiber((fiber) => {
+      const opt = ServiceMap.getOption(fiber.services, Scope.Scope)
+      if (Option.isSome(opt)) scope = opt.value
+      return Effect.void
+    })
+
     return {
       description: DESCRIPTION,
       parameters,
@@ -121,6 +147,122 @@ export const TaskTool = Tool.defineEffect(
           },
         })
 
+        if (params.background && Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS) {
+          const active = await Effect.runPromise(
+            jobs.get(String(nextSession.id)).pipe(Effect.provideService(Scope.Scope, scope!)),
+          )
+          if (active?.status === "running") {
+            throw new Error(`Task ${nextSession.id} is already running. Use task_status to check progress.`)
+          }
+
+          const userMessages = await Session.messages({ sessionID: ctx.sessionID })
+          const lastUser = userMessages.findLast((m) => m.info.role === "user")
+          const userID = lastUser?.info.id
+
+          async function injectResult(state: "completed" | "error", text: string) {
+            await SessionPrompt.prompt({
+              sessionID: ctx.sessionID,
+              noReply: true,
+              agent: ctx.agent,
+              parts: [
+                {
+                  type: "text" as const,
+                  synthetic: true,
+                  text: [
+                    `Background task "${params.description}" (task_id: ${nextSession.id}):`,
+                    state === "completed" ? "<task_result>" : "<task_error>",
+                    text,
+                    state === "completed" ? "</task_result>" : "</task_error>",
+                  ].join("\n"),
+                },
+              ],
+            })
+          }
+
+          async function resumeWhenIdle(state: "completed" | "error") {
+            if (!userID) return
+            // Wait up to 30s for parent session to become idle, then trigger loop
+            for (let i = 0; i < 100; i++) {
+              const s = await SessionStatus.get(ctx.sessionID)
+              if (s.type === "idle") break
+              await new Promise((r) => setTimeout(r, 300))
+            }
+            await Bus.publish(TuiEvent.ToastShow, {
+              title: state === "completed" ? "Background task complete" : "Background task failed",
+              message:
+                state === "completed"
+                  ? `Background task "${params.description}" finished. Resuming the main thread.`
+                  : `Background task "${params.description}" failed. Resuming the main thread.`,
+              variant: state === "completed" ? "success" : "error",
+              duration: 5000,
+            })
+            await SessionPrompt.loop({ sessionID: ctx.sessionID }).catch(() => {})
+          }
+
+          await Effect.runPromise(
+            jobs
+              .start({
+                id: String(nextSession.id),
+                type: id,
+                title: params.description,
+                metadata: { sessionId: nextSession.id, model: finalModel },
+                run: Effect.promise(async () => {
+                  await acquire(concurrencyKey, concurrencyLimit, ctx.abort)
+                  try {
+                    const result = await withTimeout(
+                      SessionPrompt.prompt({
+                        messageID,
+                        sessionID: nextSession.id,
+                        model: {
+                          modelID: ModelID.make(finalModel.modelID),
+                          providerID: ProviderID.make(finalModel.providerID),
+                        },
+                        agent: next.name,
+                        tools: {
+                          ...(canTodo ? {} : { todowrite: false }),
+                          ...(canTask ? {} : { task: false }),
+                          ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
+                        },
+                        parts: promptParts,
+                      }),
+                      cfg.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT,
+                    )
+                    const text = result.parts.findLast((item: MessageV2.Part) => item.type === "text")?.text ?? ""
+                    await injectResult("completed", text).catch(() => {})
+                    await resumeWhenIdle("completed").catch(() => {})
+                    return text
+                  } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err)
+                    await injectResult("error", msg).catch(() => {})
+                    await resumeWhenIdle("error").catch(() => {})
+                    throw err
+                  } finally {
+                    release(concurrencyKey)
+                  }
+                }),
+              })
+              .pipe(Effect.provideService(Scope.Scope, scope!)),
+          )
+
+          return {
+            title: params.description,
+            metadata: {
+              sessionId: nextSession.id,
+              model: finalModel,
+              background: true,
+            },
+            output: [
+              `task_id: ${nextSession.id}`,
+              `state: running`,
+              "",
+              "<task_result>",
+              `Background task "${params.description}" started. You can continue helping the user.`,
+              `Use task_status({ task_id: "${nextSession.id}", wait: true }) to check when done.`,
+              "</task_result>",
+            ].join("\n"),
+          }
+        }
+
         function cancel() {
           SessionPrompt.cancel(nextSession.id)
         }
@@ -141,7 +283,7 @@ export const TaskTool = Tool.defineEffect(
 
           await acquire(concurrencyKey, concurrencyLimit, ctx.abort)
           const timeout = cfg.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT
-          let result: Awaited<ReturnType<typeof SessionPrompt.prompt>>
+          let result: MessageV2.WithParts
           try {
             result = await withTimeout(
               SessionPrompt.prompt({
@@ -182,12 +324,13 @@ export const TaskTool = Tool.defineEffect(
             metadata: {
               sessionId: nextSession.id,
               model: finalModel,
+              background: false,
             },
             output: [
               `task_id: ${nextSession.id} (for resuming to continue this task if needed)`,
               "",
               "<task_result>",
-              result.parts.findLast((item) => item.type === "text")?.text ?? "",
+              result.parts.findLast((item: MessageV2.Part) => item.type === "text")?.text ?? "",
               "</task_result>",
             ].join("\n"),
           }

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"
+import { BackgroundJob } from "../../src/background/job"
 import { Config } from "../../src/config/config"
 import { Permission } from "../../src/permission"
 import { Instance } from "../../src/project/instance"
@@ -62,7 +63,9 @@ describe("tool.task parallel parity", () => {
 
         try {
           const toolInfo = await Effect.runPromise(
-            TaskTool.pipe(Effect.provide(Layer.mergeAll(Agent.defaultLayer, Config.defaultLayer))),
+            TaskTool.pipe(
+              Effect.provide(Layer.mergeAll(Agent.defaultLayer, BackgroundJob.defaultLayer, Config.defaultLayer)),
+            ),
           )
           const tool = await toolInfo.init()
           await tool.execute(
@@ -151,7 +154,9 @@ describe("tool.task parallel parity", () => {
 
         try {
           const toolInfo = await Effect.runPromise(
-            TaskTool.pipe(Effect.provide(Layer.mergeAll(Agent.defaultLayer, Config.defaultLayer))),
+            TaskTool.pipe(
+              Effect.provide(Layer.mergeAll(Agent.defaultLayer, BackgroundJob.defaultLayer, Config.defaultLayer)),
+            ),
           )
           const tool = await toolInfo.init()
           await tool.execute(
