@@ -1203,6 +1203,9 @@ export namespace SessionPrompt {
           let structured: unknown | undefined
           let step = 0
           const session = yield* sessions.get(sessionID)
+          // Cache system prompt fragments that are stable within a single runLoop call
+          let cachedSkills: { key: string; value: string | undefined } | undefined
+          let cachedEnv: { key: string; value: string[] } | undefined
 
           while (true) {
             yield* status.set(sessionID, { type: "busy" })
@@ -1392,9 +1395,21 @@ export namespace SessionPrompt {
                 handle.message.compaction = { total: sw.total, savings: sw.savings, msgs: sw.msgs }
               }
 
+              const skillsKey = agent.name
+              const envKey = `${model.providerID}:${model.id}`
               const [skills, env, instructions, modelMsgs] = yield* Effect.all([
-                Effect.promise(() => SystemPrompt.skills(agent)),
-                Effect.promise(() => SystemPrompt.environment(model)),
+                Effect.gen(function* () {
+                  if (cachedSkills?.key === skillsKey) return cachedSkills.value
+                  const val = yield* Effect.promise(() => SystemPrompt.skills(agent))
+                  cachedSkills = { key: skillsKey, value: val }
+                  return val
+                }),
+                Effect.gen(function* () {
+                  if (cachedEnv?.key === envKey) return cachedEnv.value
+                  const val = yield* Effect.promise(() => SystemPrompt.environment(model))
+                  cachedEnv = { key: envKey, value: val }
+                  return val
+                }),
                 instruction.system().pipe(Effect.orDie),
                 MessageV2.toModelMessagesEffect(msgs, model),
               ])

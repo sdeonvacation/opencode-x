@@ -17,6 +17,8 @@ export class SpawnLimitError extends Error {
 }
 
 const descendants = new Map<string, number>()
+const depthCache = new Map<string, number>()
+const rootCache = new Map<string, string>()
 
 export type SpawnReservation = {
   depth: number
@@ -25,10 +27,17 @@ export type SpawnReservation = {
 }
 
 async function getRootSessionID(sessionID: SessionID) {
+  const key = String(sessionID)
+  const cached = rootCache.get(key)
+  if (cached) return cached
   let current = sessionID
   while (true) {
     const session = await Session.get(current)
-    if (!session.parentID) return String(session.id)
+    if (!session.parentID) {
+      const root = String(session.id)
+      rootCache.set(key, root)
+      return root
+    }
     current = session.parentID
   }
 }
@@ -44,12 +53,18 @@ async function getSpawnInfo(opts: { sessionID: SessionID; parentID?: SessionID }
 }
 
 export async function getDepth(sessionID: SessionID): Promise<number> {
+  const key = String(sessionID)
+  const cached = depthCache.get(key)
+  if (cached !== undefined) return cached
   let depth = 0
   let current = sessionID
 
   while (true) {
     const session = await Session.get(current)
-    if (!session.parentID) return depth
+    if (!session.parentID) {
+      depthCache.set(key, depth)
+      return depth
+    }
     current = session.parentID
     depth++
   }

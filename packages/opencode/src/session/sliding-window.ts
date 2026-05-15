@@ -52,10 +52,15 @@ export namespace SlidingWindow {
   export const compact = Effect.fn("SlidingWindow.compact")(function* (input: CompactInput) {
     if (!should(input)) return input.msgs
 
-    const estimated = yield* estimate(input.msgs, input.model)
-    const total = input.hint !== undefined ? Math.max(input.hint, estimated) : estimated
     const opts = input.cfg.compaction?.sliding_window
     const threshold = opts?.threshold ?? 50_000
+
+    // Fast pre-check: rough char-based estimate avoids expensive toModelMessages
+    const cheap = input.msgs.reduce((acc, m) => acc + cheapEstimate(m), 0)
+    if (cheap < threshold && !input.hint) return input.msgs
+
+    const estimated = yield* estimate(input.msgs, input.model)
+    const total = input.hint !== undefined ? Math.max(input.hint, estimated) : estimated
     if (total < threshold) {
       log.info("skip_below_threshold", { sessionID: input.sessionID, total, estimated, hint: input.hint, threshold })
       return input.msgs
@@ -63,7 +68,7 @@ export namespace SlidingWindow {
 
     const tail = yield* last(input.msgs, input.model)
     const budget = Math.min(Math.max(Math.floor(estimated * (opts?.tail_ratio ?? 0.5)), tail), estimated - MIN)
-    const split = yield* divide(input.msgs, input.model, budget)
+    const split = yield* divide(input.msgs, input.model, budget, estimated)
     if (!split) {
       log.info("skip_no_split", { sessionID: input.sessionID, total, budget, tail })
       return input.msgs
@@ -194,17 +199,33 @@ export namespace SlidingWindow {
     return 0
   })
 
+  function cheapEstimate(msg: MessageV2.WithParts): number {
+    let chars = 0
+    for (const p of msg.parts) {
+      if (p.type === "text" || p.type === "reasoning") chars += p.text?.length ?? 0
+      else if (p.type === "tool" && p.state.status === "completed") {
+        const out = p.state.output
+        chars += typeof out === "string" ? out.length : (JSON.stringify(out)?.length ?? 0)
+      } else if (p.type === "tool" && p.state.status === "error") {
+        chars += p.state.error?.length ?? 0
+      }
+    }
+    return Math.round(chars / 4)
+  }
+
   const divide = Effect.fn("SlidingWindow.divide")(function* (
     msgs: MessageV2.WithParts[],
-    model: Provider.Model,
+    _model: Provider.Model,
     budget: number,
+    fullTotal: number,
   ) {
+    // Scale budget to cheap-estimate space to maintain proportional split point
+    const cheapTotal = msgs.reduce((acc, m) => acc + cheapEstimate(m), 0)
+    const scaled = cheapTotal > 0 && fullTotal > 0 ? Math.round(budget * (cheapTotal / fullTotal)) : budget
     let acc = 0
     for (let i = msgs.length - 1; i >= 0; i--) {
-      const msg = msgs[i]
-      if (!msg) continue
-      acc += yield* estimate([msg], model)
-      if (acc < budget) continue
+      acc += cheapEstimate(msgs[i])
+      if (acc < scaled) continue
       const cut = i
       if (cut === 0) return undefined
       const head = msgs.slice(0, cut)
