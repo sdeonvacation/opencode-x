@@ -82,6 +82,7 @@ export namespace SessionProcessor {
     compressionThreshold: number
     compressionTimeout: number
     compressionMaxTokens: number
+    compressionTailLines: number
     compressionThresholds?: CompressionThresholds
     doom: Map<string, number>
   }
@@ -142,6 +143,7 @@ export namespace SessionProcessor {
           compressionThreshold: cfg.hybrid?.compression_threshold ?? 10,
           compressionTimeout: cfg.hybrid?.compression_timeout_ms ?? 5000,
           compressionMaxTokens: cfg.hybrid?.compression_max_tokens ?? 4096,
+          compressionTailLines: cfg.hybrid?.compression_tail_lines ?? 20,
           compressionThresholds: cfg.hybrid?.compression_thresholds,
           doom: new Map(),
         }
@@ -223,6 +225,7 @@ export namespace SessionProcessor {
               threshold: ctx.compressionThreshold,
               timeout: ctx.compressionTimeout,
               maxTokens: ctx.compressionMaxTokens,
+              tailLines: ctx.compressionTailLines,
             })
             yield* session.updatePart({
               ...match.part,

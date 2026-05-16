@@ -303,7 +303,6 @@ Do NOT speculate about purpose or intent.`,
   filter: `Return only the relevant items from the following output.
 Drop duplicate entries, empty lines, and boilerplate.
 Keep error codes, file paths, test names, and status indicators.
-ALWAYS include the last 20 lines verbatim at the end — they contain the command result (exit status, build outcome, test summary).
 Do NOT add summary, analysis, or recommendations.
 Do NOT reorder or reinterpret the items.`,
 }

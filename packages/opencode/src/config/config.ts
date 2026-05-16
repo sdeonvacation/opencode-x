@@ -974,6 +974,13 @@ export namespace Config {
         .optional()
         .default(4096)
         .describe("Max output tokens for local model compression call (default: 4096)"),
+      compression_tail_lines: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .default(20)
+        .describe("Lines from end of bash output to always preserve verbatim after compression (default: 20)"),
       compression_thresholds: z
         .object({
           grep: z

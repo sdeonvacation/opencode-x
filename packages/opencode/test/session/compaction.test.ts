@@ -660,6 +660,7 @@ describe("session.compaction.process", () => {
                   compression_threshold: 10,
                   compression_timeout_ms: 5000,
                   compression_max_tokens: 4096,
+                  compression_tail_lines: 20,
                 },
               }),
           }),

@@ -8,6 +8,16 @@ import { COMPRESSION_SYSTEM, COMPRESSION_TEMPLATES, listLines, validateCompressi
 
 const log = Log.create({ service: "llm.compress" })
 
+function enforceTail(raw: string, compressed: string, n: number): string {
+  if (n <= 0) return compressed
+  const rawSplit = raw.split("\n")
+  const tail = rawSplit.slice(-n).filter((l) => l.trim())
+  if (!tail.length) return compressed
+  const missing = tail.filter((l) => !compressed.includes(l))
+  if (!missing.length) return compressed
+  return compressed.trimEnd() + "\n" + missing.join("\n")
+}
+
 export namespace LLMCompress {
   export type Input = {
     tool: string
@@ -17,6 +27,7 @@ export namespace LLMCompress {
     threshold: number
     timeout: number
     maxTokens: number
+    tailLines: number
   }
 
   export type Stats = {
@@ -76,7 +87,8 @@ export namespace LLMCompress {
       abortSignal: AbortSignal.timeout(input.timeout),
     })
 
-    const compressed = response.text
+    const compressed =
+      input.template === "filter" ? enforceTail(input.output, response.text, input.tailLines) : response.text
     const input_lines = listLines(input.output)
     const output_lines = listLines(compressed)
     const valid = validateCompression(input.output, compressed)
