@@ -1,5 +1,5 @@
 import { createStore } from "solid-js/store"
-import { batch, createEffect, createMemo, on } from "solid-js"
+import { batch, createEffect, createMemo } from "solid-js"
 import { useSync } from "@tui/context/sync"
 import { useTheme } from "@tui/context/theme"
 import { useRoute } from "@tui/context/route"
@@ -7,7 +7,6 @@ import { useEvent } from "@tui/context/event"
 import { uniqueBy } from "remeda"
 import path from "path"
 import { Global } from "@/global"
-import { Flag } from "@/flag/flag"
 import { iife } from "@/util/iife"
 import { createSimpleContext } from "./helper"
 import { useToast } from "../ui/toast"
@@ -409,13 +408,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const [sessionStore, setSessionStore] = createStore<{
         ready: boolean
         pinned: string[]
-        dismissedRecent: string[]
-        recentOrder: string[]
       }>({
         ready: false,
         pinned: [],
-        dismissedRecent: [],
-        recentOrder: [],
       })
 
       const filePath = path.join(Global.Path.state, "session.json")
@@ -431,16 +426,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         state.pending = false
         void Filesystem.writeJson(filePath, {
           pinned: sessionStore.pinned,
-          dismissedRecent: sessionStore.dismissedRecent,
-          recentOrder: sessionStore.recentOrder,
         })
       }
 
       Filesystem.readJson(filePath)
         .then((x: any) => {
           if (Array.isArray(x.pinned)) setSessionStore("pinned", x.pinned)
-          if (Array.isArray(x.dismissedRecent)) setSessionStore("dismissedRecent", x.dismissedRecent)
-          if (Array.isArray(x.recentOrder)) setSessionStore("recentOrder", x.recentOrder)
         })
         .catch(() => {})
         .finally(() => {
@@ -454,77 +445,24 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const slots = createMemo(() => {
         const rootSessions = sync.data.session.filter((x) => x.parentID === undefined)
         const existing = new Set(rootSessions.map((x) => x.id))
-        const dismissed = new Set(sessionStore.dismissedRecent)
-        const pins = sessionStore.pinned.filter((id) => existing.has(id))
-        const pinnedSet = new Set(pins)
-        const recent = rootSessions
-          .filter((x) => !pinnedSet.has(x.id) && !dismissed.has(x.id))
-          .toSorted((a, b) => b.time.updated - a.time.updated)
-          .map((x) => x.id)
-        return [...pins, ...recent].slice(0, 9)
+        return sessionStore.pinned.filter((id) => existing.has(id)).slice(0, 9)
       })
 
       function prune(sessionID: string) {
-        batch(() => {
-          if (sessionStore.pinned.includes(sessionID)) {
-            setSessionStore(
-              "pinned",
-              sessionStore.pinned.filter((id) => id !== sessionID),
-            )
-          }
-          if (sessionStore.dismissedRecent.includes(sessionID)) {
-            setSessionStore(
-              "dismissedRecent",
-              sessionStore.dismissedRecent.filter((id) => id !== sessionID),
-            )
-          }
-          if (sessionStore.recentOrder.includes(sessionID)) {
-            setSessionStore(
-              "recentOrder",
-              sessionStore.recentOrder.filter((id) => id !== sessionID),
-            )
-          }
-        })
-        save()
+        if (sessionStore.pinned.includes(sessionID)) {
+          setSessionStore(
+            "pinned",
+            sessionStore.pinned.filter((id) => id !== sessionID),
+          )
+          save()
+        }
       }
 
       event.on("session.deleted", (evt) => {
         prune(evt.properties.sessionID)
       })
 
-      function cycleRecent(direction: 1 | -1) {
-        if (!Flag.OPENCODE_EXPERIMENTAL_SESSION_SWITCHING) return
-        const current = route.data
-        if (current?.type !== "session") return
-        const currentID = current.sessionID
-        const list = slots()
-        const idx = list.indexOf(currentID)
-        if (list.length === 0) return
-        const next = idx === -1 ? list[0] : list[(idx + direction + list.length) % list.length]
-        if (!next || next === currentID) return
-        route.navigate({ type: "session", sessionID: next })
-
-        createEffect(
-          on(
-            () => route.data,
-            (r) => {
-              if (r?.type === "session" && r.sessionID === next) {
-                // arrived at target
-              }
-            },
-          ),
-        )
-
-        if (sessionStore.recentOrder.includes(currentID)) {
-          setSessionStore("recentOrder", [currentID, ...sessionStore.recentOrder.filter((id) => id !== currentID)])
-        } else {
-          setSessionStore("recentOrder", [currentID, ...sessionStore.recentOrder])
-        }
-        save()
-      }
-
       function quickSwitch(slot: number) {
-        if (!Flag.OPENCODE_EXPERIMENTAL_SESSION_SWITCHING) return
         const id = slots()[slot - 1]
         if (!id) return
         route.navigate({ type: "session", sessionID: id })
@@ -532,8 +470,6 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
       return {
         pinned: () => sessionStore.pinned,
-        dismissedRecent: () => sessionStore.dismissedRecent,
-        recentOrder: () => sessionStore.recentOrder,
         slots,
         isPinned: (id: string) => sessionStore.pinned.includes(id),
         togglePin: (id: string) => {
@@ -543,22 +479,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               sessionStore.pinned.filter((p) => p !== id),
             )
           } else {
-            setSessionStore("pinned", [id, ...sessionStore.pinned])
+            setSessionStore("pinned", [...sessionStore.pinned, id])
           }
           save()
         },
-        toggleRecent: (id: string) => {
-          if (sessionStore.dismissedRecent.includes(id)) {
-            setSessionStore(
-              "dismissedRecent",
-              sessionStore.dismissedRecent.filter((d) => d !== id),
-            )
-          } else {
-            setSessionStore("dismissedRecent", [id, ...sessionStore.dismissedRecent])
-          }
-          save()
-        },
-        cycleRecent,
         quickSwitch,
       }
     })

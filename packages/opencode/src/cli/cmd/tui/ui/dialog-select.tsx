@@ -30,6 +30,11 @@ export interface DialogSelectProps<T> {
     disabled?: boolean
     onTrigger: (option: DialogSelectOption<T>) => void
   }[]
+  footerHints?: {
+    title: string
+    label: string
+    side?: "left" | "right"
+  }[]
   current?: T
 }
 
@@ -236,6 +241,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   props.ref?.(ref)
 
   const keybinds = createMemo(() => props.keybind?.filter((x) => !x.disabled && x.keybind) ?? [])
+  const hints = createMemo(() => props.footerHints ?? [])
   const left = createMemo(() => keybinds().filter((item) => item.side !== "right"))
   const right = createMemo(() => keybinds().filter((item) => item.side === "right"))
 
@@ -362,7 +368,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           </For>
         </scrollbox>
       </Show>
-      <Show when={keybinds().length} fallback={<box flexShrink={0} />}>
+      <Show when={keybinds().length || hints().length} fallback={<box flexShrink={0} />}>
         <box
           paddingRight={2}
           paddingLeft={4}
@@ -382,6 +388,16 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                 </text>
               )}
             </For>
+            <For each={hints().filter((h) => h.side !== "right")}>
+              {(item) => (
+                <text>
+                  <span style={{ fg: theme.text }}>
+                    <b>{item.title}</b>{" "}
+                  </span>
+                  <span style={{ fg: theme.textMuted }}>{item.label}</span>
+                </text>
+              )}
+            </For>
           </box>
           <box flexDirection="row" gap={2}>
             <For each={right()}>
@@ -391,6 +407,16 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                     <b>{item.title}</b>{" "}
                   </span>
                   <span style={{ fg: theme.textMuted }}>{Keybind.toString(item.keybind)}</span>
+                </text>
+              )}
+            </For>
+            <For each={hints().filter((h) => h.side === "right")}>
+              {(item) => (
+                <text>
+                  <span style={{ fg: theme.text }}>
+                    <b>{item.title}</b>{" "}
+                  </span>
+                  <span style={{ fg: theme.textMuted }}>{item.label}</span>
                 </text>
               )}
             </For>

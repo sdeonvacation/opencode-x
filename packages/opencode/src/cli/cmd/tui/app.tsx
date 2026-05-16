@@ -347,40 +347,16 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
     },
     ...createClearCommands({ sdk, sync, kv, toast, route, local }),
-    ...(Flag.OPENCODE_EXPERIMENTAL_SESSION_SWITCHING
-      ? [
-          {
-            title: "Cycle to previous recent session",
-            value: "session.cycle_recent",
-            keybind: "session_cycle_recent",
-            category: "Session",
-            hidden: true,
-            onSelect: () => {
-              local.session.cycleRecent(1)
-            },
-          },
-          {
-            title: "Cycle to next recent session",
-            value: "session.cycle_recent_reverse",
-            keybind: "session_cycle_recent_reverse",
-            category: "Session",
-            hidden: true,
-            onSelect: () => {
-              local.session.cycleRecent(-1)
-            },
-          },
-          ...Array.from({ length: 9 }, (_, i) => ({
-            title: `Switch to session in quick slot ${i + 1}`,
-            value: `session.quick_switch.${i + 1}`,
-            keybind: `session_quick_switch_${i + 1}`,
-            category: "Session",
-            hidden: true,
-            onSelect: () => {
-              local.session.quickSwitch(i + 1)
-            },
-          })),
-        ]
-      : []),
+    ...Array.from({ length: 9 }, (_, i) => ({
+      title: `Switch to session in quick slot ${i + 1}`,
+      value: `session.quick_switch.${i + 1}`,
+      keybind: `session_quick_switch_${i + 1}`,
+      category: "Session",
+      hidden: true,
+      onSelect: () => {
+        local.session.quickSwitch(i + 1)
+      },
+    })),
     {
       title: "Switch model",
       value: "model.list",

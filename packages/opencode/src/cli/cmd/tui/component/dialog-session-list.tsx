@@ -29,7 +29,6 @@ export function DialogSessionList() {
   const sdk = useSDK()
   const toast = useToast()
   const local = useLocal()
-  const RECENT_LIMIT = 5
   const [toDelete, setToDelete] = createSignal<string>()
   const [search, setSearch] = createDebouncedSignal("", 150)
 
@@ -60,7 +59,6 @@ export function DialogSessionList() {
   }
 
   const options = createMemo(() => {
-    const enabled = Flag.OPENCODE_EXPERIMENTAL_SESSION_SWITCHING
     const today = new Date().toDateString()
     const rootSessions = sessions().filter((x) => x.parentID === undefined)
     const sessionMap = new Map(rootSessions.map((x) => [x.id, x]))
@@ -73,17 +71,9 @@ export function DialogSessionList() {
       })
       .map((x) => x.id)
 
-    const dismissed = enabled ? new Set(local.session.dismissedRecent()) : new Set<string>()
-    const pinned: string[] = enabled ? local.session.pinned().filter((id: string) => sessionMap.has(id)) : []
+    const pinned = local.session.pinned().filter((id: string) => sessionMap.has(id))
     const pinnedSet = new Set(pinned)
-    const slotByID = enabled
-      ? new Map<string, number>(local.session.slots().map((id: string, i: number) => [id, i + 1]))
-      : new Map<string, number>()
-
-    const recent = enabled
-      ? displayOrder.filter((id) => !pinnedSet.has(id) && !dismissed.has(id)).slice(0, RECENT_LIMIT)
-      : []
-    const recentSet = new Set(recent)
+    const slotByID = new Map<string, number>(local.session.slots().map((id: string, i: number) => [id, i + 1]))
 
     function dateCategory(id: string) {
       const x = sessionMap.get(id)
@@ -147,15 +137,10 @@ export function DialogSessionList() {
       }
     }
 
-    if (!enabled) {
-      return displayOrder.map((id) => buildOption(id, dateCategory(id))).filter((x) => x !== undefined)
-    }
-
-    const remaining = displayOrder.filter((id) => !pinnedSet.has(id) && !recentSet.has(id))
+    const remaining = displayOrder.filter((id) => !pinnedSet.has(id))
 
     return [
       ...pinned.map((id) => buildOption(id, "Pinned")),
-      ...recent.map((id) => buildOption(id, "Recent")),
       ...remaining.map((id) => buildOption(id, dateCategory(id))),
     ].filter((x) => x !== undefined)
   })
@@ -212,32 +197,13 @@ export function DialogSessionList() {
             createWorkspace()
           },
         },
-        ...(Flag.OPENCODE_EXPERIMENTAL_SESSION_SWITCHING
-          ? [
-              {
-                keybind: keybind.all.session_pin_toggle?.[0],
-                title: "pin/unpin",
-                onTrigger: (option: { value: string }) => {
-                  local.session.togglePin(option.value)
-                },
-              },
-              {
-                keybind: keybind.all.session_toggle_recent?.[0],
-                title: "toggle recent",
-                onTrigger: (option: { value: string }) => {
-                  if (local.session.isPinned(option.value)) {
-                    toast.show({
-                      variant: "info",
-                      message: "Unpin the session first to toggle it in Recent",
-                      duration: 3000,
-                    })
-                    return
-                  }
-                  local.session.toggleRecent(option.value)
-                },
-              },
-            ]
-          : []),
+        {
+          keybind: keybind.all.session_pin_toggle?.[0],
+          title: "pin/unpin",
+          onTrigger: (option: { value: string }) => {
+            local.session.togglePin(option.value)
+          },
+        },
       ]}
     />
   )
