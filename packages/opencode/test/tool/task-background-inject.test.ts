@@ -2,6 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test"
 import { Instance } from "../../src/project/instance"
 import { Bus } from "../../src/bus"
 import { TuiEvent } from "../../src/cli/cmd/tui/event"
+import { SessionID } from "../../src/session/schema"
 import { tmpdir } from "../fixture/fixture"
 
 describe("tool.task background inject Instance.bind", () => {
@@ -56,10 +57,10 @@ describe("tool.task background inject Instance.bind", () => {
           published.push(args)
         })
 
-        const bound = Instance.bind(async (state: string) => {
+        const bound = Instance.bind(async (state: "completed" | "error" | "running") => {
           await Bus.publish(TuiEvent.BackgroundTaskUpdate, {
-            sessionID: "ses_test",
-            taskID: "ses_child",
+            sessionID: SessionID.make("ses_test"),
+            taskID: SessionID.make("ses_child"),
             title: "test task",
             state,
           })

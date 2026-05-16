@@ -8,6 +8,7 @@ import { SessionID, MessageID, PartID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Config } from "../../src/config/config"
 import { Flag } from "../../src/flag/flag"
+import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { testEffect } from "../lib/effect"
 import { provideTmpdirInstance } from "../fixture/fixture"
 
@@ -25,7 +26,13 @@ const ref = {
 }
 
 const it = testEffect(
-  Layer.mergeAll(BackgroundJob.defaultLayer, SessionStatus.defaultLayer, Session.defaultLayer, Config.defaultLayer),
+  Layer.mergeAll(
+    BackgroundJob.defaultLayer,
+    SessionStatus.defaultLayer,
+    Session.defaultLayer,
+    Config.defaultLayer,
+    CrossSpawnSpawner.defaultLayer,
+  ),
 )
 
 function makeCtx(sessionID?: string) {
@@ -46,7 +53,7 @@ describe("tool.task_status", () => {
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           const info = yield* TaskStatusTool
-          const tool = await info.init()
+          const tool = yield* Effect.promise(() => info.init())
           expect(tool.description).toContain("background subagent")
           expect(tool.parameters).toBeDefined()
         }),
@@ -59,8 +66,8 @@ describe("tool.task_status", () => {
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           const info = yield* TaskStatusTool
-          const tool = await info.init()
-          const result = await tool.execute({ task_id: "ses_nonexistent" }, makeCtx())
+          const tool = yield* Effect.promise(() => info.init())
+          const result = yield* Effect.promise(() => tool.execute({ task_id: "ses_nonexistent" }, makeCtx()))
           expect(result.output).toContain("state: error")
           expect(result.output).toContain("Task not found")
           expect(result.metadata.state).toBe("error")
@@ -109,8 +116,8 @@ describe("tool.task_status", () => {
           })
 
           const info = yield* TaskStatusTool
-          const tool = await info.init()
-          const result = await tool.execute({ task_id: chat.id }, makeCtx())
+          const tool = yield* Effect.promise(() => info.init())
+          const result = yield* Effect.promise(() => tool.execute({ task_id: chat.id }, makeCtx()))
 
           expect(result.output).toContain("state:")
           expect(result.output).toContain("task_id:")
@@ -143,8 +150,8 @@ describe("tool.task_status", () => {
           })
 
           const info = yield* TaskStatusTool
-          const tool = await info.init()
-          const result = await tool.execute({ task_id: chat.id }, makeCtx())
+          const tool = yield* Effect.promise(() => info.init())
+          const result = yield* Effect.promise(() => tool.execute({ task_id: chat.id }, makeCtx()))
 
           expect(result.output).toContain("state: running")
           expect(result.output).toContain("<task_result>")
@@ -180,8 +187,8 @@ describe("tool.task_status", () => {
           yield* Effect.sleep("50 millis")
 
           const info = yield* TaskStatusTool
-          const tool = await info.init()
-          const result = await tool.execute({ task_id: chat.id }, makeCtx())
+          const tool = yield* Effect.promise(() => info.init())
+          const result = yield* Effect.promise(() => tool.execute({ task_id: chat.id }, makeCtx()))
 
           expect(result.output).toContain("state: completed")
           expect(result.output).toContain("Final answer from subagent")
@@ -217,8 +224,8 @@ describe("tool.task_status", () => {
           yield* Effect.sleep("50 millis")
 
           const info = yield* TaskStatusTool
-          const tool = await info.init()
-          const result = await tool.execute({ task_id: chat.id }, makeCtx())
+          const tool = yield* Effect.promise(() => info.init())
+          const result = yield* Effect.promise(() => tool.execute({ task_id: chat.id }, makeCtx()))
 
           expect(result.output).toContain("state: error")
           expect(result.output).toContain("<task_error>")
@@ -252,8 +259,10 @@ describe("tool.task_status", () => {
           })
 
           const info = yield* TaskStatusTool
-          const tool = await info.init()
-          const result = await tool.execute({ task_id: chat.id, wait: true, timeout_ms: 100 }, makeCtx())
+          const tool = yield* Effect.promise(() => info.init())
+          const result = yield* Effect.promise(() =>
+            tool.execute({ task_id: chat.id, wait: true, timeout_ms: 100 }, makeCtx()),
+          )
 
           expect(result.output).toContain("Timed out")
           expect(result.metadata.timed_out).toBe(true)
@@ -287,8 +296,10 @@ describe("tool.task_status", () => {
           yield* Effect.sleep("50 millis")
 
           const info = yield* TaskStatusTool
-          const tool = await info.init()
-          const result = await tool.execute({ task_id: chat.id, wait: true, timeout_ms: 5000 }, makeCtx())
+          const tool = yield* Effect.promise(() => info.init())
+          const result = yield* Effect.promise(() =>
+            tool.execute({ task_id: chat.id, wait: true, timeout_ms: 5000 }, makeCtx()),
+          )
 
           expect(result.output).toContain("state: completed")
           expect(result.output).toContain("Done instantly")
@@ -306,9 +317,12 @@ describe("tool.task_status", () => {
           ;(Flag as any).OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = false
           try {
             const info = yield* TaskStatusTool
-            const tool = await info.init()
-            await expect(tool.execute({ task_id: "ses_test" }, makeCtx())).rejects.toThrow(
-              "task_status requires OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true",
+            const tool = yield* Effect.promise(() => info.init())
+            yield* Effect.promise(
+              () =>
+                expect(tool.execute({ task_id: "ses_test" }, makeCtx())).rejects.toThrow(
+                  "task_status requires OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true",
+                ) as unknown as Promise<unknown>,
             )
           } finally {
             ;(Flag as any).OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = prev
@@ -323,8 +337,8 @@ describe("tool.task_status", () => {
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           const info = yield* TaskStatusTool
-          const tool = await info.init()
-          const result = await tool.execute({ task_id: "ses_missing" }, makeCtx())
+          const tool = yield* Effect.promise(() => info.init())
+          const result = yield* Effect.promise(() => tool.execute({ task_id: "ses_missing" }, makeCtx()))
 
           const lines = result.output.split("\n")
           expect(lines[0]).toMatch(/^task_id: /)

@@ -53,6 +53,7 @@ import { ToolRegistry } from "../../src/tool/registry"
 import { Truncate } from "../../src/tool/truncate"
 import { AppFileSystem } from "../../src/filesystem"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
+import { BackgroundJob } from "../../src/background/job"
 
 Log.init({ print: false })
 
@@ -129,6 +130,7 @@ function makeHttp() {
     mcp,
     AppFileSystem.defaultLayer,
     status,
+    BackgroundJob.defaultLayer,
   ).pipe(Layer.provideMerge(infra))
   const question = Question.layer.pipe(Layer.provideMerge(deps))
   const todo = Todo.layer.pipe(Layer.provideMerge(deps))

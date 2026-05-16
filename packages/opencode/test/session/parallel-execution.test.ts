@@ -34,6 +34,7 @@ import { reply, TestLLMServer } from "../lib/llm-server"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Skill } from "../../src/skill"
+import { BackgroundJob } from "../../src/background/job"
 
 const ref = {
   providerID: ProviderID.openai,
@@ -112,6 +113,7 @@ function makeHttp() {
     mcp,
     AppFileSystem.defaultLayer,
     status,
+    BackgroundJob.defaultLayer,
   ).pipe(Layer.provideMerge(infra))
   const question = Question.layer.pipe(Layer.provideMerge(deps))
   const todo = Todo.layer.pipe(Layer.provideMerge(deps))

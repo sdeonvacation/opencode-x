@@ -87,7 +87,7 @@ describe("tool.task background", () => {
                 prompt: "do work",
                 subagent_type: "general",
                 background: true,
-              },
+              } as any,
               {
                 sessionID,
                 messageID,
@@ -142,7 +142,7 @@ describe("tool.task background", () => {
                 prompt: "do work",
                 subagent_type: "general",
                 background: true,
-              },
+              } as any,
               {
                 sessionID,
                 messageID,
@@ -200,7 +200,7 @@ describe("tool.task background", () => {
               prompt: "do work",
               subagent_type: "general",
               background: false,
-            },
+            } as any,
             {
               sessionID,
               messageID,
@@ -283,7 +283,7 @@ describe("tool.task background", () => {
                 prompt: "do work",
                 subagent_type: "general",
                 background: true,
-              },
+              } as any,
               {
                 sessionID,
                 messageID,
