@@ -204,6 +204,13 @@ export function Prompt(props: PromptProps) {
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
   let promptPartTypeId = 0
   const event = useEvent()
+  const [bgTasks, setBgTasks] = createSignal(0)
+
+  event.on(TuiEvent.BackgroundTaskUpdate.type, (evt) => {
+    if (evt.properties.sessionID !== props.sessionID) return
+    if (evt.properties.state === "running") setBgTasks((n) => n + 1)
+    else setBgTasks((n) => Math.max(0, n - 1))
+  })
 
   event.on(TuiEvent.PromptAppend.type, (evt) => {
     if (!input || input.isDestroyed) return
@@ -1287,7 +1294,18 @@ export function Prompt(props: PromptProps) {
           />
         </box>
         <box width="100%" flexDirection="row" justifyContent="space-between">
-          <Show when={status().type !== "idle"} fallback={props.hint ?? <text />}>
+          <Show
+            when={status().type !== "idle"}
+            fallback={
+              <Show when={bgTasks() > 0} fallback={props.hint ?? <text />}>
+                <box marginLeft={1}>
+                  <text fg={theme.textMuted}>
+                    ⟳ {bgTasks()} background {bgTasks() === 1 ? "task" : "tasks"}
+                  </text>
+                </box>
+              </Show>
+            }
+          >
             <box
               flexDirection="row"
               gap={1}

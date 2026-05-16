@@ -51,6 +51,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { SessionRunState } from "./run-state"
 import { Instance } from "@/project/instance"
+import type { TaskPromptOps } from "@/tool/task"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -228,7 +229,16 @@ export namespace SessionPrompt {
           abort: options.abortSignal!,
           messageID: input.processor.message.id,
           callID: options.toolCallId,
-          extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck },
+          extra: {
+            model: input.model,
+            bypassAgentCheck: input.bypassAgentCheck,
+            promptOps: {
+              cancel: (sessionID) => SessionPrompt.cancel(sessionID),
+              resolvePromptParts: (template) => SessionPrompt.resolvePromptParts(template),
+              prompt: (promptInput) => SessionPrompt.prompt(promptInput),
+              loop: (loopInput) => SessionPrompt.loop(loopInput),
+            } satisfies TaskPromptOps,
+          },
           agent: input.agent.name,
           messages: input.messages,
           metadata: (val) =>

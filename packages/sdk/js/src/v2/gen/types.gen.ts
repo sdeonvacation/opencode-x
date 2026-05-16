@@ -320,6 +320,16 @@ export type EventTuiSessionSelect = {
   }
 }
 
+export type EventTuiBackgroundUpdate = {
+  type: "tui.background.update"
+  properties: {
+    sessionID: string
+    taskID: string
+    title: string
+    state: "running" | "completed" | "error"
+  }
+}
+
 export type EventMcpToolsChanged = {
   type: "mcp.tools.changed"
   properties: {
@@ -1045,14 +1055,14 @@ export type Session = {
     snapshot?: string
     diff?: string
   }
-  cost: number
-  tokens: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
+  cost?: number
+  tokens?: {
+    input?: number
+    output?: number
+    reasoning?: number
+    cache?: {
+      read?: number
+      write?: number
     }
   }
 }
@@ -1104,6 +1114,7 @@ export type Event =
   | EventTuiCommandExecute
   | EventTuiToastShow
   | EventTuiSessionSelect
+  | EventTuiBackgroundUpdate
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
   | EventCommandExecuted
@@ -1230,12 +1241,12 @@ export type SyncEventSessionUpdated = {
       } | null
       cost: number | null
       tokens: {
-        input: number
-        output: number
-        reasoning: number
-        cache: {
-          read: number
-          write: number
+        input?: number
+        output?: number
+        reasoning?: number
+        cache?: {
+          read?: number
+          write?: number
         }
       } | null
     }
@@ -1601,6 +1612,10 @@ export type HybridConfig = {
    * Timeout in ms for local model compression call (default: 5000)
    */
   compression_timeout_ms?: number
+  /**
+   * Max output tokens for local model compression call (default: 4096)
+   */
+  compression_max_tokens?: number
   /**
    * Per-tool line count thresholds for compression eligibility
    */
@@ -2120,14 +2135,14 @@ export type GlobalSession = {
     snapshot?: string
     diff?: string
   }
-  cost: number
-  tokens: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
+  cost?: number
+  tokens?: {
+    input?: number
+    output?: number
+    reasoning?: number
+    cache?: {
+      read?: number
+      write?: number
     }
   }
   project: ProjectSummary | null
@@ -5500,7 +5515,12 @@ export type TuiShowToastResponses = {
 export type TuiShowToastResponse = TuiShowToastResponses[keyof TuiShowToastResponses]
 
 export type TuiPublishData = {
-  body?: EventTuiPromptAppend | EventTuiCommandExecute | EventTuiToastShow | EventTuiSessionSelect
+  body?:
+    | EventTuiPromptAppend
+    | EventTuiCommandExecute
+    | EventTuiToastShow
+    | EventTuiSessionSelect
+    | EventTuiBackgroundUpdate
   path?: never
   query?: {
     directory?: string

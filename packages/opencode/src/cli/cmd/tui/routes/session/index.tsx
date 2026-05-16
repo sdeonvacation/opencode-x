@@ -1689,6 +1689,7 @@ function InlineTool(props: {
   children: JSX.Element
   part: ToolPart
   onClick?: () => void
+  tok?: string
 }) {
   const [margin, setMargin] = createSignal(0)
   const { theme } = useTheme()
@@ -1699,6 +1700,7 @@ function InlineTool(props: {
 
   // Live token counter from streaming data
   const tok = createMemo(() => {
+    if (props.tok !== undefined) return props.tok || undefined
     const state = props.part.state
     if (state.status === "pending") {
       const len = state.raw?.length ?? 0
@@ -2131,6 +2133,17 @@ function Task(props: ToolProps<typeof TaskTool>) {
 
   const messages = createMemo(() => sync.data.message[sessionId() ?? ""] ?? [])
 
+  const output = createMemo(() => {
+    if (!props.metadata.background) return ""
+    const last = messages().findLast((x) => x.role === "assistant")
+    if (!last) return ""
+    const parts = sync.data.part[last.id] ?? []
+    return parts
+      .filter((p): p is TextPart => p.type === "text")
+      .map((p) => p.text)
+      .join("")
+  })
+
   const tools = createMemo(() => {
     return messages().flatMap((msg) =>
       (sync.data.part[msg.id] ?? [])
@@ -2141,7 +2154,21 @@ function Task(props: ToolProps<typeof TaskTool>) {
 
   const current = createMemo(() => tools().findLast((x) => (x.state as any).title))
 
-  const isRunning = createMemo(() => props.part.state.status === "running")
+  const isRunning = createMemo(() => {
+    if (!props.metadata.background) return props.part.state.status === "running"
+    const id = sessionId()
+    if (!id) return false
+    const status = sync.data.session_status[id]
+    // no status entry yet means the child session hasn't reported idle — treat as running
+    return !status || status.type !== "idle"
+  })
+
+  const bgTok = createMemo(() => {
+    if (!props.metadata.background) return undefined
+    if (isRunning()) return ""
+    const out = output()
+    return out.length > 0 ? tokens(out.length) : ""
+  })
 
   const duration = createMemo(() => {
     const first = messages().find((x) => x.role === "user")?.time.created
@@ -2152,7 +2179,8 @@ function Task(props: ToolProps<typeof TaskTool>) {
 
   const content = createMemo(() => {
     if (!props.input.description) return ""
-    let content = [`${Locale.titlecase(props.input.subagent_type ?? "General")} Task — ${props.input.description}`]
+    const bg = props.metadata.background ? " [background]" : ""
+    let content = [`${Locale.titlecase(props.input.subagent_type ?? "General")} Task${bg} — ${props.input.description}`]
 
     if (isRunning() && tools().length > 0) {
       // content[0] += ` · ${tools().length} toolcalls`
@@ -2160,7 +2188,9 @@ function Task(props: ToolProps<typeof TaskTool>) {
       else content.push(`↳ ${tools().length} toolcalls`)
     }
 
-    if (props.part.state.status === "completed") {
+    if (!isRunning() && props.metadata.background) {
+      content.push(`└ ${tools().length} toolcalls · ${Locale.duration(duration())}`)
+    } else if (props.part.state.status === "completed") {
       content.push(`└ ${tools().length} toolcalls · ${Locale.duration(duration())}`)
     }
 
@@ -2174,6 +2204,7 @@ function Task(props: ToolProps<typeof TaskTool>) {
       complete={props.input.description}
       pending={SpinnerVerbs.forTool("task")}
       part={props.part}
+      tok={bgTok()}
       onClick={() => {
         const id = sessionId()
         if (id) navigate({ type: "session", sessionID: id })

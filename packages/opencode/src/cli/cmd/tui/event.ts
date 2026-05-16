@@ -46,4 +46,13 @@ export const TuiEvent = {
       sessionID: SessionID.zod.describe("Session ID to navigate to"),
     }),
   ),
+  BackgroundTaskUpdate: BusEvent.define(
+    "tui.background.update",
+    z.object({
+      sessionID: SessionID.zod,
+      taskID: z.string(),
+      title: z.string(),
+      state: z.enum(["running", "completed", "error"]),
+    }),
+  ),
 }
