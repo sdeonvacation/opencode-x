@@ -385,7 +385,7 @@ export namespace SessionProcessor {
               }))
 
               const parts = MessageV2.parts(ctx.assistantMessage.id)
-              const recentParts = parts.slice(-DOOM_LOOP_THRESHOLD)
+              const recentParts = parts.filter((part) => part.type === "tool").slice(-DOOM_LOOP_THRESHOLD)
 
               if (
                 recentParts.length !== DOOM_LOOP_THRESHOLD ||

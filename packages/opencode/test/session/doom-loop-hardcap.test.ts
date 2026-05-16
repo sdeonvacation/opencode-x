@@ -178,17 +178,11 @@ describe("doom loop hard cap", () => {
           Effect.gen(function* () {
             const { processors, session, provider } = yield* boot()
 
-            // Queue 5 responses: 4 with 3 identical parallel tool calls + 1 final text.
-            // Each step triggers doom loop once (on the 3rd tool-call).
-            // Step 1: count=1, Step 2: count=2, Step 3: count=3 (at cap, not exceeded).
-            // Step 4: count=4 > DOOM_LOOP_HARD_CAP=3 → hard fail.
-            for (let i = 0; i < 4; i++) {
-              yield* llm.push(
-                reply()
-                  .tool("bash", { cmd: "echo loop" })
-                  .tool("bash", { cmd: "echo loop" })
-                  .tool("bash", { cmd: "echo loop" }),
-              )
+            // Queue repeated single-tool responses.
+            // Doom loop starts after the 3rd matching tool part, then increments on each loop.
+            // Step 6 exceeds DOOM_LOOP_HARD_CAP=3 → hard fail.
+            for (let i = 0; i < 6; i++) {
+              yield* llm.push(reply().tool("bash", { cmd: "echo loop" }))
             }
             // Final response after hard cap (won't be reached if process stops)
             yield* llm.push(reply().text("final").stop())
@@ -221,10 +215,9 @@ describe("doom loop hard cap", () => {
             }
 
             // Call process() in a loop like prompt.ts does.
-            // Each call consumes one LLM response (3 identical tool calls).
-            // Doom loop fires once per response on the 3rd tool-call event.
+            // Each call consumes one LLM response with one matching tool call.
             let result: SessionProcessor.Result = "continue"
-            for (let i = 0; i < 5 && result === "continue"; i++) {
+            for (let i = 0; i < 7 && result === "continue"; i++) {
               result = yield* handle.process(input)
             }
 
@@ -255,15 +248,10 @@ describe("doom loop hard cap", () => {
           Effect.gen(function* () {
             const { processors, session, provider } = yield* boot()
 
-            // Queue 3 responses with 3 identical parallel tool calls + final text.
-            // Doom loop fires 3 times (count=1,2,3). Count 3 is NOT > cap (3).
-            for (let i = 0; i < 3; i++) {
-              yield* llm.push(
-                reply()
-                  .tool("bash", { cmd: "echo ok" })
-                  .tool("bash", { cmd: "echo ok" })
-                  .tool("bash", { cmd: "echo ok" }),
-              )
+            // Queue repeated single-tool responses up to the hard cap.
+            // Step 5 reaches count=3, which is allowed.
+            for (let i = 0; i < 5; i++) {
+              yield* llm.push(reply().tool("bash", { cmd: "echo ok" }))
             }
             yield* llm.push(reply().text("done").stop())
 
@@ -294,9 +282,9 @@ describe("doom loop hard cap", () => {
               tools: { bash: loopTool },
             }
 
-            // Call process() in a loop — 3 tool responses + 1 text stop
+            // Call process() in a loop — 5 tool responses + 1 text stop
             let result: SessionProcessor.Result = "continue"
-            for (let i = 0; i < 5 && result === "continue"; i++) {
+            for (let i = 0; i < 6 && result === "continue"; i++) {
               result = yield* handle.process(input)
             }
 
