@@ -1,142 +1,93 @@
 # OpenCode X
 
-AI-powered development platform with hybrid local+cloud routing, safe parallelism, and enhanced orchestration.
+Fork of [opencode](https://github.com/anomalyco/opencode) with token efficiency, memory efficiency, and orchestration improvements.
 
-**For detailed setup and configuration, see [OPENCODE-X_GUIDE.md](./OPENCODE-X_GUIDE.md).**
-
----
-
-## What's New in OpenCode X
-
-### Hybrid Local+Cloud Routing
-
-Intelligently route tasks: cheap/simple turns execute locally, complex analysis uses cloud. Configurable per-category routing for cost efficiency.
-
-- Evidence: `session/llm.ts`, `route-classifier.ts`, `resolve-local.ts`
-
-### Safe Parallel Tool Execution
-
-Run compatible tools in parallel—read, glob, grep, and file operations execute concurrently for faster workflows.
-
-- Evidence: `session/llm.ts`, `tool/grep.ts`, `tool/glob.ts`, `tool/read.ts`, `provider/transform.ts`
-
-### Stronger Orchestration Guardrails
-
-- **Loop detection** — Catches repeated identical task calls
-- **Spawn limits** — Caps subagent nesting depth and descendant count
-- **Concurrency caps** — Per-model request limiting
-- **Task category routing** — Delegate to specialized models for review, research, debug, etc.
-- Evidence: `src/tool/task.ts`, `src/session/subtask-handler.ts`, `src/orchestration/*`
-
-### Enhanced TUI Commands
-
-New slash commands for faster navigation:
-
-- `/goto` — Jump to file/symbol
-- `/clear`, `/clear-compact` — Session management
-- `/btw` — Inline context insertion
-- Evidence: `tui/command/*`
-
-### Better Image Paste & Feedback
-
-- Improved clipboard image handling in TUI
-- Enhanced spinner feedback for long-running operations
-- Evidence: `clipboard-image.ts`, `prompt/index.tsx`, `spinner-verbs.ts`
-
-### Long-Session Stability
-
-Memory and stability fixes for extended sessions and large tool output:
-
-- Optimized message buffering
-- Improved bash/output streaming
-- Database compaction refinements
-- Evidence: `session/message-v2.ts`, `tool/bash.ts`, `storage/db.ts`
-
-### LSP Enhancements
-
-- Pull-based diagnostics
-- Instant `didChange` sync
-- Idle shutdown optimization
-- Nearest-package tsserver resolution
-- Evidence: `src/lsp/*`
-
-### Terminal Customization
-
-- Font settings in app (configurable terminal appearance)
-- Bundled Nerd Font for icon support
-- Evidence: `packages/app/src/context/settings.tsx`, `terminal.tsx`
+**For full setup and configuration, see [OPENCODE-X_GUIDE.md](./OPENCODE-X_GUIDE.md).**
 
 ---
 
-## Opencode-X vs. Opencode upstream (dev)
+## Features Added in This Fork
 
-| Feature                    | OpenCode X                               | Opencode                                |
-| -------------------------- | ------------------------------------------------ | ------------------------------------------- |
-| **Hybrid routing**         | Configurable local+cloud routing by turn type    | No branch-added hybrid routing layer        |
-| **Parallel tools**         | Parallel execution for approved safe tool sets   | No branch-added parallel tool execution     |
-| **Loop/spawn guards**      | Added loop detection and spawn limits            | Fewer orchestration guardrails in this area |
-| **Task categories**        | Added category-based task routing                | No branch-added task category routing       |
-| **TUI commands**           | Adds `/goto`, `/clear`, `/clear-compact`, `/btw` | Does not include this branch command set    |
-| **Long-session stability** | Adds memory and output-handling fixes            | Does not include this branch fix set        |
+### Sliding Window Compaction
 
----
+Replaces hard-truncation with a rolling-window strategy for long sessions. Instead of truncating to a fixed size, history is split into a summarized **head** and a verbatim **tail**.
 
-## Quick Start
-
-### Install
-
-```bash
-bun install
-```
-
-### Run TUI
-
-```bash
-bun run dev
-```
-
-### Run CLI
-
-```bash
-bun run --cwd packages/opencode dev
-```
-
-### Build
-
-```bash
-bun --cwd packages/opencode run build
-```
-
-### Test
-
-```bash
-bun --cwd packages/opencode test --timeout 30000
-```
-
----
-
-## Key Configuration
-
-### Hybrid Routing (Example)
+- Summary cached by session + head boundary — only re-summarizes when the head changes
+- Inflight deduplication — one compaction per session at a time; no redundant LLM calls
+- Token savings tracked per session
+- Configurable threshold (default 50k tokens) and tail ratio (default 50%)
 
 ```json
 {
-  "experimental": {
-    "task_categories": {
-      "review": {
-        "providerID": "anthropic",
-        "modelID": "claude-sonnet-4-5"
-      },
-      "cheap": {
-        "providerID": "opencode-go",
-        "modelID": "minimax-m2.5"
-      }
+  "compaction": {
+    "sliding_window": {
+      "threshold": 50000,
+      "tail_ratio": 0.5
     }
   }
 }
 ```
 
-### Orchestration Limits
+### LLM Tool Output Compression
+
+A local model pre-processes large tool outputs before they reach the cloud model — cuts token consumption without changing agent behavior.
+
+- Triggered by output line count threshold (default: 10 lines)
+- Three compression templates, selected per tool type:
+  - **EXTRACT** — key lines, bullets, file/line refs (`grep`, `glob`, `bash`)
+  - **SUMMARIZE** — 3–6 bullets capturing key facts (`read`, large output)
+  - **FILTER** — matching items only, noise dropped (logs, diffs)
+- Anti-hallucination system prompt enforced on every compression call
+- Silently falls back to raw output on error — never corrupts results
+- Per-event stats: `input_lines`, `output_lines`, `ratio`, `template`, `model`, `fallback`
+
+```json
+{
+  "hybrid": {
+    "enabled": true,
+    "local_model": { "providerID": "anthropic", "modelID": "claude-haiku-4-5" },
+    "compression_timeout_ms": 8000,
+    "log_routing": true
+  }
+}
+```
+
+### Hybrid Local+Cloud Routing
+
+Route task categories to specific models — cheap/fast for simple tasks, capable cloud model for complex ones.
+
+```json
+{
+  "experimental": {
+    "task_categories": {
+      "review": { "providerID": "anthropic", "modelID": "claude-sonnet-4-6" },
+      "cheap": { "providerID": "opencode-go", "modelID": "minimax-m2.5" }
+    },
+    "ultrawork_model": { "providerID": "anthropic", "modelID": "claude-sonnet-4-6" }
+  }
+}
+```
+
+### Safe Parallel Tool Execution
+
+Pre-approved tool sets (`read`, `glob`, `grep`) execute concurrently within a single LLM response round-trip.
+
+```json
+{
+  "experimental": {
+    "parallel_tool_calls": true,
+    "parallel_read": true
+  }
+}
+```
+
+### Orchestration Guardrails
+
+- **Doom loop detection + hard cap** — aborts on repeated identical task calls; hard cap as separate backstop
+- **Spawn limits** — caps subagent nesting depth and total descendants per root session
+- **Per-model concurrency** — prevents thundering-herd against a single model endpoint
+- **Task category routing** — `task_category` param routes subagent tasks to a configured model
+- **Ultrawork routing** — `use_ultrawork: true` or `ulw`/`ultrawork` keyword routes to a high-reasoning model
 
 ```json
 {
@@ -144,28 +95,103 @@ bun --cwd packages/opencode test --timeout 30000
     "loop_detector_threshold": 5,
     "max_subagent_depth": 3,
     "max_subagent_descendants": 50,
-    "model_concurrency": {
-      "anthropic:claude-sonnet-4-5": 2
-    }
+    "model_concurrency": { "anthropic:claude-sonnet-4-6": 2 }
   }
 }
 ```
 
-### Parallel Tool Calls
+### Session Memory
 
-Include multiple tool calls in one LLM response—grep, glob, and read execute concurrently:
+Persistent per-session memory that survives `/clear` and `/clear-compact`. Injected into the primary agent's system prompt only.
 
-```typescript
-Grep({ pattern: "function foo" })
-Glob({ pattern: "src/**/*.ts" })
-Read({ filePath: "src/index.ts" })
-// All run in parallel
+- `/memory_add` — add a memory entry (dialog prompt)
+- `/memory_edit` — pick and edit an existing entry
+- `/memory_delete` — pick and remove an entry
+- Stored in SQLite (`MemoryTable`); tied to session, not affected by message clears
+
+### LSP Memory Efficiency
+
+- Orphan LSP server prevention — servers no longer accumulate across sessions
+- Stale diagnostics cache cleared on `didChange`
+- Idle shutdown — servers released when not in use
+- Nearest-package tsserver resolution — correct server per workspace package
+
+### Spinner Verbs
+
+Contextual present-continuous labels in the TUI spinner (e.g., "Searching…", "Reading…") instead of generic activity text. Derived from tool runtime title metadata where available.
+
+### New Slash Commands
+
+| Command          | Description                                                 |
+| ---------------- | ----------------------------------------------------------- |
+| `/btw`           | Inject context into the session without starting a new turn |
+| `/clear`         | Clear session messages                                      |
+| `/clear-compact` | Clear messages and compact history                          |
+| `/goto`          | Jump to a file or symbol                                    |
+
+### Session Cost & Token Tracking
+
+- Pre-computed cost and token totals attached to each session object
+- Tiered pricing schema — cost adjusts for context window tier
+- Streaming token count shown in tool calls during execution
+- Fix: context metrics no longer double-count cache tokens in TUI
+
+### Read Tool: Safe Default
+
+`read` defaults to 300 lines with a head+tail summary instead of returning unbounded output. Prevents accidental full-file dumps flooding context.
+
+### Session ID in `/status`
+
+`/status` dialog shows the current session ID, copyable for debugging or referencing subagent sessions.
+
+---
+
+## What's Not in This Fork (Cherry-Picks from Upstream)
+
+The following were pulled from upstream opencode and are not locally-originated features:
+
+- Thinking mode (collapsed/expandable reasoning display)
+- Session pinning + quick-switch
+- Background subagents (`task(..., background=true)`)
+- Ctrl/Cmd+number project switching
+- Patch file rendering improvements
+- Default diff parser for fenced code blocks
+
+---
+
+## OpenCode X vs. Upstream
+
+| Feature                       | This Fork                                           | Upstream             |
+| ----------------------------- | --------------------------------------------------- | -------------------- |
+| **Sliding window compaction** | Rolling head+tail with summary cache                | Hard truncation only |
+| **Tool output compression**   | Local LLM pre-processes large outputs               | None                 |
+| **Hybrid/category routing**   | Per-category model routing + ultrawork              | None                 |
+| **Parallel tool calls**       | Safe parallel execution                             | None                 |
+| **Doom loop guard**           | Detection + hard cap + spawn depth/count limits     | Fewer guardrails     |
+| **Session memory**            | Persistent per-session memory, survives clears      | None                 |
+| **LSP memory efficiency**     | Orphan prevention + idle shutdown                   | Accumulates servers  |
+| **Spinner verbs**             | Contextual tool activity labels                     | Generic spinner      |
+| **TUI slash commands**        | `/btw`, `/clear`, `/clear-compact`, `/goto`         | None of these        |
+| **Token tracking**            | Per-session totals, tiered pricing, streaming count | Basic                |
+| **Read tool default**         | 300-line limit with head+tail                       | Unbounded            |
+
+---
+
+## Quick Start
+
+```bash
+bun install
+bun run dev                              # TUI
+bun run --cwd packages/opencode dev      # CLI
+bun --cwd packages/opencode run build
+bun --cwd packages/opencode test --timeout 30000
 ```
 
 ---
 
 ## Resources
 
+- **Upstream**: https://github.com/anomalyco/opencode
 - **Docs**: https://opencode.ai/docs
 - **Console**: https://opencode.ai/zen
 - **Discord**: https://opencode.ai/discord

@@ -16,6 +16,8 @@ Guide based on OpenCode codebase analysis.
 10. [Environment Variables](#environment-variables)
 11. [MCP Servers](#mcp-servers)
 12. [Running local build of opencode](#running-local-opencode)
+13. [Session Memory](#session-memory)
+14. [Plugins](#plugins)
 
 ---
 
@@ -175,14 +177,30 @@ System converts to Task tool call with `bypassAgentCheck: true`.
 
 ```typescript
 {
-  description: string  // Short 3-5 word description
-  prompt: string       // Detailed instructions
-  subagent_type: string  // Which subagent
-  task_category?: string  // Optional model-routing category hint
-  use_ultrawork?: boolean  // Explicit high-reasoning model override
-  task_id?: string  // Resume existing session
+  description: string       // Short 3-5 word description
+  prompt: string            // Detailed instructions
+  subagent_type: string     // Which subagent
+  task_category?: string    // Optional model-routing category hint
+  use_ultrawork?: boolean   // Explicit high-reasoning model override
+  task_id?: string          // Resume existing session
+  background?: boolean      // Fire-and-forget; returns immediately with task_id
 }
 ```
+
+**background subagents:**
+
+Setting `background: true` returns immediately without waiting for the subagent to finish. The result is delivered as a toast notification. Use `task_status(task_id=...)` to poll status later.
+
+```typescript
+// Launch without blocking
+Task((subagent_type = "tester"), (description = "Run tests"), (prompt = "..."), (background = true))
+// → returns { task_id: "ses_..." }
+
+// Poll later if needed
+task_status((task_id = "ses_..."))
+```
+
+Do not use `background: true` when the result is needed to continue the current work.
 
 ### Orchestration Guardrails
 
@@ -294,6 +312,18 @@ subtask: true
 
 - `/init` - Create/update AGENTS.md
 - `/review` - Review changes
+- `/status` - Show session status. In opencode-x, also displays the current session ID (copyable) and sliding window compaction savings if active.
+
+### Local Commands (opencode-x only)
+
+These slash commands are implemented in this fork:
+
+| Command          | Description                                                                                                                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/btw`           | Inject context into the running session without starting a new turn. Opens a dialog; text is inserted as a system message visible to the agent but not displayed as a user message. |
+| `/clear`         | Clear all messages in the current session.                                                                                                                                          |
+| `/clear-compact` | Clear messages and run compaction to summarize history.                                                                                                                             |
+| `/goto`          | Jump to a file or symbol. Opens a dialog for file/symbol input.                                                                                                                     |
 
 ### Creating Commands
 
@@ -753,6 +783,13 @@ Subagents have `todowrite: deny` by default. Only primary agents manage task lis
 - Project commands
 - Model overrides
 
+### Tool Defaults (opencode-x)
+
+| Tool   | Default behavior                                                                                                                |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `read` | Returns up to 300 lines with a head+tail summary when file exceeds limit. Prevents accidental full-file dumps flooding context. |
+| `task` | Supports `background: true` for fire-and-forget execution.                                                                      |
+
 ### Model Selection
 
 **Cheap:**
@@ -842,6 +879,36 @@ project-root/
 - `prune`: Remove old tool outputs
 - `reserved`: Token buffer for compaction overhead
 
+#### Sliding Window Compaction (opencode-x)
+
+Replaces hard-truncation with a rolling-window strategy. History is split into a summarized **head** (older messages) and a verbatim **tail** (recent messages). The summary is cached by session and head boundary — only regenerated when the head changes.
+
+```json
+{
+  "compaction": {
+    "sliding_window": {
+      "enabled": true,
+      "threshold": 50000,
+      "tail_ratio": 0.5
+    }
+  }
+}
+```
+
+| Field        | Default | Description                                   |
+| ------------ | ------- | --------------------------------------------- |
+| `enabled`    | `false` | Enable sliding window compaction              |
+| `threshold`  | `50000` | Token count at which compaction triggers      |
+| `tail_ratio` | `0.5`   | Fraction of tokens reserved for verbatim tail |
+
+Enable via env var instead of config:
+
+```bash
+OPENCODE_EXPERIMENTAL_SLIDING_WINDOW=1 opencode
+```
+
+Token savings per session are tracked and visible in the TUI status dialog (`/status`).
+
 ### Experimental Features
 
 ```json
@@ -930,6 +997,11 @@ project-root/
 - Activates when a task prompt contains `ulw` / `ultrawork`
 - No effect if this model is not configured in your providers
 
+**background_subagents:**
+
+- Enable experimental fire-and-forget task spawning (set `background: true` on Task tool calls)
+- Default: `false` — background param is silently ignored unless this is enabled
+
 ### Hybrid Routing
 
 Hybrid routing splits work between a local (cheap/fast) model and a cloud model. If `enabled` is `false` or `local_model` is missing, local routing is silently disabled.
@@ -943,6 +1015,8 @@ Hybrid routing splits work between a local (cheap/fast) model and a cloud model.
       "modelID": "claude-haiku-4-5"
     },
     "compression_timeout_ms": 8000,
+    "compression_max_tokens": 2048,
+    "compression_tail_lines": 5,
     "log_routing": true
   }
 }
@@ -963,10 +1037,32 @@ Hybrid routing splits work between a local (cheap/fast) model and a cloud model.
 - Timeout in milliseconds for the local model compression call
 - Default: `5000`
 
+**compression_max_tokens:**
+
+- Max output tokens for the compression response
+- Default: `1024`
+
+**compression_tail_lines:**
+
+- Number of trailing lines from the original output to always preserve verbatim in the compressed result (anti-hallucination anchor)
+- Default: `3`
+
 **log_routing:**
 
 - Enable verbose routing decision logging to aid debugging of hybrid routing choices
 - Default: `false`
+
+#### How compression works
+
+Large tool outputs (above a line-count threshold) are pre-processed by the local model before being sent to the cloud model. Three templates are used, selected automatically by tool type:
+
+| Template    | Used for               | Output                             |
+| ----------- | ---------------------- | ---------------------------------- |
+| `EXTRACT`   | `grep`, `glob`, `bash` | Key lines, bullets, file/line refs |
+| `SUMMARIZE` | `read`, large prose    | 3–6 bullet summary of key facts    |
+| `FILTER`    | logs, diffs            | Matching items only, noise dropped |
+
+Falls back silently to raw output on error or timeout — never corrupts results.
 
 ---
 
@@ -1245,6 +1341,37 @@ Start opencode and run:
   /path/opencode/packages/opencode/dist/opencode-darwin-arm64/bin/opencode
   } in .zshrc
 - Use bun install
+
+---
+
+## Session Memory
+
+Persistent per-session memory that survives `/clear` and `/clear-compact`. Memory entries are injected into the primary agent's system prompt. Subagents do not receive session memory.
+
+### Commands
+
+| Command          | Description                             |
+| ---------------- | --------------------------------------- |
+| `/memory_add`    | Open a dialog to add a new memory entry |
+| `/memory_edit`   | Pick an existing entry and edit it      |
+| `/memory_delete` | Pick an existing entry and remove it    |
+
+### Behavior
+
+- Memory is stored in SQLite and tied to the session
+- Cleared only if the session itself is deleted — not by `/clear` or `/clear-compact`
+- Injected as a labeled block in the system prompt: `"Session Memory:\n- entry1\n- entry2"`
+- Only injected for the primary agent, not subagents
+
+### Example
+
+```
+> /memory_add
+→ dialog opens
+→ type: "Always use bun, never npm"
+→ confirm
+→ memory saved; injected into all future turns of this session
+```
 
 ---
 
