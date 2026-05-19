@@ -188,3 +188,7 @@ const table = sqliteTable("session", {
 ## Type Checking
 
 - `bun typecheck` from package dirs, never `tsc` directly.
+
+## DB
+
+DB data is present in ~/.local/share/opencode/opencode-devlocal.db
