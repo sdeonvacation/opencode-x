@@ -223,6 +223,10 @@ export namespace SessionPrompt {
         using _ = log.time("resolveTools")
         const tools: Record<string, AITool> = {}
         const toolMeta = new Map<string, LLM.ToolMeta>()
+        const cfg = yield* config.get()
+        const merged = Permission.merge(input.agent.permission, input.session.permission ?? [])
+        const approved = new Set<string>()
+        const batch = cfg.experimental?.batch_permissions === true
 
         const context = (args: any, options: ToolExecutionOptions): Tool.Context => ({
           sessionID: input.session.id,
@@ -257,15 +261,17 @@ export namespace SessionPrompt {
                 }
               }),
             ),
-          ask: (req) =>
-            Effect.runPromise(
+          ask: (req) => {
+            if (batch && approved.has(req.permission)) return Promise.resolve()
+            return Effect.runPromise(
               permission.ask({
                 ...req,
                 sessionID: input.session.id,
                 tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-                ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
+                ruleset: merged,
               }),
-            ),
+            )
+          },
         })
 
         for (const item of yield* registry.tools({
@@ -275,6 +281,9 @@ export namespace SessionPrompt {
         })) {
           const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
           toolMeta.set(item.id, { parallelSafe: item.parallelSafe === true })
+          if (batch && Permission.evaluate(item.id, "*", merged).action === "allow") {
+            approved.add(item.id)
+          }
           tools[item.id] = tool({
             id: item.id as any,
             description: item.description,
@@ -316,6 +325,9 @@ export namespace SessionPrompt {
         for (const [key, item] of Object.entries(yield* mcp.tools())) {
           const execute = item.execute
           if (!execute) continue
+          if (batch && Permission.evaluate(key, "*", merged).action === "allow") {
+            approved.add(key)
+          }
 
           const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
           const transformed = ProviderTransform.schema(input.model, schema)
@@ -329,7 +341,11 @@ export namespace SessionPrompt {
                   { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId },
                   { args },
                 )
-                yield* Effect.promise(() => ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] }))
+                if (!approved.has(key)) {
+                  yield* Effect.promise(() =>
+                    ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] }),
+                  )
+                }
                 const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.promise(() =>
                   execute(args, opts),
                 )
@@ -1403,6 +1419,16 @@ export namespace SessionPrompt {
               const sw = SlidingWindow.getMetrics(sessionID)
               if (sw) {
                 handle.message.compaction = { total: sw.total, savings: sw.savings, msgs: sw.msgs }
+              }
+
+              if (cfg.experimental?.proactive_prune && lastFinished?.tokens) {
+                const used =
+                  lastFinished.tokens.input + lastFinished.tokens.cache.read + lastFinished.tokens.cache.write
+                const limit = model.limit?.context ?? 200_000
+                if (used > limit * 0.8) {
+                  yield* compaction.prune({ sessionID, aggressive: true }).pipe(Effect.orElseSucceed(() => false))
+                  msgs = yield* MessageV2.filterCompactedEffect(sessionID)
+                }
               }
 
               const skillsKey = agent.name

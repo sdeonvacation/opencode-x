@@ -15,6 +15,8 @@ export namespace SlidingWindow {
   const MAX = 50
   const MIN = 4_000
   const cache = new Map<SessionID, CacheEntry>()
+  const lastGen = new Map<SessionID, string>()
+  const lastCompact = new Map<SessionID, MessageV2.WithParts[]>()
   const inflight = new Set<SessionID>()
 
   type Metrics = {
@@ -52,18 +54,39 @@ export namespace SlidingWindow {
   export const compact = Effect.fn("SlidingWindow.compact")(function* (input: CompactInput) {
     if (!should(input)) return input.msgs
 
+    if (input.cfg.experimental?.cache_sliding_window) {
+      const key = `${input.msgs.length}:${input.msgs.at(-1)?.info.id}`
+      const prev = lastCompact.get(input.sessionID)
+      if (prev && lastGen.get(input.sessionID) === key) {
+        log.info("cache_generation_hit", { sessionID: input.sessionID })
+        // Refresh LRU position
+        lastGen.delete(input.sessionID)
+        lastGen.set(input.sessionID, key)
+        lastCompact.delete(input.sessionID)
+        lastCompact.set(input.sessionID, prev)
+        return prev
+      }
+      lastGen.set(input.sessionID, key)
+    }
+
     const opts = input.cfg.compaction?.sliding_window
     const threshold = opts?.threshold ?? 50_000
 
+    const caching = input.cfg.experimental?.cache_sliding_window
+    const stash = (out: MessageV2.WithParts[]) => {
+      if (caching) lastCompact.set(input.sessionID, out)
+      return out
+    }
+
     // Fast pre-check: rough char-based estimate avoids expensive toModelMessages
     const cheap = input.msgs.reduce((acc, m) => acc + cheapEstimate(m), 0)
-    if (cheap < threshold && !input.hint) return input.msgs
+    if (cheap < threshold && !input.hint) return stash(input.msgs)
 
     const estimated = yield* estimate(input.msgs, input.model)
     const total = input.hint !== undefined ? Math.max(input.hint, estimated) : estimated
     if (total < threshold) {
       log.info("skip_below_threshold", { sessionID: input.sessionID, total, estimated, hint: input.hint, threshold })
-      return input.msgs
+      return stash(input.msgs)
     }
 
     const tail = yield* last(input.msgs, input.model)
@@ -71,17 +94,17 @@ export namespace SlidingWindow {
     const split = yield* divide(input.msgs, input.model, budget, estimated)
     if (!split) {
       log.info("skip_no_split", { sessionID: input.sessionID, total, budget, tail })
-      return input.msgs
+      return stash(input.msgs)
     }
 
     const size = yield* estimate(split.head, input.model)
     if (size < MIN) {
       log.info("skip_small_head", { sessionID: input.sessionID, head: size, min: MIN, total, budget, tail })
-      return input.msgs
+      return stash(input.msgs)
     }
 
     const headEndID = split.head.at(-1)?.info.id
-    if (!headEndID) return input.msgs
+    if (!headEndID) return stash(input.msgs)
 
     const hit = cache.get(input.sessionID)
     if (hit && hit.headEndID === headEndID) {
@@ -100,14 +123,14 @@ export namespace SlidingWindow {
         msgs: split.tail.length,
         ts: Date.now(),
       })
-      return result
+      return stash(result)
     }
 
     log.info("cache_miss", { sessionID: input.sessionID, headEndID, total, budget, head: size })
 
     if (inflight.has(input.sessionID)) {
       log.info("skip_inflight", { sessionID: input.sessionID })
-      return input.msgs
+      return stash(input.msgs)
     }
     inflight.add(input.sessionID)
 
@@ -120,7 +143,7 @@ export namespace SlidingWindow {
     )
     if (!summary) {
       log.info("skip_no_summary", { sessionID: input.sessionID, headEndID })
-      return input.msgs
+      return stash(input.msgs)
     }
 
     store(input.sessionID, { headEndID, summary, ts: Date.now() })
@@ -147,12 +170,14 @@ export namespace SlidingWindow {
       head: size,
       tail_msgs: split.tail.length,
     })
-    return result
+    return stash(result)
   })
 
   export function invalidate(sessionID: SessionID) {
     cache.delete(sessionID)
     metrics.delete(sessionID)
+    lastGen.delete(sessionID)
+    lastCompact.delete(sessionID)
     log.info("invalidate", { sessionID })
   }
 
@@ -353,6 +378,12 @@ export namespace SlidingWindow {
       const key = metrics.keys().next().value as SessionID | undefined
       if (!key) break
       metrics.delete(key)
+    }
+    while (lastGen.size > MAX) {
+      const key = lastGen.keys().next().value as SessionID | undefined
+      if (!key) break
+      lastGen.delete(key)
+      lastCompact.delete(key)
     }
   }
 

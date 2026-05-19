@@ -56,6 +56,8 @@ export namespace SystemPrompt {
             : ""
         }`,
         `</directories>`,
+        ``,
+        `When you intend to call multiple tools and there are no dependencies between the calls, make all of the independent calls in the same response.`,
       ].join("\n"),
     ]
   }

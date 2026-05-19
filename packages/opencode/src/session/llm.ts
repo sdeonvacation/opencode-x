@@ -93,8 +93,7 @@ export namespace LLM {
     cfg: Config.Info
     toolMeta?: Map<string, ToolMeta>
   }) {
-    const enabled =
-      input.agent.parallelToolCalls ?? input.cfg.experimental?.parallel_tool_calls ?? input.agent.mode === "subagent"
+    const enabled = input.agent.parallelToolCalls ?? input.cfg.experimental?.parallel_tool_calls ?? true
     if (enabled !== true) return false
     if (!input.toolMeta || input.toolMeta.size === 0) return false
 

@@ -31,6 +31,13 @@ export namespace SessionProcessor {
   const DOOM_LOOP_HARD_CAP = 3
   const log = Log.create({ service: "session.processor" })
 
+  export function truncateHeadTail(text: string, head: number, tail: number): string {
+    const lines = text.split("\n")
+    if (lines.length <= head + tail) return text
+    const omitted = lines.length - head - tail
+    return [...lines.slice(0, head), `\n... (${omitted} lines omitted) ...\n`, ...lines.slice(-tail)].join("\n")
+  }
+
   export type Result = "compact" | "stop" | "continue"
 
   export type Event = LLM.Event
@@ -85,6 +92,8 @@ export namespace SessionProcessor {
     compressionTailLines: number
     compressionThresholds?: CompressionThresholds
     doom: Map<string, number>
+    hadText: boolean
+    hadToolCalls: boolean
   }
 
   type StreamEvent = Event
@@ -146,6 +155,8 @@ export namespace SessionProcessor {
           compressionTailLines: cfg.hybrid?.compression_tail_lines ?? 20,
           compressionThresholds: cfg.hybrid?.compression_thresholds,
           doom: new Map(),
+          hadText: false,
+          hadToolCalls: false,
         }
         let aborted = false
 
@@ -217,35 +228,59 @@ export namespace SessionProcessor {
           })
           const enabled = cfg.hybrid?.enabled ?? Flag.OPENCODE_HYBRID_ROUTING
           if (enabled && ctx.localModel && shouldCompress(output.output, match.part.tool, ctx.compressionThresholds)) {
-            const result = yield* LLMCompress.compress({
-              tool: match.part.tool,
-              output: output.output,
-              template: templateFor(match.part.tool, cfg.hybrid?.compression_templates),
-              model: ctx.localModel,
-              threshold: ctx.compressionThreshold,
-              timeout: ctx.compressionTimeout,
-              maxTokens: ctx.compressionMaxTokens,
-              tailLines: ctx.compressionTailLines,
-            })
-            yield* session.updatePart({
-              ...match.part,
-              state: {
-                status: "completed",
-                input: match.part.state.input,
-                output: result.compressed,
-                metadata: {
-                  ...output.metadata,
-                  compressed: true,
-                  compression_template: result.stats.template,
-                  compression_ratio: result.stats.ratio,
-                  compression_fallback: result.stats.fallback,
-                  compression_validated: result.stats.validated,
+            const heuristic =
+              (match.part.tool === "grep" || match.part.tool === "glob") &&
+              cfg.experimental?.compression_threshold !== undefined &&
+              cfg.experimental.compression_threshold !== 0
+            if (heuristic) {
+              const truncated = truncateHeadTail(output.output, 50, 20)
+              yield* session.updatePart({
+                ...match.part,
+                state: {
+                  status: "completed",
+                  input: match.part.state.input,
+                  output: truncated,
+                  metadata: {
+                    ...output.metadata,
+                    compressed: true,
+                    compression_template: "heuristic_head_tail",
+                  },
+                  title: output.title,
+                  time: { start: match.part.state.time.start, end: Date.now() },
+                  attachments: output.attachments,
                 },
-                title: output.title,
-                time: { start: match.part.state.time.start, end: Date.now() },
-                attachments: output.attachments,
-              },
-            })
+              })
+            } else {
+              const result = yield* LLMCompress.compress({
+                tool: match.part.tool,
+                output: output.output,
+                template: templateFor(match.part.tool, cfg.hybrid?.compression_templates),
+                model: ctx.localModel,
+                threshold: ctx.compressionThreshold,
+                timeout: ctx.compressionTimeout,
+                maxTokens: ctx.compressionMaxTokens,
+                tailLines: ctx.compressionTailLines,
+              })
+              yield* session.updatePart({
+                ...match.part,
+                state: {
+                  status: "completed",
+                  input: match.part.state.input,
+                  output: result.compressed,
+                  metadata: {
+                    ...output.metadata,
+                    compressed: true,
+                    compression_template: result.stats.template,
+                    compression_ratio: result.stats.ratio,
+                    compression_fallback: result.stats.fallback,
+                    compression_validated: result.stats.validated,
+                  },
+                  title: output.title,
+                  time: { start: match.part.state.time.start, end: Date.now() },
+                  attachments: output.attachments,
+                },
+              })
+            }
           }
           if (enabled) {
             const model = ctx.localModel ?? ctx.model
@@ -336,6 +371,7 @@ export namespace SessionProcessor {
               if (ctx.assistantMessage.summary) {
                 throw new Error(`Tool call not allowed while generating summary: ${value.toolName}`)
               }
+              ctx.hadToolCalls = true
               const part = yield* session.updatePart({
                 id: ctx.toolcalls[value.id]?.partID ?? PartID.ascending(),
                 messageID: ctx.assistantMessage.id,
@@ -535,6 +571,7 @@ export namespace SessionProcessor {
                 },
                 { text: ctx.currentText.text },
               )).text
+              if (ctx.currentText.text) ctx.hadText = true
               {
                 const end = Date.now()
                 ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
@@ -632,6 +669,8 @@ export namespace SessionProcessor {
         const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
           log.info("process")
           ctx.needsCompaction = false
+          ctx.hadText = false
+          ctx.hadToolCalls = false
           ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
 
           return yield* Effect.gen(function* () {
@@ -681,6 +720,8 @@ export namespace SessionProcessor {
 
             if (ctx.needsCompaction) return "compact"
             if (ctx.blocked || ctx.assistantMessage.error) return "stop"
+            // Noop exit: model returned nothing useful
+            if (cfg.experimental?.noop_exit && !ctx.hadText && !ctx.hadToolCalls) return "stop"
             return "continue"
           })
         })

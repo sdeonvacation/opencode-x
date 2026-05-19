@@ -209,7 +209,7 @@ Rules:
       tokens: MessageV2.Assistant["tokens"]
       model: Provider.Model
     }) => Effect.Effect<boolean>
-    readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<boolean>
+    readonly prune: (input: { sessionID: SessionID; aggressive?: boolean }) => Effect.Effect<boolean>
     readonly process: (input: {
       parentID: MessageID
       messages: MessageV2.WithParts[]
@@ -328,7 +328,10 @@ Rules:
 
       // goes backwards through parts until there are PRUNE_PROTECT tokens worth of tool
       // calls, then erases output of older tool calls to free context space
-      const prune = Effect.fn("SessionCompaction.prune")(function* (input: { sessionID: SessionID }) {
+      const prune = Effect.fn("SessionCompaction.prune")(function* (input: {
+        sessionID: SessionID
+        aggressive?: boolean
+      }) {
         const cfg = yield* config.get()
         if (cfg.compaction?.prune === false) return false
         log.info("pruning")
@@ -356,7 +359,8 @@ Rules:
                 if (part.state.time.compacted) break loop
                 const estimate = Token.estimate(part.state.output)
                 total += estimate
-                if (total > PRUNE_PROTECT) {
+                const threshold = input.aggressive ? PRUNE_PROTECT / 2 : PRUNE_PROTECT
+                if (total > threshold) {
                   pruned += estimate
                   toPrune.push(part)
                 }
@@ -651,7 +655,7 @@ Rules:
     return runPromise((svc) => svc.resolveModel(input))
   }
 
-  export async function prune(input: { sessionID: SessionID }): Promise<boolean> {
+  export async function prune(input: { sessionID: SessionID; aggressive?: boolean }): Promise<boolean> {
     return runPromise((svc) => svc.prune(input))
   }
 

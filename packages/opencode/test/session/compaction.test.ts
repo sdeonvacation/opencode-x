@@ -1862,3 +1862,80 @@ describe("session.getUsage", () => {
     expect(result.cost).toBe((300_000 * 3) / 1_000_000 + (100_000 * 4) / 1_000_000)
   })
 })
+
+describe("session.compaction.prune aggressive", () => {
+  test("aggressive mode uses lower threshold", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const a = await user(session.id, "first")
+        const b = await assistant(session.id, a.id, tmp.path)
+        // 100_000 chars = 25_000 tokens, above PRUNE_PROTECT/2 (20_000) but below PRUNE_PROTECT (40_000)
+        await tool(session.id, b.id, "bash", "x".repeat(100_000))
+        await user(session.id, "second")
+        await user(session.id, "third")
+
+        await SessionCompaction.prune({ sessionID: session.id, aggressive: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+        expect(part?.type).toBe("tool")
+        if (part?.type === "tool" && part.state.status === "completed") {
+          expect(part.state.time.compacted).toBeNumber()
+        }
+      },
+    })
+  })
+
+  test("non-aggressive mode does not prune below full threshold", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const a = await user(session.id, "first")
+        const b = await assistant(session.id, a.id, tmp.path)
+        // 100_000 chars = 25_000 tokens, below PRUNE_PROTECT (40_000)
+        await tool(session.id, b.id, "bash", "x".repeat(100_000))
+        await user(session.id, "second")
+        await user(session.id, "third")
+
+        await SessionCompaction.prune({ sessionID: session.id })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+        expect(part?.type).toBe("tool")
+        if (part?.type === "tool" && part.state.status === "completed") {
+          expect(part.state.time.compacted).toBeUndefined()
+        }
+      },
+    })
+  })
+
+  test("aggressive flag is optional and defaults to non-aggressive", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const a = await user(session.id, "first")
+        const b = await assistant(session.id, a.id, tmp.path)
+        // 200_000 chars = 50_000 tokens, above PRUNE_PROTECT (40_000) — prunes without aggressive
+        await tool(session.id, b.id, "bash", "x".repeat(200_000))
+        await user(session.id, "second")
+        await user(session.id, "third")
+
+        await SessionCompaction.prune({ sessionID: session.id })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+        expect(part?.type).toBe("tool")
+        if (part?.type === "tool" && part.state.status === "completed") {
+          expect(part.state.time.compacted).toBeNumber()
+        }
+      },
+    })
+  })
+})

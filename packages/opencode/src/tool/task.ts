@@ -150,6 +150,13 @@ export const TaskTool = Tool.defineEffect(
 
         const messageID = MessageID.ascending()
         const promptParts = await SessionPrompt.resolvePromptParts(params.prompt)
+        if (cfg.experimental?.subagent_context_transfer) {
+          const parent = MessageV2.page({ sessionID: ctx.sessionID, limit: 20 })
+          const context = buildContextTransfer(parent.items, 4000)
+          if (context) {
+            promptParts.unshift({ type: "text", text: context })
+          }
+        }
         const finalModel = resolveTaskModel({
           prompt: params.prompt,
           subagentType: params.subagent_type,
@@ -352,3 +359,23 @@ export const TaskTool = Tool.defineEffect(
     }
   }),
 )
+
+export function buildContextTransfer(msgs: MessageV2.WithParts[], limit: number): string | undefined {
+  const parts: string[] = []
+  let size = 0
+  for (let i = msgs.length - 1; i >= 0 && size < limit; i--) {
+    const msg = msgs[i]
+    for (const part of msg.parts) {
+      if (part.type !== "tool") continue
+      if (part.state.status !== "completed") continue
+      if (!part.state.output || part.state.output.length < 50) continue
+      const snippet = part.state.output.slice(0, Math.min(part.state.output.length, limit - size))
+      if (!snippet) break
+      parts.push(`[${part.tool}] ${snippet}`)
+      size += snippet.length
+      if (size >= limit) break
+    }
+  }
+  if (!parts.length) return undefined
+  return `<parent-context>\nRecent tool outputs from parent session:\n${parts.reverse().join("\n---\n")}\n</parent-context>`
+}

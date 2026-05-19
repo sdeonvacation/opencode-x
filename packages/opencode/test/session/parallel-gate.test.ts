@@ -56,14 +56,20 @@ describe("session.llm.parallelGate", () => {
   })
 
   test("returns false when permission resolves to ask", () => {
-    expect(
-      LLM.parallelGate({
-        agent: agent("subagent", [{ permission: "grep", pattern: "*", action: "ask" }]),
-        permission: [],
-        cfg: cfg(),
-        toolMeta: meta([["grep", true]]),
-      }),
-    ).toBe(false)
+    const prev = process.env.OPENCODE_PERMISSION
+    delete process.env.OPENCODE_PERMISSION
+    try {
+      expect(
+        LLM.parallelGate({
+          agent: agent("subagent", [{ permission: "grep", pattern: "*", action: "ask" }]),
+          permission: [],
+          cfg: cfg(),
+          toolMeta: meta([["grep", true]]),
+        }),
+      ).toBe(false)
+    } finally {
+      if (prev !== undefined) process.env.OPENCODE_PERMISSION = prev
+    }
   })
 
   test("returns true when OPENCODE_PERMISSION allow-all overrides session ask", () => {
@@ -86,14 +92,20 @@ describe("session.llm.parallelGate", () => {
   })
 
   test("returns false when permission resolves to deny", () => {
-    expect(
-      LLM.parallelGate({
-        agent: agent("subagent", [{ permission: "grep", pattern: "*", action: "deny" }]),
-        permission: [],
-        cfg: cfg(),
-        toolMeta: meta([["grep", true]]),
-      }),
-    ).toBe(false)
+    const prev = process.env.OPENCODE_PERMISSION
+    delete process.env.OPENCODE_PERMISSION
+    try {
+      expect(
+        LLM.parallelGate({
+          agent: agent("subagent", [{ permission: "grep", pattern: "*", action: "deny" }]),
+          permission: [],
+          cfg: cfg(),
+          toolMeta: meta([["grep", true]]),
+        }),
+      ).toBe(false)
+    } finally {
+      if (prev !== undefined) process.env.OPENCODE_PERMISSION = prev
+    }
   })
 
   test("returns false when a path-scoped non-allow rule exists even if wildcard permission allows", () => {
@@ -121,7 +133,7 @@ describe("session.llm.parallelGate", () => {
     ).toBe(false)
   })
 
-  test("returns false for primary agent by default", () => {
+  test("returns true for primary agent by default", () => {
     expect(
       LLM.parallelGate({
         agent: agent("primary"),
@@ -129,7 +141,7 @@ describe("session.llm.parallelGate", () => {
         cfg: cfg(),
         toolMeta: meta([["grep", true]]),
       }),
-    ).toBe(false)
+    ).toBe(true)
   })
 
   test("returns true for primary agent when explicitly enabled", () => {

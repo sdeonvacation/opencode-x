@@ -1292,6 +1292,32 @@ export namespace Config {
             .describe(
               "Model override used for keyword-triggered ultrawork routing, or when task.use_ultrawork is explicitly set to true",
             ),
+          compression_threshold: z
+            .number()
+            .int()
+            .nonnegative()
+            .optional()
+            .describe("Character threshold below which tool output skips LLM compression (0 = always use LLM)"),
+          noop_exit: z
+            .boolean()
+            .optional()
+            .describe("Exit loop early when model returns empty response with no tool calls"),
+          proactive_prune: z
+            .boolean()
+            .optional()
+            .describe("Aggressively prune at 80% context usage to avoid compaction"),
+          subagent_context_transfer: z
+            .boolean()
+            .optional()
+            .describe("Transfer relevant parent context to subagent sessions"),
+          batch_permissions: z
+            .boolean()
+            .optional()
+            .describe("Pre-resolve all tool permissions before stream instead of per-call"),
+          cache_sliding_window: z
+            .boolean()
+            .optional()
+            .describe("Cache SlidingWindow computation across loop iterations"),
         })
         .optional(),
     })
