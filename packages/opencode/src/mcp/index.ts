@@ -479,6 +479,43 @@ export namespace MCP {
         })
       }
 
+      function monitor(s: State, name: string, client: MCPClient, mcp: Config.Mcp, retries = 3) {
+        let ctx: any
+        try {
+          ctx = Instance.current
+        } catch {}
+
+        client.onclose = () => {
+          if (s.clients[name] !== client) return
+          log.warn("transport closed", { server: name, retries })
+          s.status[name] = { status: "failed", error: "Transport disconnected" }
+          delete s.clients[name]
+          delete s.defs[name]
+          if (retries <= 0) return
+
+          setTimeout(() => {
+            const run = () =>
+              Effect.runPromise(
+                Effect.gen(function* () {
+                  const result = yield* create(name, mcp)
+                  if (!result.mcpClient) {
+                    s.status[name] = result.status
+                    return
+                  }
+                  s.status[name] = result.status
+                  s.clients[name] = result.mcpClient
+                  s.defs[name] = result.defs!
+                  watch(s, name, result.mcpClient, mcp.timeout)
+                  monitor(s, name, result.mcpClient, mcp, retries - 1)
+                  log.info("reconnected", { server: name })
+                }).pipe(Effect.ignore),
+              ).catch(() => {})
+            if (ctx) Instance.restore(ctx, run)
+            else run()
+          }, 1000)
+        }
+      }
+
       const state = yield* InstanceState.make<State>(
         Effect.fn("MCP.state")(function* () {
           const cfg = yield* cfgSvc.get()
@@ -511,6 +548,7 @@ export namespace MCP {
                   s.clients[key] = result.mcpClient
                   s.defs[key] = result.defs!
                   watch(s, key, result.mcpClient, mcp.timeout)
+                  monitor(s, key, result.mcpClient, mcp)
                 }
               }),
             { concurrency: "unbounded" },
@@ -585,6 +623,7 @@ export namespace MCP {
         s.clients[name] = result.mcpClient
         s.defs[name] = result.defs!
         watch(s, name, result.mcpClient, mcp.timeout)
+        monitor(s, name, result.mcpClient, mcp)
         return result.status
       })
 
