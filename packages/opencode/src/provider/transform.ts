@@ -225,8 +225,33 @@ export namespace ProviderTransform {
   }
 
   function applyCaching(msgs: ModelMessage[], model: Provider.Model): ModelMessage[] {
-    const system = msgs.filter((msg) => msg.role === "system").slice(0, 2)
-    const final = msgs.filter((msg) => msg.role !== "system").slice(-2)
+    // Providers that also get a tool-level cache marker via toolCaching() must
+    // reserve one breakpoint slot (4 max for Anthropic).  We allocate 3 message
+    // markers and let the 4th go to tool definitions (3000-8000 tokens, often
+    // the largest stable cacheable block).  Providers without tool caching use
+    // all 4 slots for messages.
+    const hasToolSlot =
+      model.providerID === "anthropic" ||
+      model.providerID === "google-vertex-anthropic" ||
+      model.providerID.includes("bedrock") ||
+      model.api.npm === "@ai-sdk/anthropic" ||
+      model.api.npm === "@ai-sdk/amazon-bedrock"
+    const nonSystem = msgs.filter((msg) => msg.role !== "system")
+
+    let targets: ModelMessage[]
+    if (hasToolSlot) {
+      // 3 markers: system[0] + first non-system (compaction summary) + last msg
+      const system = msgs.filter((msg) => msg.role === "system").slice(0, 1)
+      const first = nonSystem.slice(0, 1)
+      const final = nonSystem.slice(-1)
+      targets = unique([...system, ...first, ...final])
+    } else {
+      // 4 markers: system[0..1] + first non-system + last msg
+      const system = msgs.filter((msg) => msg.role === "system").slice(0, 2)
+      const first = nonSystem.slice(0, 1)
+      const final = nonSystem.slice(-1)
+      targets = unique([...system, ...first, ...final])
+    }
 
     const cacheTtl = process.env.ENABLE_PROMPT_CACHING_1H ? "1h" : undefined
     const providerOptions = {
@@ -250,7 +275,7 @@ export namespace ProviderTransform {
       },
     }
 
-    for (const msg of unique([...system, ...final])) {
+    for (const msg of targets) {
       const useMessageLevelOptions =
         model.providerID === "anthropic" ||
         model.providerID.includes("bedrock") ||
@@ -325,13 +350,14 @@ export namespace ProviderTransform {
     const keys = Object.keys(tools)
     if (keys.length === 0) return tools
     const last = keys[keys.length - 1]
+    const cacheTtl = process.env.ENABLE_PROMPT_CACHING_1H ? { ttl: "1h" } : {}
     return {
       ...tools,
       [last]: {
         ...tools[last],
         providerOptions: mergeDeep(tools[last].providerOptions ?? {}, {
           anthropic: {
-            cacheControl: { type: "ephemeral", ...(process.env.ENABLE_PROMPT_CACHING_1H ? { ttl: "1h" } : {}) },
+            cacheControl: { type: "ephemeral", ...cacheTtl },
           },
           bedrock: { cachePoint: { type: "default" } },
         }),
