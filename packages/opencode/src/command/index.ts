@@ -5,6 +5,7 @@ import { SessionID, MessageID } from "@/session/schema"
 import { Effect, Layer, ServiceMap } from "effect"
 import z from "zod"
 import { Config } from "../config/config"
+import { Hook } from "../hook/hook"
 import { MCP } from "../mcp"
 import { Skill } from "../skill"
 import { Log } from "../util/log"
@@ -36,7 +37,7 @@ export namespace Command {
       description: z.string().optional(),
       agent: z.string().optional(),
       model: z.string().optional(),
-      source: z.enum(["command", "mcp", "skill"]).optional(),
+      source: z.enum(["command", "mcp", "skill", "hook"]).optional(),
       // workaround for zod not supporting async functions natively so we use getters
       // https://zod.dev/v4/changelog?id=zfunction
       template: z.promise(z.string()).or(z.string()),
@@ -155,6 +156,20 @@ export namespace Command {
             source: "skill",
             get template() {
               return item.content
+            },
+            hints: [],
+          }
+        }
+
+        const hookCmds = yield* Effect.promise(() => Hook.loadCommands())
+        for (const cmd of hookCmds) {
+          if (commands[cmd.name]) continue
+          commands[cmd.name] = {
+            name: cmd.name,
+            description: cmd.description,
+            source: "hook",
+            get template() {
+              return ""
             },
             hints: [],
           }

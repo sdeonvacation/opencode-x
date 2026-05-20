@@ -21,6 +21,8 @@ import { Instance } from "../project/instance"
 import { InstanceState } from "@/effect/instance-state"
 import { fn } from "@/util/fn"
 import { Snapshot } from "@/snapshot"
+import { Hook } from "../hook/hook"
+import { Config } from "../config/config"
 import { ProjectID } from "../project/schema"
 import { WorkspaceID } from "../control-plane/schema"
 import { SessionID, MessageID, PartID } from "./schema"
@@ -31,6 +33,29 @@ import { Global } from "@/global"
 import type { LanguageModelV2Usage } from "@ai-sdk/provider"
 import { Effect, Layer, ServiceMap } from "effect"
 import { makeRuntime } from "@/effect/run-service"
+
+// Hook output storage for system prompt injection
+const hookSession = new Map<string, string>()
+const hookTurn = new Map<string, string>()
+
+export const HookContext = {
+  setSession(id: string, text: string) {
+    hookSession.set(id, text)
+  },
+  getSession(id: string) {
+    return hookSession.get(id)
+  },
+  setTurn(id: string, text: string) {
+    hookTurn.set(id, text)
+  },
+  getTurn(id: string) {
+    return hookTurn.get(id)
+  },
+  clear(id: string) {
+    hookSession.delete(id)
+    hookTurn.delete(id)
+  },
+}
 
 export namespace Session {
   const log = Log.create({ service: "session" })
@@ -435,6 +460,19 @@ export namespace Session {
 
         yield* Effect.sync(() => SyncEvent.run(Event.Created, { sessionID: result.id, info: result }))
 
+        // Hook dispatch: SessionStart (capture stdout for system prompt)
+        yield* Effect.promise(async () => {
+          const cfg = await Config.get()
+          if (!cfg.experimental?.hooks) return
+          const rules = await Hook.load()
+          const res = await Effect.runPromise(
+            Hook.dispatch("SessionStart", { sessionID: result.id }, rules).pipe(Effect.option),
+          )
+          if (res._tag === "Some" && res.value.output.length > 0) {
+            HookContext.setSession(result.id, res.value.output.join("\n\n"))
+          }
+        }).pipe(Effect.ignore)
+
         if (!Flag.OPENCODE_EXPERIMENTAL_WORKSPACES) {
           // This only exist for backwards compatibility. We should not be
           // manually publishing this event; it is a sync event now
@@ -467,6 +505,14 @@ export namespace Session {
       const remove: Interface["remove"] = Effect.fnUntraced(function* (sessionID: SessionID) {
         try {
           const session = yield* get(sessionID)
+          HookContext.clear(sessionID)
+          // Hook dispatch: Stop (fire-and-forget)
+          yield* Effect.promise(async () => {
+            const cfg = await Config.get()
+            if (!cfg.experimental?.hooks) return
+            const rules = await Hook.load()
+            await Effect.runPromise(Hook.dispatch("Stop", { sessionID }, rules).pipe(Effect.asVoid, Effect.ignore))
+          }).pipe(Effect.ignore)
           const kids = yield* children(sessionID)
           for (const child of kids) {
             yield* remove(child.id)

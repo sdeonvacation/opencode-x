@@ -339,7 +339,14 @@ export namespace ProviderTransform {
     })
   }
 
-  export function toolCaching(tools: Record<string, { providerOptions?: Record<string, any> }>, model: Provider.Model) {
+  // Module-level state for session-stable tool caching
+  const toolAnchors = new Map<string, { hash: string; anchor: string }>()
+
+  export function toolCaching(
+    tools: Record<string, { providerOptions?: Record<string, any> }>,
+    model: Provider.Model,
+    sessionID?: string,
+  ) {
     const isAnthropicLike =
       model.providerID === "anthropic" ||
       model.providerID === "google-vertex-anthropic" ||
@@ -349,13 +356,32 @@ export namespace ProviderTransform {
     if (!isAnthropicLike) return tools
     const keys = Object.keys(tools)
     if (keys.length === 0) return tools
-    const last = keys[keys.length - 1]
+
+    const hash = keys.join(",")
+    const key = sessionID ? `${sessionID}:${model.id}` : undefined
+
+    if (key) {
+      const prev = toolAnchors.get(key)
+      if (prev) {
+        if (prev.hash !== hash) {
+          // Tools changed (MCP dynamic) — skip tool caching to avoid cache bust
+          toolAnchors.set(key, { hash, anchor: keys[keys.length - 1] })
+          return tools
+        }
+      } else {
+        // First call — latch anchor
+        toolAnchors.set(key, { hash, anchor: keys[keys.length - 1] })
+      }
+    }
+
+    const anchor = key ? toolAnchors.get(key)!.anchor : keys[keys.length - 1]
+    const target = keys.includes(anchor) ? anchor : keys[keys.length - 1]
     const cacheTtl = process.env.ENABLE_PROMPT_CACHING_1H ? { ttl: "1h" } : {}
     return {
       ...tools,
-      [last]: {
-        ...tools[last],
-        providerOptions: mergeDeep(tools[last].providerOptions ?? {}, {
+      [target]: {
+        ...tools[target],
+        providerOptions: mergeDeep(tools[target].providerOptions ?? {}, {
           anthropic: {
             cacheControl: { type: "ephemeral", ...cacheTtl },
           },
@@ -369,7 +395,7 @@ export namespace ProviderTransform {
     msgs = unsupportedParts(msgs, model)
     msgs = normalizeMessages(msgs, model, options)
     if (
-      (model.providerID === "anthropic" ||
+      ((model.providerID === "anthropic" ||
         model.providerID === "google-vertex-anthropic" ||
         model.providerID === "openrouter" ||
         model.api.id.includes("anthropic") ||
@@ -377,10 +403,10 @@ export namespace ProviderTransform {
         model.id.includes("anthropic") ||
         model.id.includes("claude") ||
         model.api.npm === "@ai-sdk/anthropic" ||
-        model.api.npm === "@ai-sdk/anthropic" ||
         model.api.npm === "@openrouter/ai-sdk-provider" ||
         model.api.npm === "@ai-sdk/alibaba") &&
-      model.api.npm !== "@ai-sdk/gateway"
+        model.api.npm !== "@ai-sdk/gateway") ||
+      options.caching !== false
     ) {
       msgs = applyCaching(msgs, model)
     }

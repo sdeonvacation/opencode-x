@@ -24,6 +24,7 @@ import { errors } from "../error"
 import { lazy } from "../../util/lazy"
 import { Bus } from "../../bus"
 import { NamedError } from "@opencode-ai/util/error"
+import { Goal } from "../../goal/goal"
 
 const log = Log.create({ service: "server" })
 
@@ -1121,6 +1122,56 @@ export const SessionRoutes = lazy(() =>
           reply: c.req.valid("json").response,
         })
         return c.json(true)
+      },
+    )
+    .post(
+      "/:sessionID/goal",
+      describeRoute({
+        summary: "Create goal",
+        description: "Create a goal for the session to work toward autonomously.",
+        operationId: "session.goal",
+        responses: {
+          200: {
+            description: "Goal created",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    id: z.string(),
+                    session_id: z.string(),
+                    objective: z.string(),
+                    status: z.string(),
+                    token_budget: z.number().nullable(),
+                    tokens_used: z.number(),
+                    turns_used: z.number(),
+                    time_used_secs: z.number(),
+                    created_at: z.number(),
+                    completed_at: z.number().nullable(),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      validator(
+        "json",
+        z.object({
+          objective: z.string(),
+        }),
+      ),
+      async (c) => {
+        const sessionID = c.req.valid("param").sessionID
+        const body = c.req.valid("json")
+        const goal = Goal.create({ sessionID, objective: body.objective })
+        return c.json(goal)
       },
     ),
 )

@@ -4,6 +4,7 @@ import { createCliRenderer, type CliRendererConfig } from "@opentui/core"
 import { createBtwCommand } from "@tui/command/btw-command"
 import { createMemoryCommands } from "@tui/command/memory-commands"
 import { createClearCommands } from "@tui/command/clear-commands"
+import { createGoalCommand } from "@tui/command/goal-command"
 import { createGotoCommand } from "@tui/command/goto-command"
 import { useTerminalTitle } from "@tui/component/terminal-title"
 import { RouteProvider, useRoute } from "@tui/context/route"
@@ -570,6 +571,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       category: "System",
     },
     createGotoCommand({ dialog, sdk, toast, sync }),
+    createGoalCommand({ dialog, sdk, toast, route }),
     {
       title: "Exit the app",
       value: "app.exit",

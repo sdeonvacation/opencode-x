@@ -230,10 +230,11 @@ export namespace SessionProcessor {
           if (enabled && ctx.localModel && shouldCompress(output.output, match.part.tool, ctx.compressionThresholds)) {
             const heuristic =
               (match.part.tool === "grep" || match.part.tool === "glob") &&
-              cfg.experimental?.compression_threshold !== undefined &&
-              cfg.experimental.compression_threshold !== 0
+              cfg.experimental?.compression_heuristic !== false
             if (heuristic) {
-              const truncated = truncateHeadTail(output.output, 50, 20)
+              const head = cfg.hybrid?.heuristic_head ?? 50
+              const tail = cfg.hybrid?.heuristic_tail ?? 20
+              const truncated = truncateHeadTail(output.output, head, tail)
               yield* session.updatePart({
                 ...match.part,
                 state: {

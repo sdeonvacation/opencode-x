@@ -800,7 +800,7 @@ export function Prompt(props: PromptProps) {
       iife(() => {
         const firstLine = inputText.split("\n")[0]
         const command = firstLine.split(" ")[0].slice(1)
-        return sync.data.command.some((x) => x.name === command)
+        return sync.data.command.some((x) => x.name === command && x.source !== "hook")
       })
     ) {
       // Parse command from first line, preserve multi-line content in arguments
@@ -1017,6 +1017,7 @@ export function Prompt(props: PromptProps) {
             return newMap
           })
         }}
+        onSubmit={submit}
         value={store.prompt.input}
         fileStyleId={fileStyleId}
         agentStyleId={agentStyleId}

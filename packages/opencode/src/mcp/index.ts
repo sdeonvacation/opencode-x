@@ -1,3 +1,5 @@
+import path from "path"
+import os from "os"
 import { dynamicTool, type Tool, jsonSchema, type JSONSchema7 } from "ai"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
@@ -211,6 +213,7 @@ export namespace MCP {
     status: Record<string, Status>
     clients: Record<string, MCPClient>
     defs: Record<string, MCPToolDef[]>
+    discovered: Record<string, any>
   }
 
   export interface Interface {
@@ -519,11 +522,41 @@ export namespace MCP {
       const state = yield* InstanceState.make<State>(
         Effect.fn("MCP.state")(function* () {
           const cfg = yield* cfgSvc.get()
-          const config = cfg.mcp ?? {}
+          const config: Record<string, any> = { ...(cfg.mcp ?? {}) }
+
+          // Auto-discover MCP servers from installed Claude Code plugins
+          yield* Effect.promise(async () => {
+            try {
+              const manifest = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json")
+              const text = await Bun.file(manifest).text()
+              const installed = JSON.parse(text)
+              for (const [, entries] of Object.entries(installed.plugins ?? {})) {
+                const entry = (entries as any[])?.[0]
+                const dir = entry?.installPath
+                if (!dir) continue
+                try {
+                  const ptext = await Bun.file(path.join(dir, ".claude-plugin", "plugin.json")).text()
+                  const plugin = JSON.parse(ptext)
+                  for (const [name, server] of Object.entries(plugin.mcpServers ?? {})) {
+                    if (config[name]) continue
+                    const srv = server as any
+                    const args = (srv.args ?? []).map((a: string) => a.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, dir))
+                    config[name] = {
+                      type: "local" as const,
+                      command: [srv.command, ...args],
+                      environment: { CLAUDE_PLUGIN_ROOT: dir },
+                    }
+                  }
+                } catch {}
+              }
+            } catch {}
+          })
+
           const s: State = {
             status: {},
             clients: {},
             defs: {},
+            discovered: config,
           }
 
           yield* Effect.forEach(
@@ -592,7 +625,7 @@ export namespace MCP {
         const s = yield* InstanceState.get(state)
 
         const cfg = yield* cfgSvc.get()
-        const config = cfg.mcp ?? {}
+        const config = { ...(cfg.mcp ?? {}), ...s.discovered }
         const result: Record<string, Status> = {}
 
         for (const [key, mcp] of Object.entries(config)) {

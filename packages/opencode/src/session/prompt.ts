@@ -5,7 +5,7 @@ import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import { Log } from "../util/log"
 import { SessionRevert } from "./revert"
-import { Session } from "."
+import { Session, HookContext } from "."
 import { Agent } from "../agent/agent"
 import { Provider } from "../provider/provider"
 import { ModelID, ProviderID } from "../provider/schema"
@@ -48,6 +48,14 @@ import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
 import { insertReminders } from "./prompt-reminders"
 import { handleSubtask } from "./subtask-handler"
 import { InstanceState } from "@/effect/instance-state"
+import { applyToolBudget } from "./tool-budget"
+import { ContextCollapse } from "./context-collapse"
+import { MicroCompact } from "./microcompact"
+import { PromptSplit } from "./prompt-split"
+import { Goal } from "../goal/goal"
+import { GoalLoop } from "../goal/goal-loop"
+import { Hook } from "../hook/hook"
+import { PersistentMemory } from "../memory/persistent"
 import { makeRuntime } from "@/effect/run-service"
 import { SessionRunState } from "./run-state"
 import { Instance } from "@/project/instance"
@@ -297,6 +305,34 @@ export namespace SessionPrompt {
                     { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID },
                     { args },
                   )
+                  // Hook dispatch: PreToolUse (Phase 5)
+                  if (cfg.experimental?.hooks) {
+                    const rules = yield* Effect.promise(() => Hook.load())
+                    const hookResult = yield* (
+                      Hook.dispatch(
+                        "PreToolUse",
+                        {
+                          tool: item.id,
+                          input: args,
+                          sessionID: ctx.sessionID,
+                          model: input.model?.id,
+                        },
+                        rules,
+                        cfg,
+                      ) as Effect.Effect<{ allowed: true; output: string[] }, any>
+                    ).pipe(
+                      Effect.catch((denied: any) => {
+                        return Effect.succeed({ allowed: false as const, reason: denied.message as string })
+                      }),
+                    )
+                    if (!hookResult.allowed) {
+                      return {
+                        title: "Hook denied",
+                        output: `Tool execution denied by hook: ${"reason" in hookResult ? hookResult.reason : "unknown"}`,
+                        metadata: { denied: true },
+                      }
+                    }
+                  }
                   const result = yield* Effect.promise(() => item.execute(args, ctx))
                   const output = {
                     ...result,
@@ -312,6 +348,30 @@ export namespace SessionPrompt {
                     { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args },
                     output,
                   )
+                  // Hook dispatch: PostToolUse (Phase 5, fire-and-forget)
+                  if (cfg.experimental?.hooks) {
+                    Effect.runPromise(
+                      Effect.promise(async () => {
+                        const rules = await Hook.load()
+                        await Effect.runPromise(
+                          (
+                            Hook.dispatch(
+                              "PostToolUse",
+                              {
+                                tool: item.id,
+                                input: args,
+                                result: output,
+                                sessionID: ctx.sessionID,
+                                model: input.model?.id,
+                              },
+                              rules,
+                              cfg,
+                            ) as Effect.Effect<{ allowed: true; output: string[] }>
+                          ).pipe(Effect.ignore),
+                        )
+                      }),
+                    ).catch(() => {})
+                  }
                   if (options.abortSignal?.aborted) {
                     yield* input.processor.completeToolCall(options.toolCallId, output)
                   }
@@ -631,10 +691,15 @@ export namespace SessionPrompt {
         const model = input.model ?? ag.model ?? (yield* lastModel(input.sessionID))
         const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
         const full =
-          !input.variant && ag.variant && same
+          input.variant || (ag.variant && same)
             ? yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.catchDefect(() => Effect.void))
             : undefined
-        const variant = input.variant ?? (ag.variant && full?.variants?.[ag.variant] ? ag.variant : undefined)
+        const variant =
+          input.variant && full?.variants?.[input.variant]
+            ? input.variant
+            : ag.variant && same && full?.variants?.[ag.variant]
+              ? ag.variant
+              : undefined
 
         const info: MessageV2.User = {
           id: input.messageID ?? MessageID.ascending(),
@@ -980,6 +1045,33 @@ export namespace SessionPrompt {
           const message = yield* createUserMessage(input)
           yield* sessions.touch(input.sessionID)
 
+          // Hook dispatch: UserPromptSubmit (blocking — can deny)
+          const cfg = yield* Effect.promise(() => Config.get())
+          if (cfg.experimental?.hooks) {
+            const rules = yield* Effect.promise(() => Hook.load())
+            const text = input.parts
+              .filter((p): p is { type: "text"; text: string } => p.type === "text")
+              .map((p) => p.text)
+              .join("\n")
+            const exit = yield* Effect.exit(
+              Hook.dispatch("UserPromptSubmit", { sessionID: input.sessionID, prompt: text }, rules, cfg),
+            )
+            if (Exit.isFailure(exit)) {
+              const err = Cause.squash(exit.cause)
+              const reason =
+                err && typeof err === "object" && "message" in err ? String(err.message) : "hook denied prompt"
+              log.warn("hook-denied-prompt", { sessionID: input.sessionID, reason })
+              const error = new NamedError.Unknown({
+                message: `UserPromptSubmit hook denied prompt: ${reason}`,
+              })
+              yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+              return message
+            }
+            if (Exit.isSuccess(exit) && exit.value.output.length > 0) {
+              HookContext.setTurn(input.sessionID, exit.value.output.join("\n\n"))
+            }
+          }
+
           const permissions: Permission.Ruleset = []
           for (const [t, enabled] of Object.entries(input.tools ?? {})) {
             permissions.push({ permission: t, action: enabled ? "allow" : "deny", pattern: "*" })
@@ -1165,6 +1257,10 @@ export namespace SessionPrompt {
                   assistant.finish = event.finishReason
                   assistant.cost += usage.cost
                   assistant.tokens = usage.tokens
+                  // Cache break detection: large context with zero cache reads suggests cache bust
+                  if (usage.tokens.cache.read === 0 && usage.tokens.input > 10000 && usage.tokens.cache.write === 0) {
+                    log.warn("cache-break", { input: usage.tokens.input, model: model.id })
+                  }
                   await Session.updatePart({
                     id: PartID.ascending(),
                     reason: event.finishReason,
@@ -1431,6 +1527,47 @@ export namespace SessionPrompt {
                 }
               }
 
+              // Tool result budget (Phase 1A)
+              if (cfg.experimental?.tool_result_budget) {
+                msgs = applyToolBudget(msgs, cfg.experimental.tool_result_budget)
+              }
+
+              // MicroCompact at 75% (Phase 1C) — mutual exclusion with proactive_prune
+              if (cfg.experimental?.microcompact && !cfg.experimental?.proactive_prune && lastFinished?.tokens) {
+                const used =
+                  lastFinished.tokens.input + lastFinished.tokens.cache.read + lastFinished.tokens.cache.write
+                const limit = model.limit?.context ?? 200_000
+                if (MicroCompact.shouldCompact({ input: used, context: limit })) {
+                  msgs = yield* (
+                    MicroCompact.compact({
+                      sessionID,
+                      msgs,
+                      model,
+                      provider,
+                      cfg,
+                    }) as Effect.Effect<MessageV2.WithParts[]>
+                  ).pipe(Effect.orElseSucceed(() => msgs))
+                }
+              }
+
+              // Context collapse at 97% (Phase 1B)
+              if (cfg.experimental?.context_collapse && lastFinished?.tokens) {
+                const used =
+                  lastFinished.tokens.input + lastFinished.tokens.cache.read + lastFinished.tokens.cache.write
+                const limit = model.limit?.context ?? 200_000
+                if (ContextCollapse.shouldCollapse({ input: used, context: limit })) {
+                  msgs = yield* (
+                    ContextCollapse.collapse({
+                      sessionID,
+                      msgs,
+                      model,
+                      provider,
+                      cfg,
+                    }) as Effect.Effect<MessageV2.WithParts[]>
+                  ).pipe(Effect.orElseSucceed(() => msgs))
+                }
+              }
+
               const skillsKey = agent.name
               const envKey = `${model.providerID}:${model.id}`
               const [skills, env, instructions, modelMsgs] = yield* Effect.all([
@@ -1449,15 +1586,51 @@ export namespace SessionPrompt {
                 instruction.system().pipe(Effect.orDie),
                 MessageV2.toModelMessagesEffect(msgs, model),
               ])
-              const system = [...env, ...(skills ? [skills] : []), ...instructions]
+              const system: string[] = []
+              // Prompt split caching: stable prefix (one joined entry) then dynamic suffix
+              if (cfg.experimental?.prompt_split_caching !== false) {
+                const stable = [...(skills ? [skills] : []), ...instructions].filter((x) => x)
+                system.push(stable.join("\n"))
+                system.push(...env)
+              } else {
+                system.push(...env, ...(skills ? [skills] : []), ...instructions)
+              }
               if (agent.mode === "primary") {
                 const memory = yield* Effect.promise(() => Memory.list(sessionID)).pipe(
                   Effect.orElseSucceed(() => [] as Awaited<ReturnType<typeof Memory.list>>),
                 )
                 if (memory.length > 0) system.push("Session Memory:\n" + memory.map((m) => `- ${m.content}`).join("\n"))
               }
+
+              // Persistent memory (Phase 6)
+              if (cfg.experimental?.persistent_memory) {
+                const mem = PersistentMemory.inject()
+                if (mem) system.push(mem)
+              }
+
+              // Goal addendum (Phase 3)
+              if (cfg.experimental?.goal_system) {
+                const goal = Goal.get(sessionID)
+                if (goal) system.push(Goal.addendum(goal))
+              }
+
+              // Hook context injection (plugin stdout)
+              const hookSession = HookContext.getSession(sessionID)
+              if (hookSession) system.push(hookSession)
+              const hookTurn = HookContext.getTurn(sessionID)
+              if (hookTurn) system.push(hookTurn)
+
               const format = lastUser.format ?? { type: "text" as const }
               if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+              // Multi-step gate: allow SDK-internal looping for safe tool sets
+              const safe = LLM.parallelGate({
+                agent,
+                permission: session.permission,
+                cfg,
+                toolMeta: resolvedTools.toolMeta,
+              })
+              const steps =
+                safe && cfg.experimental?.multi_step !== false ? (cfg.experimental?.multi_step_count ?? 5) : undefined
               const result = yield* handle.process({
                 user: lastUser,
                 agent,
@@ -1470,6 +1643,7 @@ export namespace SessionPrompt {
                 toolMeta: resolvedTools.toolMeta,
                 model,
                 toolChoice: format.type === "json_schema" ? "required" : undefined,
+                maxSteps: steps,
               })
 
               if (structured !== undefined) {
@@ -1503,7 +1677,27 @@ export namespace SessionPrompt {
               }
               return "continue" as const
             }).pipe(Effect.ensuring(instruction.clear(handle.message.id)))
-            if (outcome === "break") break
+            if (outcome === "break") {
+              // Goal auto-continuation (Phase 3): if goal active + under budget, continue loop
+              const loopCfg = yield* config.get()
+              if (loopCfg.experimental?.goal_system && lastUser) {
+                const goal = Goal.get(sessionID)
+                if (goal && GoalLoop.shouldContinue({ goal, step })) {
+                  Goal.tick({ id: goal.id, tokens: lastFinished?.tokens?.input ?? 0, turns: 1 })
+                  const updated = Goal.get(sessionID)
+                  if (updated && updated.status === "active") {
+                    yield* createUserMessage({
+                      sessionID,
+                      agent: lastUser.agent,
+                      model: lastUser.model,
+                      parts: [{ type: "text", text: GoalLoop.continuation(updated) }],
+                    })
+                    continue
+                  }
+                }
+              }
+              break
+            }
             continue
           }
 

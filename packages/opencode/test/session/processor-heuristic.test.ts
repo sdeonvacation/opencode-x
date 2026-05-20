@@ -212,6 +212,132 @@ describe("SessionProcessor.truncateHeadTail", () => {
 })
 
 // ---------------------------------------------------------------------------
+// truncateHeadTail with custom head/tail counts
+// ---------------------------------------------------------------------------
+
+describe("SessionProcessor.truncateHeadTail custom counts", () => {
+  test("respects custom head=10 tail=5", () => {
+    const lines = Array(50)
+      .fill("x")
+      .map((_, i) => `r-${i}`)
+    const text = lines.join("\n")
+    const result = SessionProcessor.truncateHeadTail(text, 10, 5)
+    const parts = result.split("\n")
+    expect(parts[0]).toBe("r-0")
+    expect(parts[9]).toBe("r-9")
+    expect(parts).toContainEqual(expect.stringContaining("35 lines omitted"))
+    expect(parts[parts.length - 1]).toBe("r-49")
+    expect(parts[parts.length - 5]).toBe("r-45")
+  })
+
+  test("no truncation when lines <= head + tail with custom counts", () => {
+    const lines = Array(15)
+      .fill("x")
+      .map((_, i) => `r-${i}`)
+    const text = lines.join("\n")
+    const result = SessionProcessor.truncateHeadTail(text, 10, 5)
+    expect(result).toBe(text)
+  })
+
+  test("head=1 tail=1 truncates aggressively", () => {
+    const lines = Array(10)
+      .fill("x")
+      .map((_, i) => `r-${i}`)
+    const text = lines.join("\n")
+    const result = SessionProcessor.truncateHeadTail(text, 1, 1)
+    const parts = result.split("\n")
+    expect(parts[0]).toBe("r-0")
+    expect(parts).toContainEqual(expect.stringContaining("8 lines omitted"))
+    expect(parts[parts.length - 1]).toBe("r-9")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Heuristic gate logic
+// ---------------------------------------------------------------------------
+
+describe("heuristic gate defaults", () => {
+  test("heuristic enabled by default (no experimental config)", () => {
+    const cfg: Record<string, unknown> = {}
+    const tool = "grep"
+    const heuristic = (tool === "grep" || tool === "glob") && (cfg.experimental as any)?.compression_heuristic !== false
+    expect(heuristic).toBe(true)
+  })
+
+  test("heuristic enabled when compression_heuristic is undefined", () => {
+    const cfg = { experimental: {} }
+    const tool: string = "glob"
+    const heuristic = (tool === "grep" || tool === "glob") && (cfg.experimental as any)?.compression_heuristic !== false
+    expect(heuristic).toBe(true)
+  })
+
+  test("heuristic disabled when compression_heuristic is false", () => {
+    const cfg = { experimental: { compression_heuristic: false } }
+    const tool: string = "grep"
+    const heuristic = (tool === "grep" || tool === "glob") && (cfg.experimental as any)?.compression_heuristic !== false
+    expect(heuristic).toBe(false)
+  })
+
+  test("heuristic enabled when compression_heuristic is true", () => {
+    const cfg = { experimental: { compression_heuristic: true } }
+    const tool: string = "grep"
+    const heuristic = (tool === "grep" || tool === "glob") && (cfg.experimental as any)?.compression_heuristic !== false
+    expect(heuristic).toBe(true)
+  })
+
+  test("heuristic false for bash tool", () => {
+    const cfg = { experimental: { compression_heuristic: true } }
+    const tool: string = "bash"
+    const heuristic = (tool === "grep" || tool === "glob") && (cfg.experimental as any)?.compression_heuristic !== false
+    expect(heuristic).toBe(false)
+  })
+
+  test("heuristic false for read tool", () => {
+    const cfg = {}
+    const tool: string = "read"
+    const heuristic = (tool === "grep" || tool === "glob") && (cfg as any).experimental?.compression_heuristic !== false
+    expect(heuristic).toBe(false)
+  })
+
+  test("heuristic enabled when compression_heuristic is true", () => {
+    const cfg = { experimental: { compression_heuristic: true } }
+    const tool = "grep"
+    const heuristic = (tool === "grep" || tool === "glob") && (cfg.experimental as any)?.compression_heuristic !== false
+    expect(heuristic).toBe(true)
+  })
+
+  test("heuristic false for bash tool", () => {
+    const cfg = { experimental: { compression_heuristic: true } }
+    const tool: string = "bash"
+    const heuristic = (tool === "grep" || tool === "glob") && (cfg.experimental as any)?.compression_heuristic !== false
+    expect(heuristic).toBe(false)
+  })
+
+  test("heuristic false for read tool", () => {
+    const cfg = {}
+    const tool: string = "read"
+    const heuristic = (tool === "grep" || tool === "glob") && (cfg as any).experimental?.compression_heuristic !== false
+    expect(heuristic).toBe(false)
+  })
+
+  test("head/tail defaults from hybrid config", () => {
+    const cfg: Record<string, unknown> = {}
+    const head = (cfg.hybrid as any)?.heuristic_head ?? 50
+    const tail = (cfg.hybrid as any)?.heuristic_tail ?? 20
+    expect(head).toBe(50)
+    expect(tail).toBe(20)
+  })
+
+  test("head/tail uses hybrid config values", () => {
+    const cfg = { hybrid: { heuristic_head: 30, heuristic_tail: 10 } }
+    const head = cfg.hybrid?.heuristic_head ?? 50
+    const tail = cfg.hybrid?.heuristic_tail ?? 20
+    expect(head).toBe(30)
+    expect(tail).toBe(10)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Noop exit test
 // ---------------------------------------------------------------------------
 

@@ -78,6 +78,7 @@ export function Autocomplete(props: {
   fileStyleId: number
   agentStyleId: number
   promptPartTypeId: () => number
+  onSubmit?: () => void
 }) {
   const editor = useEditorContext()
   const sdk = useSDK()
@@ -403,7 +404,7 @@ export function Autocomplete(props: {
 
     for (const serverCommand of sync.data.command) {
       if (serverCommand.source === "skill") continue
-      const label = serverCommand.source === "mcp" ? ":mcp" : ""
+      const label = serverCommand.source === "mcp" ? ":mcp" : serverCommand.source === "hook" ? ":hook" : ""
       results.push({
         display: "/" + serverCommand.name + label,
         description: serverCommand.description,
@@ -413,6 +414,12 @@ export function Autocomplete(props: {
           props.input().deleteRange(0, 0, cursor.row, cursor.col)
           props.input().insertText(newText)
           props.input().cursorOffset = Bun.stringWidth(newText)
+          if (serverCommand.source === "hook") {
+            props.setPrompt((draft) => {
+              draft.input = newText
+            })
+            props.onSubmit?.()
+          }
         },
       })
     }

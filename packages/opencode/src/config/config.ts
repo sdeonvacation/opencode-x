@@ -920,6 +920,10 @@ export namespace Config {
             .describe(
               "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted.",
             ),
+          caching: z
+            .boolean()
+            .optional()
+            .describe("Enable explicit cache_control markers for this provider (e.g. Deepseek, Fireworks)"),
         })
         .catchall(z.any())
         .optional(),
@@ -981,6 +985,18 @@ export namespace Config {
         .optional()
         .default(20)
         .describe("Lines from end of bash output to always preserve verbatim after compression (default: 20)"),
+      heuristic_head: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Head lines to keep in heuristic truncation (default: 50)"),
+      heuristic_tail: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Tail lines to keep in heuristic truncation (default: 20)"),
       compression_thresholds: z
         .object({
           grep: z
@@ -1209,6 +1225,145 @@ export namespace Config {
             .optional(),
         })
         .optional(),
+      hooks: z
+        .object({
+          PreToolUse: z
+            .array(
+              z.object({
+                matcher: z.string().optional(),
+                status_message: z.string().optional(),
+                hooks: z.array(
+                  z.object({
+                    type: z.literal("command"),
+                    command: z.string(),
+                    timeout: z.number().optional(),
+                  }),
+                ),
+              }),
+            )
+            .optional(),
+          PostToolUse: z
+            .array(
+              z.object({
+                matcher: z.string().optional(),
+                status_message: z.string().optional(),
+                hooks: z.array(
+                  z.object({
+                    type: z.literal("command"),
+                    command: z.string(),
+                    timeout: z.number().optional(),
+                  }),
+                ),
+              }),
+            )
+            .optional(),
+          PostToolUseFailure: z
+            .array(
+              z.object({
+                matcher: z.string().optional(),
+                status_message: z.string().optional(),
+                hooks: z.array(
+                  z.object({
+                    type: z.literal("command"),
+                    command: z.string(),
+                    timeout: z.number().optional(),
+                  }),
+                ),
+              }),
+            )
+            .optional(),
+          Notification: z
+            .array(
+              z.object({
+                matcher: z.string().optional(),
+                status_message: z.string().optional(),
+                hooks: z.array(
+                  z.object({
+                    type: z.literal("command"),
+                    command: z.string(),
+                    timeout: z.number().optional(),
+                  }),
+                ),
+              }),
+            )
+            .optional(),
+          Stop: z
+            .array(
+              z.object({
+                matcher: z.string().optional(),
+                status_message: z.string().optional(),
+                hooks: z.array(
+                  z.object({
+                    type: z.literal("command"),
+                    command: z.string(),
+                    timeout: z.number().optional(),
+                  }),
+                ),
+              }),
+            )
+            .optional(),
+          SubagentStart: z
+            .array(
+              z.object({
+                matcher: z.string().optional(),
+                status_message: z.string().optional(),
+                hooks: z.array(
+                  z.object({
+                    type: z.literal("command"),
+                    command: z.string(),
+                    timeout: z.number().optional(),
+                  }),
+                ),
+              }),
+            )
+            .optional(),
+          SubagentStop: z
+            .array(
+              z.object({
+                matcher: z.string().optional(),
+                status_message: z.string().optional(),
+                hooks: z.array(
+                  z.object({
+                    type: z.literal("command"),
+                    command: z.string(),
+                    timeout: z.number().optional(),
+                  }),
+                ),
+              }),
+            )
+            .optional(),
+          SessionStart: z
+            .array(
+              z.object({
+                matcher: z.string().optional(),
+                status_message: z.string().optional(),
+                hooks: z.array(
+                  z.object({
+                    type: z.literal("command"),
+                    command: z.string(),
+                    timeout: z.number().optional(),
+                  }),
+                ),
+              }),
+            )
+            .optional(),
+          UserPromptSubmit: z
+            .array(
+              z.object({
+                matcher: z.string().optional(),
+                status_message: z.string().optional(),
+                hooks: z.array(
+                  z.object({
+                    type: z.literal("command"),
+                    command: z.string(),
+                    timeout: z.number().optional(),
+                  }),
+                ),
+              }),
+            )
+            .optional(),
+        })
+        .optional(),
       experimental: z
         .object({
           disable_paste_summary: z.boolean().optional(),
@@ -1298,6 +1453,10 @@ export namespace Config {
             .nonnegative()
             .optional()
             .describe("Character threshold below which tool output skips LLM compression (0 = always use LLM)"),
+          compression_heuristic: z
+            .boolean()
+            .optional()
+            .describe("Use head+tail truncation for grep/glob instead of LLM compression (default: true)"),
           noop_exit: z
             .boolean()
             .optional()
@@ -1318,6 +1477,33 @@ export namespace Config {
             .boolean()
             .optional()
             .describe("Cache SlidingWindow computation across loop iterations"),
+          tool_result_budget: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Global char budget for tool results in history (default: disabled, set to 50000 to enable)"),
+          context_collapse: z.boolean().optional().describe("Enable emergency context collapse at 97% utilization"),
+          microcompact: z.boolean().optional().describe("Enable gradual MicroCompact at 75% context utilization"),
+          prompt_split_caching: z
+            .boolean()
+            .optional()
+            .describe("Split system prompt into cached/dynamic sections for improved provider caching"),
+          goal_system: z.boolean().optional().describe("Enable autonomous goal system with /goal command"),
+          worktree_isolation: z.boolean().optional().describe("Enable git worktree isolation for parallel subagents"),
+          hooks: z.boolean().optional().describe("Enable plugin hooks system (Claude Code compatible)"),
+          persistent_memory: z.boolean().optional().describe("Enable cross-session persistent memory"),
+          multi_step: z
+            .boolean()
+            .optional()
+            .describe("Enable multi-step streamText for safe tool chains (default: true)"),
+          multi_step_count: z
+            .number()
+            .int()
+            .min(1)
+            .max(10)
+            .optional()
+            .describe("Max SDK-internal steps when multi_step enabled (default: 5)"),
         })
         .optional(),
     })

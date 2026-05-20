@@ -45,6 +45,8 @@ import { Permission } from "@/permission"
 import { filterTools } from "./tool-filter"
 import { SessionStatus } from "@/session/status"
 import { BackgroundJob } from "@/background/job"
+import { GoalCompleteTool } from "./goal-complete"
+import { MemoryPersistTool } from "./memory-persist"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -189,6 +191,8 @@ export namespace ToolRegistry {
           ApplyPatchTool,
           ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [lsptool] : []),
           ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [plan] : []),
+          ...(cfg.experimental?.goal_system ? [GoalCompleteTool] : []),
+          ...(cfg.experimental?.persistent_memory ? [MemoryPersistTool] : []),
           ...s.custom,
         ]
       })

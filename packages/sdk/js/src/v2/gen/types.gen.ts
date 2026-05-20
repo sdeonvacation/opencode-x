@@ -1617,6 +1617,10 @@ export type HybridConfig = {
    */
   compression_max_tokens?: number
   /**
+   * Lines from end of bash output to always preserve verbatim after compression (default: 20)
+   */
+  compression_tail_lines?: number
+  /**
    * Per-tool line count thresholds for compression eligibility
    */
   compression_thresholds?: {
@@ -1840,6 +1844,80 @@ export type Config = {
       timeout_ms?: number
     }
   }
+  hooks?: {
+    PreToolUse?: Array<{
+      matcher?: string
+      hooks: Array<{
+        type: "command"
+        command: string
+        timeout?: number
+      }>
+    }>
+    PostToolUse?: Array<{
+      matcher?: string
+      hooks: Array<{
+        type: "command"
+        command: string
+        timeout?: number
+      }>
+    }>
+    PostToolUseFailure?: Array<{
+      matcher?: string
+      hooks: Array<{
+        type: "command"
+        command: string
+        timeout?: number
+      }>
+    }>
+    Notification?: Array<{
+      matcher?: string
+      hooks: Array<{
+        type: "command"
+        command: string
+        timeout?: number
+      }>
+    }>
+    Stop?: Array<{
+      matcher?: string
+      hooks: Array<{
+        type: "command"
+        command: string
+        timeout?: number
+      }>
+    }>
+    SubagentStart?: Array<{
+      matcher?: string
+      hooks: Array<{
+        type: "command"
+        command: string
+        timeout?: number
+      }>
+    }>
+    SubagentStop?: Array<{
+      matcher?: string
+      hooks: Array<{
+        type: "command"
+        command: string
+        timeout?: number
+      }>
+    }>
+    SessionStart?: Array<{
+      matcher?: string
+      hooks: Array<{
+        type: "command"
+        command: string
+        timeout?: number
+      }>
+    }>
+    UserPromptSubmit?: Array<{
+      matcher?: string
+      hooks: Array<{
+        type: "command"
+        command: string
+        timeout?: number
+      }>
+    }>
+  }
   experimental?: {
     disable_paste_summary?: boolean
     /**
@@ -1916,6 +1994,62 @@ export type Config = {
       providerID: string
       modelID: string
     }
+    /**
+     * Character threshold below which tool output skips LLM compression (0 = always use LLM)
+     */
+    compression_threshold?: number
+    /**
+     * Exit loop early when model returns empty response with no tool calls
+     */
+    noop_exit?: boolean
+    /**
+     * Aggressively prune at 80% context usage to avoid compaction
+     */
+    proactive_prune?: boolean
+    /**
+     * Transfer relevant parent context to subagent sessions
+     */
+    subagent_context_transfer?: boolean
+    /**
+     * Pre-resolve all tool permissions before stream instead of per-call
+     */
+    batch_permissions?: boolean
+    /**
+     * Cache SlidingWindow computation across loop iterations
+     */
+    cache_sliding_window?: boolean
+    /**
+     * Global char budget for tool results in history (default: disabled, set to 50000 to enable)
+     */
+    tool_result_budget?: number
+    /**
+     * Enable emergency context collapse at 97% utilization
+     */
+    context_collapse?: boolean
+    /**
+     * Enable gradual MicroCompact at 75% context utilization
+     */
+    microcompact?: boolean
+    /**
+     * Split system prompt into cached/dynamic sections for improved provider caching
+     */
+    prompt_split_caching?: boolean
+    /**
+     * Enable autonomous goal system with /goal command
+     */
+    goal_system?: boolean
+    /**
+     * Enable git worktree isolation for parallel subagents
+     */
+    worktree_isolation?: boolean
+    /**
+     * Enable plugin hooks system (Claude Code compatible)
+     */
+    hooks?: boolean
+    /**
+     * Enable cross-session persistent memory
+     */
+    persistent_memory?: boolean
   }
 }
 
@@ -2344,7 +2478,7 @@ export type Command = {
   description?: string
   agent?: string
   model?: string
-  source?: "command" | "mcp" | "skill"
+  source?: "command" | "mcp" | "skill" | "hook"
   template: string
   subtask?: boolean
   hints: Array<string>
@@ -4478,6 +4612,53 @@ export type PermissionRespondResponses = {
 }
 
 export type PermissionRespondResponse = PermissionRespondResponses[keyof PermissionRespondResponses]
+
+export type SessionGoalData = {
+  body?: {
+    objective: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/goal"
+}
+
+export type SessionGoalErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionGoalError = SessionGoalErrors[keyof SessionGoalErrors]
+
+export type SessionGoalResponses = {
+  /**
+   * Goal created
+   */
+  200: {
+    id: string
+    session_id: string
+    objective: string
+    status: string
+    token_budget: number | null
+    tokens_used: number
+    turns_used: number
+    time_used_secs: number
+    created_at: number
+    completed_at: number | null
+  }
+}
+
+export type SessionGoalResponse = SessionGoalResponses[keyof SessionGoalResponses]
 
 export type SessionMemoryListData = {
   body?: never

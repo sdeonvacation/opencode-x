@@ -3,7 +3,7 @@ import { Log } from "@/util/log"
 import { Cause, Effect, Layer, Record, ServiceMap } from "effect"
 import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
-import { streamText, wrapLanguageModel, type ModelMessage, type Tool, tool, jsonSchema } from "ai"
+import { streamText, wrapLanguageModel, stepCountIs, type ModelMessage, type Tool, tool, jsonSchema } from "ai"
 import { mergeDeep, pipe } from "remeda"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
 import { ProviderTransform } from "@/provider/transform"
@@ -44,6 +44,7 @@ export namespace LLM {
     toolMeta?: Map<string, ToolMeta>
     retries?: number
     toolChoice?: "auto" | "required" | "none"
+    maxSteps?: number
     onModelResolved?: (model: Provider.Model) => void
   }
 
@@ -157,23 +158,29 @@ export namespace LLM {
     const isOpenaiOauth = provider.id === "openai" && auth?.type === "oauth"
 
     const system: string[] = []
-    system.push(
-      [
-        // use agent prompt if set
-        ...(input.agent.prompt ? [input.agent.prompt] : []),
-        // any custom prompt passed into this call
-        ...input.system,
-        // any custom prompt from last user message
-        ...(input.user.system ? [input.user.system] : []),
-      ]
+    if (cfg.experimental?.prompt_split_caching !== false && input.system.length >= 2) {
+      // Preserve stable/dynamic boundary: system[0] = stable prefix, system[1] = dynamic suffix
+      const stable = [...(input.agent.prompt ? [input.agent.prompt] : []), input.system[0]].filter((x) => x).join("\n")
+      const dynamic = [...input.system.slice(1), ...(input.user.system ? [input.user.system] : [])]
         .filter((x) => x)
-        .join("\n"),
-    )
+        .join("\n")
+      system.push(stable, dynamic)
+    } else {
+      system.push(
+        [
+          ...(input.agent.prompt ? [input.agent.prompt] : []),
+          ...input.system,
+          ...(input.user.system ? [input.user.system] : []),
+        ]
+          .filter((x) => x)
+          .join("\n"),
+      )
+    }
 
     const header = system[0]
     await Plugin.trigger("experimental.chat.system.transform", { sessionID: input.sessionID, model }, { system })
     // rejoin to maintain 2-part structure for caching if header unchanged
-    if (system.length > 2 && system[0] === header) {
+    if (cfg.experimental?.prompt_split_caching === false && system.length > 2 && system[0] === header) {
       const rest = system.slice(1)
       system.length = 0
       system.push(header, rest.join("\n"))
@@ -387,6 +394,7 @@ export namespace LLM {
           error,
         })
       },
+      stopWhen: input.maxSteps && input.maxSteps > 1 ? stepCountIs(input.maxSteps) : undefined,
       async experimental_repairToolCall(failed) {
         const lower = failed.toolCall.toolName.toLowerCase()
         if (lower !== failed.toolCall.toolName && tools[lower]) {
@@ -413,7 +421,7 @@ export namespace LLM {
       topK: params.topK,
       providerOptions,
       activeTools: Object.keys(visible).filter((x) => x !== "invalid"),
-      tools: ProviderTransform.toolCaching(visible, model) as typeof visible,
+      tools: ProviderTransform.toolCaching(visible, model, input.sessionID) as typeof visible,
       toolChoice: input.toolChoice,
       maxOutputTokens: params.maxOutputTokens,
       abortSignal: input.abort,

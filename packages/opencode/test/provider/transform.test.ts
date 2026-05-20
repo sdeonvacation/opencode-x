@@ -3090,3 +3090,201 @@ describe("ProviderTransform.variants", () => {
     })
   })
 })
+
+describe("ProviderTransform.message - opt-in caching via options.caching", () => {
+  const model = {
+    id: "deepseek/deepseek-chat",
+    providerID: "deepseek",
+    api: {
+      id: "deepseek-chat",
+      url: "https://api.deepseek.com",
+      npm: "@ai-sdk/openai-compatible",
+    },
+    name: "DeepSeek Chat",
+    capabilities: {},
+    options: {},
+    headers: {},
+  } as any
+
+  const msgs = [
+    {
+      role: "system",
+      content: [{ type: "text", text: "You are a helpful assistant" }],
+    },
+    {
+      role: "user",
+      content: [{ type: "text", text: "Hello" }],
+    },
+  ] as any[]
+
+  test("applies cache_control when options.caching is true", () => {
+    const result = ProviderTransform.message(msgs, model, { caching: true }) as any[]
+    const system = result[0]
+    // Should have providerOptions with cache control on system message
+    expect(system.providerOptions).toBeDefined()
+  })
+
+  test("does not apply cache_control when options.caching is absent", () => {
+    const result = ProviderTransform.message(msgs, model, {}) as any[]
+    const system = result[0]
+    // openai-compatible provider without caching flag should not get cache markers
+    expect(system.providerOptions?.openaiCompatible?.cacheControl).toBeUndefined()
+    expect(system.providerOptions?.anthropic?.cacheControl).toBeUndefined()
+  })
+
+  test("does not apply cache_control when options.caching is false", () => {
+    const result = ProviderTransform.message(msgs, model, { caching: false }) as any[]
+    const system = result[0]
+    expect(system.providerOptions?.openaiCompatible?.cacheControl).toBeUndefined()
+    expect(system.providerOptions?.anthropic?.cacheControl).toBeUndefined()
+  })
+
+  test("anthropic still gets caching without options.caching flag", () => {
+    const anthropic = {
+      ...model,
+      id: "anthropic/claude-sonnet-4",
+      providerID: "anthropic",
+      api: {
+        id: "claude-sonnet-4-20250514",
+        url: "https://api.anthropic.com",
+        npm: "@ai-sdk/anthropic",
+      },
+    } as any
+
+    const result = ProviderTransform.message(msgs, anthropic, {}) as any[]
+    const system = result[0]
+    expect(system.providerOptions).toBeDefined()
+  })
+})
+
+describe("ProviderTransform.toolCaching - session-stable", () => {
+  const anthropic = {
+    id: "anthropic/claude-sonnet-4",
+    providerID: "anthropic",
+    api: {
+      id: "claude-sonnet-4-20250514",
+      url: "https://api.anthropic.com",
+      npm: "@ai-sdk/anthropic",
+    },
+    name: "Claude Sonnet 4",
+    capabilities: {},
+    cost: {},
+    limit: {},
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  const bedrock = {
+    ...anthropic,
+    id: "bedrock/claude-sonnet-4",
+    providerID: "amazon-bedrock",
+    api: { id: "claude-sonnet-4", url: "https://bedrock.aws", npm: "@ai-sdk/amazon-bedrock" },
+  } as any
+
+  const openai = {
+    ...anthropic,
+    id: "openai/gpt-4",
+    providerID: "openai",
+    api: { id: "gpt-4", url: "https://api.openai.com", npm: "@ai-sdk/openai" },
+  } as any
+
+  const tools = (names: string[]) =>
+    Object.fromEntries(names.map((n) => [n, { providerOptions: {} }])) as Record<
+      string,
+      { providerOptions?: Record<string, any> }
+    >
+
+  test("non-anthropic provider returns tools unchanged", () => {
+    const t = tools(["read", "write"])
+    const result = ProviderTransform.toolCaching(t, openai, "sess1")
+    expect(result).toBe(t)
+  })
+
+  test("empty tools returns tools unchanged", () => {
+    const t = {} as Record<string, { providerOptions?: Record<string, any> }>
+    const result = ProviderTransform.toolCaching(t, anthropic, "sess1")
+    expect(result).toBe(t)
+  })
+
+  test("marks last tool with cache breakpoint without sessionID", () => {
+    const t = tools(["read", "write", "bash"])
+    const result = ProviderTransform.toolCaching(t, anthropic)
+    expect(result.bash.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+    expect(result.read.providerOptions?.anthropic?.cacheControl).toBeUndefined()
+    expect(result.write.providerOptions?.anthropic?.cacheControl).toBeUndefined()
+  })
+
+  test("first call with sessionID latches anchor on last tool", () => {
+    const sid = "latch-test-" + Date.now()
+    const t = tools(["read", "write", "bash"])
+    const result = ProviderTransform.toolCaching(t, anthropic, sid)
+    expect(result.bash.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+  })
+
+  test("same tools on subsequent call uses same anchor", () => {
+    const sid = "stable-test-" + Date.now()
+    const t = tools(["read", "write", "bash"])
+    ProviderTransform.toolCaching(t, anthropic, sid)
+    const result = ProviderTransform.toolCaching(t, anthropic, sid)
+    expect(result.bash.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+    expect(result.read.providerOptions?.anthropic?.cacheControl).toBeUndefined()
+  })
+
+  test("tools changed (MCP dynamic) skips caching and returns tools unchanged", () => {
+    const sid = "mcp-change-" + Date.now()
+    const t1 = tools(["read", "write", "bash"])
+    ProviderTransform.toolCaching(t1, anthropic, sid)
+    // MCP adds a tool
+    const t2 = tools(["read", "write", "bash", "mcp_search"])
+    const result = ProviderTransform.toolCaching(t2, anthropic, sid)
+    // No cache markers on any tool
+    for (const key of Object.keys(result)) {
+      expect(result[key].providerOptions?.anthropic?.cacheControl).toBeUndefined()
+    }
+  })
+
+  test("after tools change, next stable call latches new anchor", () => {
+    const sid = "re-latch-" + Date.now()
+    const t1 = tools(["read", "write", "bash"])
+    ProviderTransform.toolCaching(t1, anthropic, sid)
+    // Tools change
+    const t2 = tools(["read", "write", "bash", "mcp_search"])
+    ProviderTransform.toolCaching(t2, anthropic, sid) // skipped
+    // Same tools again — should now latch
+    const result = ProviderTransform.toolCaching(t2, anthropic, sid)
+    expect(result.mcp_search.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+  })
+
+  test("different sessions have independent anchors", () => {
+    const sid1 = "session-a-" + Date.now()
+    const sid2 = "session-b-" + Date.now()
+    const t1 = tools(["read", "write"])
+    const t2 = tools(["bash", "edit"])
+    const r1 = ProviderTransform.toolCaching(t1, anthropic, sid1)
+    const r2 = ProviderTransform.toolCaching(t2, anthropic, sid2)
+    expect(r1.write.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+    expect(r2.edit.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+  })
+
+  test("bedrock provider gets cachePoint marker", () => {
+    const sid = "bedrock-" + Date.now()
+    const t = tools(["read", "write"])
+    const result = ProviderTransform.toolCaching(t, bedrock, sid)
+    expect(result.write.providerOptions?.bedrock?.cachePoint).toEqual({ type: "default" })
+  })
+
+  test("different models same session are independent", () => {
+    const sid = "multi-model-" + Date.now()
+    const t1 = tools(["read", "write"])
+    const t2 = tools(["read", "write", "extra"])
+    // First model stable
+    ProviderTransform.toolCaching(t1, anthropic, sid)
+    const r1 = ProviderTransform.toolCaching(t1, anthropic, sid)
+    expect(r1.write.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+    // Second model (bedrock) gets its own key
+    ProviderTransform.toolCaching(t2, bedrock, sid)
+    const r2 = ProviderTransform.toolCaching(t2, bedrock, sid)
+    expect(r2.extra.providerOptions?.bedrock?.cachePoint).toEqual({ type: "default" })
+  })
+})
