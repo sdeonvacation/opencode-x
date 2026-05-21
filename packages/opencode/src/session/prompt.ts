@@ -1401,6 +1401,15 @@ export namespace SessionPrompt {
             const hasToolCalls =
               lastAssistantMsg?.parts.some((part) => part.type === "tool" && !part.metadata?.providerExecuted) ?? false
 
+            // [fork-perf] doom-loop guard: an errored assistant (e.g. schema-validation
+            // failure pre-stream) leaves `finish` undefined, so the normal exit
+            // condition below never matches and the loop spins. Stop immediately
+            // when the most recent assistant carries an error newer than the user.
+            if (lastAssistant?.error && lastUser.id < lastAssistant.id) {
+              log.info("exiting loop on errored assistant", { sessionID, error: lastAssistant.error?.name })
+              break
+            }
+
             if (
               lastAssistant?.finish &&
               !["tool-calls"].includes(lastAssistant.finish) &&

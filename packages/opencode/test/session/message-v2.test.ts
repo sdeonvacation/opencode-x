@@ -1035,6 +1035,50 @@ describe("session.message-v2.toModelMessage", () => {
     const texts = (result[0].content as any[]).filter((p) => p.type === "text")
     expect(texts.map((t) => t.text)).toStrictEqual(["", "hello"])
   })
+
+  // [fork-perf] regression: hybrid-compression writes `metadata: { terminal: true }`
+  // to flush the part-coalescer. Without stripping, this leaks into the
+  // ModelMessage tool-call as `providerOptions: { terminal: true }` which
+  // fails AI SDK's `modelMessageSchema` validation and triggers an infinite
+  // retry loop ("Invalid prompt: messages do not match the ModelMessage[] schema").
+  test("strips top-level `terminal` flag from tool callProviderMetadata", async () => {
+    const messageID = "m-asst"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("m-user"),
+        parts: [{ ...basePart("m-user", "p1"), type: "text", text: "hi" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(messageID, "m-user"),
+        parts: [
+          {
+            ...basePart(messageID, "tool-1"),
+            type: "tool",
+            tool: "grep",
+            callID: "call_1",
+            metadata: { terminal: true },
+            state: {
+              status: "completed",
+              input: { pattern: "x" },
+              output: "result",
+              metadata: { compressed: true },
+              title: "grep",
+              time: { start: 0, end: 1 },
+            },
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    const assistantMsg = result.find((m) => m.role === "assistant") as any
+    const toolCall = (assistantMsg.content as any[]).find((c) => c.type === "tool-call")
+    expect(toolCall).toBeDefined()
+    // Either undefined or a provider-namespaced object — never `{ terminal: true }`
+    if (toolCall.providerOptions !== undefined) {
+      expect(toolCall.providerOptions).not.toHaveProperty("terminal")
+    }
+  })
 })
 
 describe("session.message-v2.fromError", () => {

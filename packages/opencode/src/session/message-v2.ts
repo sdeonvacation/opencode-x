@@ -601,7 +601,12 @@ export namespace MessageV2 {
 
   function providerMeta(metadata: Record<string, any> | undefined) {
     if (!metadata) return undefined
-    const { providerExecuted: _, ...rest } = metadata
+    // [fork-perf] strip non-provider-namespaced flags. `terminal` is set by
+    // hybrid-compression / coalescer (processor.ts) — it's a fork-internal
+    // signal, not a provider option. Leaving it in produces
+    // `providerOptions: { terminal: true }` which fails AI SDK's
+    // ModelMessage[] schema validation and triggers an infinite retry loop.
+    const { providerExecuted: _, terminal: __, ...rest } = metadata
     return Object.keys(rest).length > 0 ? rest : undefined
   }
 
