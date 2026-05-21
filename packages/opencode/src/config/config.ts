@@ -384,6 +384,11 @@ export namespace Config {
         .positive()
         .optional()
         .describe("Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."),
+      tools: z
+        .string()
+        .array()
+        .optional()
+        .describe("Allowlist of tool names to expose. If omitted, all tools are exposed."),
     })
     .strict()
     .meta({
@@ -427,6 +432,11 @@ export namespace Config {
         .positive()
         .optional()
         .describe("Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."),
+      tools: z
+        .string()
+        .array()
+        .optional()
+        .describe("Allowlist of tool names to expose. If omitted, all tools are exposed."),
     })
     .strict()
     .meta({

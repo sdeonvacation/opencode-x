@@ -708,7 +708,9 @@ export namespace MCP {
               }
 
               const timeout = entry?.timeout ?? defaultTimeout
+              const allowed = entry?.tools
               for (const mcpTool of listed) {
+                if (allowed && !allowed.includes(mcpTool.name)) continue
                 result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
               }
             }),
