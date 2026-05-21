@@ -205,7 +205,7 @@ describe("Hook", () => {
       PreToolUse: [
         {
           matcher: "*",
-          hooks: [{ type: "command", command: "sleep 10", timeout: 100 }],
+          hooks: [{ type: "command", command: "sleep 10", timeout: 0.05 }],
         },
       ],
       PostToolUse: [],

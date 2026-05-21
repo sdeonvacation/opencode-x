@@ -198,7 +198,7 @@ export namespace Hook {
     const block = match[1]
     const name = block.match(/^name:\s*(.+)/m)?.[1]?.trim()
     let description = ""
-    const multiline = block.match(/^description:\s*[>|]?\s*\n([\s\S]*?)(?=\n\w|\n---)/m)
+    const multiline = block.match(/^description:\s*[>|]?\s*\n((?:[ \t].*(?:\n|$))*)/m)
     if (multiline) {
       description = multiline[1].replace(/^\s+/gm, "").trim()
     } else {
