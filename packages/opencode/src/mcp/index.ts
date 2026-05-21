@@ -511,6 +511,8 @@ export namespace MCP {
                   watch(s, name, result.mcpClient, mcp.timeout)
                   monitor(s, name, result.mcpClient, mcp, retries - 1)
                   log.info("reconnected", { server: name })
+                  // [fork-perf] notify TUI so stale "Transport disconnected" status clears
+                  yield* bus.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
                 }).pipe(Effect.ignore),
               ).catch(() => {})
             if (ctx) Instance.restore(ctx, run)
