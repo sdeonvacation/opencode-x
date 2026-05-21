@@ -240,7 +240,13 @@ export const TaskTool = Tool.defineEffect(
                 const result = await withTimeout(
                   worktreeCtx ? Instance.restore(worktreeCtx, () => promptCall()) : promptCall(),
                   timeout,
-                )
+                ).catch((err) => {
+                  if (err instanceof Error && err.message.includes("Operation timed out")) {
+                    SessionPrompt.cancel(nextSession.id)
+                    throw new Error(`Subagent timed out after ${timeout}ms`)
+                  }
+                  throw err
+                })
 
                 let mergeNote = ""
                 if (worktree) {
@@ -379,6 +385,7 @@ export const TaskTool = Tool.defineEffect(
               timeout,
             ).catch((err) => {
               if (err instanceof Error && err.message.includes("Operation timed out")) {
+                cancel()
                 throw new Error(`Subagent timed out after ${timeout}ms`)
               }
               throw err
