@@ -5,6 +5,7 @@ import {
   createMemo,
   createSignal,
   For,
+  Index,
   Match,
   on,
   onCleanup,
@@ -1581,9 +1582,16 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
   // tags inside the text body instead of a native reasoning content block.
   // Split the text so those segments render with the dimmed reasoning style
   // and the user can hide them via the existing thinking-mode toggle.
+  //
+  // Streaming flicker fix: keep a stable fast-path for the no-thinking case so
+  // the single <markdown> element is reused across stream ticks. <For> would
+  // unmount/remount children every token because segments() returns a fresh
+  // array of fresh objects on each text delta, killing the markdown component's
+  // internal streaming buffer.
+  const hasThinking = createMemo(() => props.part.text.includes("<thinking>"))
   const segments = createMemo(() => {
+    if (!hasThinking()) return []
     const raw = props.part.text
-    if (!raw || !raw.includes("<thinking>")) return [{ kind: "text" as const, text: raw }]
     const out: Array<{ kind: "text" | "thinking"; text: string }> = []
     const re = /<thinking>([\s\S]*?)(?:<\/thinking>|$)/g
     let cursor = 0
@@ -1599,53 +1607,71 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
   const inMinimal = createMemo(() => ctx.thinkingMode() === "hide")
   return (
     <Show when={props.part.text.trim()}>
-      <For each={segments()}>
-        {(seg) => (
-          <Switch>
-            <Match when={seg.kind === "thinking" && inMinimal()}>
-              <box paddingLeft={3} marginTop={1} flexShrink={0}>
-                <text fg={theme.textMuted} wrapMode="none">
-                  ▶ Thought
-                </text>
-              </box>
-            </Match>
-            <Match when={seg.kind === "thinking"}>
-              <box
-                paddingLeft={2}
-                marginTop={1}
-                flexDirection="column"
-                border={["left"]}
-                customBorderChars={SplitBorder.customBorderChars}
-                borderColor={theme.backgroundElement}
-              >
-                <code
-                  filetype="markdown"
-                  drawUnstyledText={false}
-                  streaming={true}
-                  syntaxStyle={subtleSyntax()}
-                  content={"_Thought:_ " + seg.text.trim()}
-                  conceal={ctx.conceal()}
-                  fg={theme.textMuted}
-                />
-              </box>
-            </Match>
-            <Match when={true}>
-              <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
-                <markdown
-                  syntaxStyle={syntax()}
-                  streaming={true}
-                  internalBlockMode="top-level"
-                  content={seg.text.trim()}
-                  tableOptions={{ style: "grid" }}
-                  conceal={ctx.conceal()}
-                  fg={theme.markdownText}
-                  bg={theme.background}
-                />
-              </box>
-            </Match>
-          </Switch>
-        )}
-      </For>
+      <Show
+        when={hasThinking()}
+        fallback={
+          <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
+            <markdown
+              syntaxStyle={syntax()}
+              streaming={true}
+              internalBlockMode="top-level"
+              content={props.part.text.trim()}
+              tableOptions={{ style: "grid" }}
+              conceal={ctx.conceal()}
+              fg={theme.markdownText}
+              bg={theme.background}
+            />
+          </box>
+        }
+      >
+        <Index each={segments()}>
+          {(seg) => (
+            <Switch>
+              <Match when={seg().kind === "thinking" && inMinimal()}>
+                <box paddingLeft={3} marginTop={1} flexShrink={0}>
+                  <text fg={theme.textMuted} wrapMode="none">
+                    ▶ Thought
+                  </text>
+                </box>
+              </Match>
+              <Match when={seg().kind === "thinking"}>
+                <box
+                  paddingLeft={2}
+                  marginTop={1}
+                  flexDirection="column"
+                  border={["left"]}
+                  customBorderChars={SplitBorder.customBorderChars}
+                  borderColor={theme.backgroundElement}
+                >
+                  <code
+                    filetype="markdown"
+                    drawUnstyledText={false}
+                    streaming={true}
+                    syntaxStyle={subtleSyntax()}
+                    content={"_Thought:_ " + seg().text.trim()}
+                    conceal={ctx.conceal()}
+                    fg={theme.textMuted}
+                  />
+                </box>
+              </Match>
+              <Match when={true}>
+                <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
+                  <markdown
+                    syntaxStyle={syntax()}
+                    streaming={true}
+                    internalBlockMode="top-level"
+                    content={seg().text.trim()}
+                    tableOptions={{ style: "grid" }}
+                    conceal={ctx.conceal()}
+                    fg={theme.markdownText}
+                    bg={theme.background}
+                  />
+                </box>
+              </Match>
+            </Switch>
+          )}
+        </Index>
+      </Show>
     </Show>
   )
 }
