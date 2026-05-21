@@ -16,4 +16,5 @@ Usage notes:
 4. The agent's outputs should generally be trusted
 5. Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent. Tell it how to verify its work if possible (e.g., relevant test commands).
 6. If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.
+7. Prompt hygiene: the `prompt` argument is a directive for the subagent, NOT a thinking scratchpad. Do NOT include first-person deliberation phrases like "WAIT —", "Let me reconsider", "BEST APPROACH:", "Actually wait", "Hmm", "Looking at the pattern...", or other internal-monologue markers. Resolve uncertainty BEFORE the tool call; the prompt must read as a finalized brief, not a stream of consciousness. Think in your reasoning channel, then write a clean prompt.
 
