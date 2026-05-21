@@ -337,6 +337,7 @@ function plugin(ready: ReturnType<typeof defer>) {
     },
     list: () => Effect.succeed([]),
     init: () => Effect.void,
+    hasListeners: (_name: string) => true, // [fork-perf] mock: always assume listeners present
   })
 }
 
@@ -351,6 +352,7 @@ function autocontinue(enabled: boolean) {
     },
     list: () => Effect.succeed([]),
     init: () => Effect.void,
+    hasListeners: (_name: string) => true, // [fork-perf] mock: always assume listeners present
   })
 }
 

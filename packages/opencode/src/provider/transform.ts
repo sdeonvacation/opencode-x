@@ -6,6 +6,7 @@ import type { Provider } from "./provider"
 import type { ModelsDev } from "./models"
 import { iife } from "@/util/iife"
 import { Flag } from "@/flag/flag"
+import { TransformCache } from "./transform-cache" // [fork-perf]
 
 type Modality = NonNullable<ModelsDev.Model["modalities"]>["input"][number]
 
@@ -346,6 +347,16 @@ export namespace ProviderTransform {
     tools: Record<string, { providerOptions?: Record<string, any> }>,
     model: Provider.Model,
     sessionID?: string,
+    cacheKey?: TransformCache.Key, // [fork-perf] when provided, result is memoized
+  ) {
+    if (cacheKey) return TransformCache.memo(cacheKey, () => _toolCachingImpl(tools, model, sessionID)) // [fork-perf]
+    return _toolCachingImpl(tools, model, sessionID)
+  }
+
+  function _toolCachingImpl(
+    tools: Record<string, { providerOptions?: Record<string, any> }>,
+    model: Provider.Model,
+    sessionID?: string,
   ) {
     const isAnthropicLike =
       model.providerID === "anthropic" ||
@@ -391,7 +402,12 @@ export namespace ProviderTransform {
     }
   }
 
-  export function message(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown>) {
+  export function message(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown>, messageCacheKey?: TransformCache.Key) { // [fork-perf] messageCacheKey enables memoization
+    if (messageCacheKey) return TransformCache.memo(messageCacheKey, () => _messageImpl(msgs, model, options)) // [fork-perf]
+    return _messageImpl(msgs, model, options)
+  }
+
+  function _messageImpl(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown>) {
     msgs = unsupportedParts(msgs, model)
     msgs = normalizeMessages(msgs, model, options)
     if (

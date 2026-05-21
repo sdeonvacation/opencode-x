@@ -1,4 +1,5 @@
 import type { Hooks, PluginInput, Plugin as PluginInstance, PluginModule } from "@opencode-ai/plugin"
+import { ListenerIndex } from "./listener-index" // [fork-perf]
 import { Config } from "../config/config"
 import { Bus } from "../bus"
 import { Log } from "../util/log"
@@ -23,6 +24,7 @@ export namespace Plugin {
 
   type State = {
     hooks: Hooks[]
+    index: Map<string, number> // [fork-perf] listener counter map
   }
 
   // Hook names that follow the (input, output) => Promise<void> trigger pattern
@@ -42,6 +44,7 @@ export namespace Plugin {
     ) => Effect.Effect<Output>
     readonly list: () => Effect.Effect<Hooks[]>
     readonly init: () => Effect.Effect<void>
+    readonly hasListeners: (name: string) => boolean // [fork-perf]
   }
 
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Plugin") {}
@@ -237,7 +240,7 @@ export namespace Plugin {
             Effect.forkScoped,
           )
 
-          return { hooks }
+          return { hooks, index: ListenerIndex.build(hooks) } // [fork-perf] build index once after all hooks loaded
         }),
       )
 
@@ -248,6 +251,8 @@ export namespace Plugin {
       >(name: Name, input: Input, output: Output) {
         if (!name) return output
         const s = yield* InstanceState.get(state)
+        const cfg = yield* config.get() // [fork-perf]
+        if (cfg.experimental?.plugin_fast_path !== false && !ListenerIndex.has(s.index, name)) return output // [fork-perf] O(1) early-return when no listeners
         for (const hook of s.hooks) {
           const fn = hook[name] as any
           if (!fn) continue
@@ -261,11 +266,18 @@ export namespace Plugin {
         return s.hooks
       })
 
+      // [fork-perf] Closure-level index ref, set once after hooks load via init.
+      // Synchronous read avoids Effect overhead on the hot trigger path.
+      let _listenerIndex: Map<string, number> = new Map()
+
       const init = Effect.fn("Plugin.init")(function* () {
-        yield* InstanceState.get(state)
+        const s = yield* InstanceState.get(state)
+        _listenerIndex = s.index // [fork-perf] capture index into closure for O(1) synchronous reads
       })
 
-      return Service.of({ trigger, list, init })
+      const hasListeners = (name: string): boolean => ListenerIndex.has(_listenerIndex, name) // [fork-perf]
+
+      return Service.of({ trigger, list, init, hasListeners })
     }),
   )
 
