@@ -1375,6 +1375,12 @@ export namespace SessionPrompt {
             // SlidingWindow.compact() produced last iteration. Synthetic is never persisted
             // to DB so filterCompactedEffect cannot see it. Adopt peeked array if first part
             // is a synthetic <context-summary> text and shape aligns with DB tail.
+            //
+            // CRITICAL: also append any DB msgs that arrived AFTER the stash was taken,
+            // otherwise an errored assistant persisted post-stash is invisible to the
+            // doom-loop guard below and the loop spins. The stash is frozen at the last
+            // compact; new tail msgs (tool turns, errored assistants) live only in the
+            // fresh DB read.
             const peeked = SlidingWindow.peekCompacted(sessionID)
             if (peeked && peeked.length > 0) {
               const firstPart = peeked[0]?.parts[0]
@@ -1383,7 +1389,9 @@ export namespace SessionPrompt {
                 (firstPart as { synthetic?: boolean }).synthetic === true &&
                 firstPart.text.startsWith("<context-summary>")
               if (isSyntheticSummary && peeked.length <= msgs.length + 1) {
-                msgs = peeked
+                const stashTailIds = new Set(peeked.map((m) => m.info.id))
+                const tail = msgs.filter((m) => !stashTailIds.has(m.info.id))
+                msgs = tail.length > 0 ? [...peeked, ...tail] : peeked
               }
             }
 
