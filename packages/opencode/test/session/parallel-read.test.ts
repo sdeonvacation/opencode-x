@@ -31,7 +31,25 @@ const it = testEffect(
     CrossSpawnSpawner.defaultLayer,
     FileTime.defaultLayer,
     Instruction.defaultLayer,
-    LSP.defaultLayer,
+    Layer.succeed(
+      LSP.Service,
+      LSP.Service.of({
+        init: () => Effect.void,
+        status: () => Effect.succeed([]),
+        hasClients: () => Effect.succeed(false),
+        touchFile: () => Effect.void,
+        diagnostics: () => Effect.succeed({}),
+        hover: () => Effect.succeed(undefined),
+        definition: () => Effect.succeed([]),
+        references: () => Effect.succeed([]),
+        implementation: () => Effect.succeed([]),
+        documentSymbol: () => Effect.succeed([]),
+        workspaceSymbol: () => Effect.succeed([]),
+        prepareCallHierarchy: () => Effect.succeed([]),
+        incomingCalls: () => Effect.succeed([]),
+        outgoingCalls: () => Effect.succeed([]),
+      }),
+    ),
   ),
 )
 

@@ -1,10 +1,13 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Effect } from "effect"
 import { Config } from "../../src/config/config"
 import type { Provider } from "../../src/provider/provider"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
+
+// Capture the real `ai` module before replacing it, so we can restore after.
+const realAi = await import("ai")
 
 const state = {
   calls: 0,
@@ -13,13 +16,19 @@ const state = {
 }
 
 mock.module("ai", () => ({
+  ...realAi,
   generateText: async () => {
     state.calls++
     if (state.err) throw state.err
     return { text: state.text }
   },
-  wrapLanguageModel: ({ model }: { model: unknown }) => model,
 }))
+
+// Restore the real `ai` module after all tests in this file finish so that
+// concurrent/subsequent test files (e.g. llm.test.ts) see the real wrapLanguageModel.
+afterAll(() => {
+  mock.module("ai", () => realAi)
+})
 
 const { SlidingWindow } = await import("../../src/session/sliding-window")
 

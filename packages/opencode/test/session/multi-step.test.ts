@@ -92,7 +92,7 @@ describe("multi-step gate", () => {
       agent: agent("subagent"),
       permission: [],
       cfg: cfg({}),
-      toolMeta: meta([["read", true]]),
+      toolMeta: meta([["glob", true]]),
     })
     const c = cfg({})
     const steps = safe && c.experimental?.multi_step !== false ? (c.experimental?.multi_step_count ?? 5) : undefined
