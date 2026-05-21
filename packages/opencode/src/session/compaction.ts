@@ -18,9 +18,8 @@ import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect, Layer, ServiceMap } from "effect" // [fork-perf] Phase 5: forkChild used below
 import { makeRuntime } from "@/effect/run-service"
 import { InstanceState } from "@/effect/instance-state"
-import { isOverflow as overflow } from "./overflow"
+import { isOverflow as overflow, usable } from "./overflow"
 import { resolveLocal } from "./resolve-local"
-import { ProviderTransform } from "@/provider/transform"
 import { SlidingWindow } from "./sliding-window" // [fork-perf] Phase 5
 
 export namespace SessionCompaction {
@@ -103,14 +102,6 @@ Rules:
       | undefined
   }
 
-  function usable(input: { cfg: Config.Info; model: Provider.Model }) {
-    const context = input.model.limit.context
-    if (context === 0) return 0
-    const reserved = input.cfg.compaction?.reserved ?? Math.min(20_000, ProviderTransform.maxOutputTokens(input.model))
-    if (input.model.limit.input) return input.model.limit.input - reserved
-    return context - ProviderTransform.maxOutputTokens(input.model)
-  }
-
   function summaryText(message: MessageV2.WithParts) {
     const text = message.parts
       .filter((part): part is MessageV2.TextPart => part.type === "text")
@@ -154,6 +145,7 @@ Rules:
 
   function preserveRecentBudget(input: { cfg: Config.Info; model: Provider.Model }) {
     return (
+      opts(input.cfg)?.tail_tokens ??
       opts(input.cfg)?.preserve_recent_tokens ??
       Math.min(MAX_PRESERVE_RECENT_TOKENS, Math.max(MIN_PRESERVE_RECENT_TOKENS, Math.floor(usable(input) * 0.25)))
     )

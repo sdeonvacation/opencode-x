@@ -842,6 +842,68 @@ describe("session.compaction.process", () => {
     })
   })
 
+  test("falls back to full summary when retained tail media exceeds tail budget", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const stub = llm()
+    let captured = ""
+    stub.push(
+      reply("summary", (input) => {
+        captured = JSON.stringify(input.messages)
+      }),
+    )
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await user(session.id, "older")
+        const recent = await user(session.id, "recent image turn")
+        await Session.updatePart({
+          id: PartID.ascending(),
+          messageID: recent.id,
+          sessionID: session.id,
+          type: "file",
+          mime: "image/png",
+          filename: "big.png",
+          url: `data:image/png;base64,${"a".repeat(4_000)}`,
+        })
+        await SessionCompaction.create({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          auto: false,
+        })
+
+        const rt = liveRuntime(stub.layer, wide(), cfg({ tail_turns: 1, tail_tokens: 100 }))
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          const parent = msgs.at(-1)?.info.id
+          expect(parent).toBeTruthy()
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: parent!,
+                messages: msgs,
+                sessionID: session.id,
+                auto: false,
+              }),
+            ),
+          )
+
+          const part = (await Session.messages({ sessionID: session.id }))
+            .at(-2)
+            ?.parts.find((item) => item.type === "compaction")
+
+          expect(part?.type).toBe("compaction")
+          if (part?.type === "compaction") expect(part.tail_start_id).toBeUndefined()
+          expect(captured).toContain("recent image turn")
+          expect(captured).toContain("Attached image/png: big.png")
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
+
   test("allows plugins to disable synthetic continue prompt", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
