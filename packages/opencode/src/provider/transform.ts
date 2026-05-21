@@ -64,8 +64,15 @@ export namespace ProviderTransform {
           }
           if (!Array.isArray(msg.content)) return msg
           const filtered = msg.content.filter((part) => {
-            if (part.type === "text" || part.type === "reasoning") {
+            if (part.type === "text") {
               return part.text !== ""
+            }
+            if (part.type === "reasoning") {
+              return (
+                part.text.trim().length > 0 ||
+                part.providerOptions?.anthropic?.signature != null ||
+                part.providerOptions?.anthropic?.redactedData != null
+              )
             }
             return true
           })
@@ -85,8 +92,15 @@ export namespace ProviderTransform {
           }
           if (!Array.isArray(msg.content)) return msg
           const filtered = msg.content.filter((part) => {
-            if (part.type === "text" || part.type === "reasoning") {
+            if (part.type === "text") {
               return part.text !== ""
+            }
+            if (part.type === "reasoning") {
+              return (
+                part.text.trim().length > 0 ||
+                part.providerOptions?.bedrock?.signature != null ||
+                part.providerOptions?.bedrock?.redactedData != null
+              )
             }
             return true
           })
@@ -263,17 +277,15 @@ export namespace ProviderTransform {
 
     let targets: ModelMessage[]
     if (hasToolSlot) {
-      // 3 markers: system[0] + first non-system (compaction summary) + last msg
+      // 3 markers: system[0] + last 2 non-system messages (tool exchange boundary)
       const system = msgs.filter((msg) => msg.role === "system").slice(0, 1)
-      const first = nonSystem.slice(0, 1)
-      const final = nonSystem.slice(-1)
-      targets = unique([...system, ...first, ...final])
+      const final = nonSystem.slice(-2)
+      targets = unique([...system, ...final])
     } else {
-      // 4 markers: system[0..1] + first non-system + last msg
+      // 4 markers: system[0..1] + last 2 non-system messages
       const system = msgs.filter((msg) => msg.role === "system").slice(0, 2)
-      const first = nonSystem.slice(0, 1)
-      const final = nonSystem.slice(-1)
-      targets = unique([...system, ...first, ...final])
+      const final = nonSystem.slice(-2)
+      targets = unique([...system, ...final])
     }
 
     const cacheTtl = process.env.ENABLE_PROMPT_CACHING_1H ? "1h" : undefined
