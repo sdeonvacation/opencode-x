@@ -1594,6 +1594,11 @@ export namespace Config {
             .max(10)
             .optional()
             .describe("Max SDK-internal steps when multi_step enabled (default: 5)"),
+          // [fork-perf] cache debug log: per-session JSONL trace of cache hit/miss behavior
+          cache_debug_log: z
+            .boolean()
+            .optional()
+            .describe("Write per-turn cache-behavior debug log to ~/.local/share/opencode/cache-debug/ (default: false)"),
         })
         .optional(),
     })

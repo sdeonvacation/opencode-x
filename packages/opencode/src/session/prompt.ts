@@ -60,6 +60,7 @@ import { Hook } from "../hook/hook"
 import { PersistentMemory } from "../memory/persistent"
 import { makeRuntime } from "@/effect/run-service"
 import { SessionRunState } from "./run-state"
+import { CacheDebugLog } from "./cache-debug-log"
 import { Instance } from "@/project/instance"
 import type { TaskPromptOps } from "@/tool/task"
 
@@ -290,7 +291,10 @@ export namespace SessionPrompt {
           agent: input.agent,
         })) {
           const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
-          toolMeta.set(item.id, { parallelSafe: item.parallelSafe === true || typeof item.parallelSafe === "function" }) // [fork-perf] function-form treated as statically safe for gate
+          // [fork-perf] parallel-safe gate: only static `true` is safe at request-time.
+          // Function-form predicates depend on input not yet known; their runtime
+          // check belongs in StreamingDispatcher (Phase 3, deferred). Treat as not-safe.
+          toolMeta.set(item.id, { parallelSafe: item.parallelSafe === true })
           if (batch && Permission.evaluate(item.id, "*", merged).action === "allow") {
             approved.add(item.id)
           }
@@ -1336,12 +1340,52 @@ export namespace SessionPrompt {
           const historyCache =
             _cfgPerf.experimental?.history_cache !== false ? HistoryCache.create() : undefined
 
+          // [cache-debug] open one debug-log handle for this runLoop invocation
+          const _cacheDebugLog = CacheDebugLog.open(sessionID, _cfgPerf)
+          // tracking state for per-turn delta computation and change detection
+          let _cdbPrevTokens: CacheDebugLog.TokenCounts | undefined
+          let _cdbPrevSystemHash: string | undefined
+          let _cdbPrevToolsHash: string | undefined
+          let _cdbPrevMsgsHash: string | undefined
+
           while (true) {
             yield* status.set(sessionID, { type: "busy" })
             log.info("loop", { step, sessionID })
 
+            // [cache-debug] prune event
+            const _cdbPruneMsgsBefore = yield* MessageV2.filterCompactedEffect(sessionID)
             yield* compaction.prune({ sessionID }).pipe(Effect.orElseSucceed(() => false))
             let msgs = yield* MessageV2.filterCompactedEffect(sessionID)
+            if (_cacheDebugLog && msgs.length !== _cdbPruneMsgsBefore.length) {
+              _cacheDebugLog.log({
+                type: "prune",
+                sessionID,
+                event: "prune",
+                msgsLenBefore: _cdbPruneMsgsBefore.length,
+                msgsLenAfter: msgs.length,
+                msgsFingerprintBefore: MessageV2.msgsFingerprint(_cdbPruneMsgsBefore),
+                msgsFingerprintAfter: MessageV2.msgsFingerprint(msgs),
+                historyCacheInvalidated: false,
+                tokenEstimate: CacheDebugLog.cheapTokenEstimate(msgs),
+                ts: Date.now(),
+              })
+            }
+
+            // [fork-perf] cache-stability: restore in-memory synthetic summary that
+            // SlidingWindow.compact() produced last iteration. Synthetic is never persisted
+            // to DB so filterCompactedEffect cannot see it. Adopt peeked array if first part
+            // is a synthetic <context-summary> text and shape aligns with DB tail.
+            const peeked = SlidingWindow.peekCompacted(sessionID)
+            if (peeked && peeked.length > 0) {
+              const firstPart = peeked[0]?.parts[0]
+              const isSyntheticSummary =
+                firstPart?.type === "text" &&
+                (firstPart as { synthetic?: boolean }).synthetic === true &&
+                firstPart.text.startsWith("<context-summary>")
+              if (isSyntheticSummary && peeked.length <= msgs.length + 1) {
+                msgs = peeked
+              }
+            }
 
             const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
 
@@ -1389,6 +1433,7 @@ export namespace SessionPrompt {
 
             if (task?.type === "compaction") {
               SlidingWindow.invalidate(sessionID)
+              const _cdbCpFpBefore = MessageV2.msgsFingerprint(msgs)
               const result = yield* compaction.process({
                 messages: msgs,
                 parentID: lastUser.id,
@@ -1399,6 +1444,21 @@ export namespace SessionPrompt {
               // [fork-perf] Phase 1: invalidate AFTER compaction so next turn
               // rebuilds from the post-compaction state, not pre-compaction stale messages.
               historyCache?.invalidate()
+              if (_cacheDebugLog) {
+                const _cdbCpMsgsAfter = yield* MessageV2.filterCompactedEffect(sessionID)
+                _cacheDebugLog.log({
+                  type: "prune",
+                  sessionID,
+                  event: "compaction-process",
+                  msgsLenBefore: msgs.length,
+                  msgsLenAfter: _cdbCpMsgsAfter.length,
+                  msgsFingerprintBefore: _cdbCpFpBefore,
+                  msgsFingerprintAfter: MessageV2.msgsFingerprint(_cdbCpMsgsAfter),
+                  historyCacheInvalidated: true,
+                  tokenEstimate: CacheDebugLog.cheapTokenEstimate(_cdbCpMsgsAfter),
+                  ts: Date.now(),
+                })
+              }
               if (result === "stop") break
               continue
             }
@@ -1498,6 +1558,7 @@ export namespace SessionPrompt {
               yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
               const cfg = yield* config.get()
               const before = msgs.length
+              const _cdbSwFpBefore = MessageV2.msgsFingerprint(msgs)
               msgs = yield* SlidingWindow.compact({
                 msgs,
                 model,
@@ -1510,7 +1571,22 @@ export namespace SessionPrompt {
                   : undefined,
               })
               log.info("compact", { sessionID, before, after: msgs.length })
-              if (msgs.length !== before) historyCache?.invalidate() // [fork-perf] Phase 1
+              const _cdbSwChanged = msgs.length !== before
+              if (_cdbSwChanged) historyCache?.invalidate() // [fork-perf] Phase 1
+              if (_cacheDebugLog && (_cdbSwChanged || MessageV2.msgsFingerprint(msgs) !== _cdbSwFpBefore)) {
+                _cacheDebugLog.log({
+                  type: "prune",
+                  sessionID,
+                  event: "sliding-window-compact",
+                  msgsLenBefore: before,
+                  msgsLenAfter: msgs.length,
+                  msgsFingerprintBefore: _cdbSwFpBefore,
+                  msgsFingerprintAfter: MessageV2.msgsFingerprint(msgs),
+                  historyCacheInvalidated: _cdbSwChanged,
+                  tokenEstimate: CacheDebugLog.cheapTokenEstimate(msgs),
+                  ts: Date.now(),
+                })
+              }
               const sw = SlidingWindow.getMetrics(sessionID)
               if (sw) {
                 handle.message.compaction = { total: sw.total, savings: sw.savings, msgs: sw.msgs }
@@ -1520,7 +1596,11 @@ export namespace SessionPrompt {
                 const used =
                   lastFinished.tokens.input + lastFinished.tokens.cache.read + lastFinished.tokens.cache.write
                 const limit = model.limit?.context ?? 200_000
-                if (used > limit * 0.8) {
+                // [fork-perf] cache-stability: skip proactive_prune when SlidingWindow.compact
+                // already trimmed history this turn. Stacking both invalidates the prompt-cache
+                // breakpoint twice in one turn for marginal additional savings.
+                const slidingCompactedThisTurn = before !== msgs.length
+                if (used > limit * 0.8 && !slidingCompactedThisTurn) {
                   yield* compaction.prune({ sessionID, aggressive: true }).pipe(Effect.orElseSucceed(() => false))
                   msgs = yield* MessageV2.filterCompactedEffect(sessionID)
                   // [fork-perf] Phase 1: msgs replaced — next turn must rebuild from fresh state
@@ -1530,7 +1610,23 @@ export namespace SessionPrompt {
 
               // Tool result budget (Phase 1A)
               if (cfg.experimental?.tool_result_budget) {
+                const _cdbTbBefore = msgs.length
+                const _cdbTbFpBefore = MessageV2.msgsFingerprint(msgs)
                 msgs = applyToolBudget(msgs, cfg.experimental.tool_result_budget)
+                if (_cacheDebugLog && msgs.length !== _cdbTbBefore) {
+                  _cacheDebugLog.log({
+                    type: "prune",
+                    sessionID,
+                    event: "tool-budget",
+                    msgsLenBefore: _cdbTbBefore,
+                    msgsLenAfter: msgs.length,
+                    msgsFingerprintBefore: _cdbTbFpBefore,
+                    msgsFingerprintAfter: MessageV2.msgsFingerprint(msgs),
+                    historyCacheInvalidated: false,
+                    tokenEstimate: CacheDebugLog.cheapTokenEstimate(msgs),
+                    ts: Date.now(),
+                  })
+                }
               }
 
               // MicroCompact at 75% (Phase 1C) — mutual exclusion with proactive_prune
@@ -1540,6 +1636,7 @@ export namespace SessionPrompt {
                 const limit = model.limit?.context ?? 200_000
                 if (MicroCompact.shouldCompact({ input: used, context: limit })) {
                   const prevLen = msgs.length
+                  const _cdbMcFpBefore = MessageV2.msgsFingerprint(msgs)
                   msgs = yield* (
                     MicroCompact.compact({
                       sessionID,
@@ -1550,7 +1647,22 @@ export namespace SessionPrompt {
                     }) as Effect.Effect<MessageV2.WithParts[]>
                   ).pipe(Effect.orElseSucceed(() => msgs))
                   // [fork-perf] Phase 1: invalidate only when MicroCompact actually changed msgs
-                  if (msgs.length !== prevLen) historyCache?.invalidate()
+                  const _cdbMcChanged = msgs.length !== prevLen
+                  if (_cdbMcChanged) historyCache?.invalidate()
+                  if (_cacheDebugLog && _cdbMcChanged) {
+                    _cacheDebugLog.log({
+                      type: "prune",
+                      sessionID,
+                      event: "microcompact",
+                      msgsLenBefore: prevLen,
+                      msgsLenAfter: msgs.length,
+                      msgsFingerprintBefore: _cdbMcFpBefore,
+                      msgsFingerprintAfter: MessageV2.msgsFingerprint(msgs),
+                      historyCacheInvalidated: _cdbMcChanged,
+                      tokenEstimate: CacheDebugLog.cheapTokenEstimate(msgs),
+                      ts: Date.now(),
+                    })
+                  }
                 }
               }
 
@@ -1561,6 +1673,7 @@ export namespace SessionPrompt {
                 const limit = model.limit?.context ?? 200_000
                 if (ContextCollapse.shouldCollapse({ input: used, context: limit })) {
                   const prevLen = msgs.length
+                  const _cdbCcFpBefore = MessageV2.msgsFingerprint(msgs)
                   msgs = yield* (
                     ContextCollapse.collapse({
                       sessionID,
@@ -1571,7 +1684,22 @@ export namespace SessionPrompt {
                     }) as Effect.Effect<MessageV2.WithParts[]>
                   ).pipe(Effect.orElseSucceed(() => msgs))
                   // [fork-perf] Phase 1: invalidate only when ContextCollapse actually changed msgs
-                  if (msgs.length !== prevLen) historyCache?.invalidate()
+                  const _cdbCcChanged = msgs.length !== prevLen
+                  if (_cdbCcChanged) historyCache?.invalidate()
+                  if (_cacheDebugLog && _cdbCcChanged) {
+                    _cacheDebugLog.log({
+                      type: "prune",
+                      sessionID,
+                      event: "context-collapse",
+                      msgsLenBefore: prevLen,
+                      msgsLenAfter: msgs.length,
+                      msgsFingerprintBefore: _cdbCcFpBefore,
+                      msgsFingerprintAfter: MessageV2.msgsFingerprint(msgs),
+                      historyCacheInvalidated: _cdbCcChanged,
+                      tokenEstimate: CacheDebugLog.cheapTokenEstimate(msgs),
+                      ts: Date.now(),
+                    })
+                  }
                 }
               }
 
@@ -1642,6 +1770,50 @@ export namespace SessionPrompt {
               })
               const steps =
                 safe && cfg.experimental?.multi_step !== false ? (cfg.experimental?.multi_step_count ?? 5) : undefined
+
+              // [cache-debug] log TurnEvent before the LLM call
+              if (_cacheDebugLog) {
+                const _prevTokens = lastFinished?.tokens
+                const curTokens: CacheDebugLog.TokenCounts = {
+                  input: _prevTokens?.input ?? 0,
+                  cacheRead: _prevTokens?.cache?.read ?? 0,
+                  cacheWrite: _prevTokens?.cache?.write ?? 0,
+                  output: _prevTokens?.output ?? 0,
+                }
+                const tokenDelta: CacheDebugLog.TokenDelta = _cdbPrevTokens
+                  ? {
+                      input: curTokens.input - _cdbPrevTokens.input,
+                      cacheRead: curTokens.cacheRead - _cdbPrevTokens.cacheRead,
+                      cacheWrite: curTokens.cacheWrite - _cdbPrevTokens.cacheWrite,
+                      output: curTokens.output - _cdbPrevTokens.output,
+                    }
+                  : { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
+                _cdbPrevTokens = curTokens
+
+                const sysHash = CacheDebugLog.systemHash(system)
+                const tHash = CacheDebugLog.toolsHash(Object.keys(tools))
+                const mHash = CacheDebugLog.djb2(MessageV2.msgsFingerprint(msgs))
+
+                const turnEvent: CacheDebugLog.TurnEvent = {
+                  type: "turn",
+                  sessionID,
+                  turn: step,
+                  tokens: curTokens,
+                  tokenDelta,
+                  ...(sysHash !== _cdbPrevSystemHash ? { systemHash: sysHash } : {}),
+                  ...(tHash !== _cdbPrevToolsHash ? { toolsHash: tHash } : {}),
+                  ...(mHash !== _cdbPrevMsgsHash ? { msgsHash: mHash } : {}),
+                  flags: CacheDebugLog.extractFlags(cfg),
+                  provider: model.providerID,
+                  model: model.id,
+                  ts: Date.now(),
+                }
+                _cdbPrevSystemHash = sysHash
+                _cdbPrevToolsHash = tHash
+                _cdbPrevMsgsHash = mHash
+                _cacheDebugLog.log(turnEvent)
+              }
+
               const result = yield* handle.process({
                 user: lastUser,
                 agent,
@@ -1656,6 +1828,12 @@ export namespace SessionPrompt {
                 toolChoice: format.type === "json_schema" ? "required" : undefined,
                 maxSteps: steps,
               })
+              // [fork-perf] history-cache: assistant message's parts mutate during streaming
+              // (tool calls/results appended in place to the existing assistant message ID).
+              // streamAfterEffect only finds messages with id > lastMessageID, so it cannot
+              // detect parts.length change on the SAME message. Invalidate after each turn
+              // (correctness > memoization). The cache still wins INSIDE a turn (tools batch).
+              historyCache?.invalidate()
 
               if (structured !== undefined) {
                 handle.message.structured = structured
@@ -1707,12 +1885,18 @@ export namespace SessionPrompt {
                   }
                 }
               }
-              break
+              // Re-enter the loop so the top-of-loop condition re-reads msgs.
+              // If a new user message arrived during this run, it will be detected
+              // (lastUser.id > lastAssistant.id) and processed; otherwise the top
+              // condition exits normally.
+              continue
             }
             continue
           }
 
           yield* compaction.prune({ sessionID }).pipe(Effect.ignore, Effect.forkIn(scope))
+          // [cache-debug] close handle so no further writes occur after runLoop exits
+          _cacheDebugLog?.close()
           return yield* lastAssistant(sessionID)
         },
       )
