@@ -1,44 +1,30 @@
 import { afterEach, describe, expect, mock, test } from "bun:test"
 import { APICallError } from "ai"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect"
 import * as Stream from "effect/Stream"
+import path from "path"
 import { Bus } from "../../src/bus"
-import { Config } from "@/config/config"
-import { Image } from "@/image/image"
+import { Config } from "../../src/config/config"
 import { Agent } from "../../src/agent/agent"
 import { LLM } from "../../src/session/llm"
 import { SessionCompaction } from "../../src/session/compaction"
-import { Token } from "@/util/token"
-import * as Log from "@opencode-ai/core/util/log"
+import { Token } from "../../src/util/token"
+import { Instance } from "../../src/project/instance"
+import { Log } from "../../src/util/log"
 import { Permission } from "../../src/permission"
 import { Plugin } from "../../src/plugin"
-import { provideTmpdirInstance, TestInstance } from "../fixture/fixture"
-import { Session as SessionNs } from "@/session/session"
+import { tmpdir } from "../fixture/fixture"
+import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
-import { SessionSummary } from "../../src/session/summary"
-import { SessionV2 } from "../../src/v2/session"
 import { ModelID, ProviderID } from "../../src/provider/schema"
-import type { Provider } from "@/provider/provider"
+import type { Provider } from "../../src/provider/provider"
 import * as SessionProcessorModule from "../../src/session/processor"
 import { Snapshot } from "../../src/snapshot"
 import { ProviderTest } from "../fake/provider"
-import { testEffect } from "../lib/effect"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { TestConfig } from "../fixture/config"
-import { SyncEvent } from "@/sync"
 
-void Log.init({ print: false })
-
-const summary = Layer.succeed(
-  SessionSummary.Service,
-  SessionSummary.Service.of({
-    summarize: () => Effect.void,
-    diff: () => Effect.succeed([]),
-    computeDiff: () => Effect.succeed([]),
-  }),
-)
+Log.init({ print: false })
 
 const ref = {
   providerID: ProviderID.make("test"),
@@ -81,109 +67,106 @@ function createModel(opts: {
 
 const wide = () => ProviderTest.fake({ model: createModel({ context: 100_000, output: 32_000 }) })
 
-function createUserMessage(sessionID: SessionID, text: string) {
-  return Effect.gen(function* () {
-    const ssn = yield* SessionNs.Service
-    const msg = yield* ssn.updateMessage({
-      id: MessageID.ascending(),
-      role: "user",
-      sessionID,
-      agent: "build",
-      model: ref,
-      time: { created: Date.now() },
-    })
-    yield* ssn.updatePart({
-      id: PartID.ascending(),
-      messageID: msg.id,
-      sessionID,
-      type: "text",
-      text,
-    })
-    return msg
+async function user(sessionID: SessionID, text: string) {
+  const msg = await Session.updateMessage({
+    id: MessageID.ascending(),
+    role: "user",
+    sessionID,
+    agent: "build",
+    model: ref,
+    time: { created: Date.now() },
   })
+  await Session.updatePart({
+    id: PartID.ascending(),
+    messageID: msg.id,
+    sessionID,
+    type: "text",
+    text,
+  })
+  return msg
 }
 
-function createAssistantMessage(sessionID: SessionID, parentID: MessageID, root: string) {
-  return SessionNs.Service.use((ssn) =>
-    ssn.updateMessage({
-      id: MessageID.ascending(),
-      role: "assistant",
-      sessionID,
-      mode: "build",
-      agent: "build",
-      path: { cwd: root, root },
-      cost: 0,
-      tokens: {
-        output: 0,
-        input: 0,
-        reasoning: 0,
-        cache: { read: 0, write: 0 },
-      },
-      modelID: ref.modelID,
-      providerID: ref.providerID,
-      parentID,
-      time: { created: Date.now() },
-      finish: "end_turn",
-    }),
-  )
+async function assistant(sessionID: SessionID, parentID: MessageID, root: string) {
+  const msg: MessageV2.Assistant = {
+    id: MessageID.ascending(),
+    role: "assistant",
+    sessionID,
+    mode: "build",
+    agent: "build",
+    path: { cwd: root, root },
+    cost: 0,
+    tokens: {
+      output: 0,
+      input: 0,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    },
+    modelID: ref.modelID,
+    providerID: ref.providerID,
+    parentID,
+    time: { created: Date.now() },
+    finish: "end_turn",
+  }
+  await Session.updateMessage(msg)
+  return msg
 }
 
-function createSummaryAssistantMessage(sessionID: SessionID, parentID: MessageID, root: string, text: string) {
-  return SessionNs.Service.use((ssn) =>
-    Effect.gen(function* () {
-      const msg = yield* ssn.updateMessage({
-        id: MessageID.ascending(),
-        role: "assistant",
-        sessionID,
-        mode: "compaction",
-        agent: "compaction",
-        path: { cwd: root, root },
-        cost: 0,
-        tokens: {
-          output: 0,
-          input: 0,
-          reasoning: 0,
-          cache: { read: 0, write: 0 },
-        },
-        modelID: ref.modelID,
-        providerID: ref.providerID,
-        parentID,
-        summary: true,
-        time: { created: Date.now() },
-        finish: "end_turn",
-      })
-      yield* ssn.updatePart({
-        id: PartID.ascending(),
-        messageID: msg.id,
-        sessionID,
-        type: "text",
-        text,
-      })
-      return msg
-    }),
-  )
+async function summaryAssistant(sessionID: SessionID, parentID: MessageID, root: string, text: string) {
+  const msg: MessageV2.Assistant = {
+    id: MessageID.ascending(),
+    role: "assistant",
+    sessionID,
+    mode: "compaction",
+    agent: "compaction",
+    path: { cwd: root, root },
+    cost: 0,
+    tokens: {
+      output: 0,
+      input: 0,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    },
+    modelID: ref.modelID,
+    providerID: ref.providerID,
+    parentID,
+    summary: true,
+    time: { created: Date.now() },
+    finish: "end_turn",
+  }
+  await Session.updateMessage(msg)
+  await Session.updatePart({
+    id: PartID.ascending(),
+    messageID: msg.id,
+    sessionID,
+    type: "text",
+    text,
+  })
+  return msg
 }
 
-function createCompactionMarker(sessionID: SessionID) {
-  return SessionNs.Service.use((ssn) =>
-    Effect.gen(function* () {
-      const msg = yield* ssn.updateMessage({
-        id: MessageID.ascending(),
-        role: "user",
-        model: ref,
-        sessionID,
-        agent: "build",
-        time: { created: Date.now() },
-      })
-      yield* ssn.updatePart({
-        id: PartID.ascending(),
-        messageID: msg.id,
-        sessionID: msg.sessionID,
-        type: "compaction",
-        auto: false,
-      })
-    }),
-  )
+async function lastCompactionPart(sessionID: SessionID) {
+  return (await Session.messages({ sessionID }))
+    .at(-2)
+    ?.parts.find((item): item is MessageV2.CompactionPart => item.type === "compaction")
+}
+
+async function tool(sessionID: SessionID, messageID: MessageID, tool: string, output: string) {
+  return Session.updatePart({
+    id: PartID.ascending(),
+    messageID,
+    sessionID,
+    type: "tool",
+    callID: crypto.randomUUID(),
+    tool,
+    state: {
+      status: "completed",
+      input: {},
+      output,
+      title: "done",
+      metadata: {},
+      time: { start: Date.now(), end: Date.now() },
+    },
+  })
 }
 
 function fake(
@@ -210,79 +193,29 @@ function layer(result: "continue" | "compact") {
   )
 }
 
-function cfg(compaction?: Config.Info["compaction"]) {
-  const base = Config.Info.zod.parse({})
-  return TestConfig.layer({
+function cfg(compaction?: Config.Info["compaction"] & { tail_turns?: number; preserve_recent_tokens?: number }) {
+  const base = Config.Info.parse({})
+  return Layer.mock(Config.Service)({
     get: () => Effect.succeed({ ...base, compaction }),
   })
 }
 
-const deps = Layer.mergeAll(
-  wide().layer,
-  layer("continue"),
-  Agent.defaultLayer,
-  Plugin.defaultLayer,
-  Bus.layer,
-  Config.defaultLayer,
-  SyncEvent.defaultLayer,
-)
-
-const env = Layer.mergeAll(
-  SessionNs.defaultLayer,
-  CrossSpawnSpawner.defaultLayer,
-  SessionCompaction.layer.pipe(Layer.provide(SessionNs.defaultLayer), Layer.provideMerge(deps)),
-)
-
-const it = testEffect(env)
-
-const compactionEnv = Layer.mergeAll(SessionNs.defaultLayer, CrossSpawnSpawner.defaultLayer)
-const itCompaction = testEffect(compactionEnv)
-
-type CompactionProcessOptions = {
-  result?: "continue" | "compact"
-  llm?: Layer.Layer<LLM.Service>
-  plugin?: Layer.Layer<Plugin.Service>
-  provider?: ReturnType<typeof ProviderTest.fake>
-  config?: Layer.Layer<Config.Service>
-}
-
-function withCompaction(options?: CompactionProcessOptions) {
-  return Effect.provide(compactionProcessLayer(options))
-}
-
-function compactionProcessLayer(options?: CompactionProcessOptions) {
+function runtime(
+  result: "continue" | "compact",
+  plugin = Plugin.defaultLayer,
+  provider = ProviderTest.fake(),
+  config = Config.defaultLayer,
+) {
   const bus = Bus.layer
-  const status = SessionStatus.layer.pipe(Layer.provide(bus))
-  const processor = options?.llm
-    ? SessionProcessorModule.SessionProcessor.layer.pipe(
-        Layer.provide(summary),
-        Layer.provide(Image.defaultLayer),
-        Layer.provide(status),
-      )
-    : layer(options?.result ?? "continue")
-  return Layer.mergeAll(SessionCompaction.layer.pipe(Layer.provide(processor)), processor, bus, status).pipe(
-    Layer.provide(SessionNs.defaultLayer),
-    Layer.provide((options?.provider ?? wide()).layer),
-    Layer.provide(Snapshot.defaultLayer),
-    Layer.provide(options?.llm ?? LLM.defaultLayer),
-    Layer.provide(Permission.defaultLayer),
-    Layer.provide(Agent.defaultLayer),
-    Layer.provide(options?.plugin ?? Plugin.defaultLayer),
-    Layer.provide(status),
-    Layer.provide(bus),
-    Layer.provide(options?.config ?? Config.defaultLayer),
-    Layer.provide(SyncEvent.defaultLayer),
-  )
-}
-
-function createSummaryCompaction(sessionID: SessionID) {
-  return SessionCompaction.use.create({ sessionID, agent: "build", model: ref, auto: false })
-}
-
-function readCompactionPart(sessionID: SessionID) {
-  return SessionNs.Service.use((ssn) => ssn.messages({ sessionID })).pipe(
-    Effect.map((messages) =>
-      messages.at(-2)?.parts.find((item): item is MessageV2.CompactionPart => item.type === "compaction"),
+  return ManagedRuntime.make(
+    Layer.mergeAll(SessionCompaction.layer, bus).pipe(
+      Layer.provide(provider.layer),
+      Layer.provide(Session.defaultLayer),
+      Layer.provide(layer(result)),
+      Layer.provide(Agent.defaultLayer),
+      Layer.provide(plugin),
+      Layer.provide(bus),
+      Layer.provide(config),
     ),
   )
 }
@@ -307,6 +240,26 @@ function llm() {
       }),
     ),
   }
+}
+
+function liveRuntime(layer: Layer.Layer<LLM.Service>, provider = ProviderTest.fake(), config = Config.defaultLayer) {
+  const bus = Bus.layer
+  const status = SessionStatus.layer.pipe(Layer.provide(bus))
+  const processor = SessionProcessorModule.SessionProcessor.layer
+  return ManagedRuntime.make(
+    Layer.mergeAll(SessionCompaction.layer.pipe(Layer.provide(processor)), processor, bus, status).pipe(
+      Layer.provide(provider.layer),
+      Layer.provide(Session.defaultLayer),
+      Layer.provide(Snapshot.defaultLayer),
+      Layer.provide(layer),
+      Layer.provide(Permission.defaultLayer),
+      Layer.provide(Agent.defaultLayer),
+      Layer.provide(Plugin.defaultLayer),
+      Layer.provide(status),
+      Layer.provide(bus),
+      Layer.provide(config),
+    ),
+  )
 }
 
 function reply(
@@ -364,14 +317,23 @@ function reply(
   }
 }
 
-function plugin(ready: Deferred.Deferred<void>) {
+function wait(ms = 50) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function defer() {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
+function plugin(ready: ReturnType<typeof defer>) {
   return Layer.mock(Plugin.Service)({
     trigger: <Name extends string, Input, Output>(name: Name, _input: Input, output: Output) => {
       if (name !== "experimental.session.compacting") return Effect.succeed(output)
-      return Effect.sync(() => Deferred.doneUnsafe(ready, Effect.void)).pipe(
-        Effect.andThen(Effect.never),
-        Effect.as(output),
-      )
+      return Effect.sync(() => ready.resolve()).pipe(Effect.andThen(Effect.never), Effect.as(output))
     },
     list: () => Effect.succeed([]),
     init: () => Effect.void,
@@ -393,77 +355,77 @@ function autocontinue(enabled: boolean) {
 }
 
 describe("session.compaction.isOverflow", () => {
-  it.live(
-    "returns true when token count exceeds usable context",
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const compact = yield* SessionCompaction.Service
+  test("returns true when token count exceeds usable context", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
         const model = createModel({ context: 100_000, output: 32_000 })
         const tokens = { input: 75_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } }
-        expect(yield* compact.isOverflow({ tokens, model })).toBe(true)
-      }),
-    ),
-  )
+        expect(await SessionCompaction.isOverflow({ tokens, model })).toBe(true)
+      },
+    })
+  })
 
-  it.live(
-    "returns false when token count within usable context",
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const compact = yield* SessionCompaction.Service
+  test("returns false when token count within usable context", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
         const model = createModel({ context: 200_000, output: 32_000 })
         const tokens = { input: 100_000, output: 10_000, reasoning: 0, cache: { read: 0, write: 0 } }
-        expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
-      }),
-    ),
-  )
+        expect(await SessionCompaction.isOverflow({ tokens, model })).toBe(false)
+      },
+    })
+  })
 
-  it.live(
-    "includes cache.read in token count",
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const compact = yield* SessionCompaction.Service
+  test("includes cache.read in token count", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
         const model = createModel({ context: 100_000, output: 32_000 })
         const tokens = { input: 60_000, output: 10_000, reasoning: 0, cache: { read: 10_000, write: 0 } }
-        expect(yield* compact.isOverflow({ tokens, model })).toBe(true)
-      }),
-    ),
-  )
+        expect(await SessionCompaction.isOverflow({ tokens, model })).toBe(true)
+      },
+    })
+  })
 
-  it.live(
-    "respects input limit for input caps",
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const compact = yield* SessionCompaction.Service
+  test("respects input limit for input caps", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
         const model = createModel({ context: 400_000, input: 272_000, output: 128_000 })
         const tokens = { input: 271_000, output: 1_000, reasoning: 0, cache: { read: 2_000, write: 0 } }
-        expect(yield* compact.isOverflow({ tokens, model })).toBe(true)
-      }),
-    ),
-  )
+        expect(await SessionCompaction.isOverflow({ tokens, model })).toBe(true)
+      },
+    })
+  })
 
-  it.live(
-    "returns false when input/output are within input caps",
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const compact = yield* SessionCompaction.Service
+  test("returns false when input/output are within input caps", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
         const model = createModel({ context: 400_000, input: 272_000, output: 128_000 })
         const tokens = { input: 200_000, output: 20_000, reasoning: 0, cache: { read: 10_000, write: 0 } }
-        expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
-      }),
-    ),
-  )
+        expect(await SessionCompaction.isOverflow({ tokens, model })).toBe(false)
+      },
+    })
+  })
 
-  it.live(
-    "returns false when output within limit with input caps",
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const compact = yield* SessionCompaction.Service
+  test("returns false when output within limit with input caps", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
         const model = createModel({ context: 200_000, input: 120_000, output: 10_000 })
         const tokens = { input: 50_000, output: 9_999, reasoning: 0, cache: { read: 0, write: 0 } }
-        expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
-      }),
-    ),
-  )
+        expect(await SessionCompaction.isOverflow({ tokens, model })).toBe(false)
+      },
+    })
+  })
 
   // ─── Bug reproduction tests ───────────────────────────────────────────
   // These tests demonstrate that when limit.input is set, isOverflow()
@@ -477,11 +439,11 @@ describe("session.compaction.isOverflow", () => {
   // Related issues: #10634, #8089, #11086, #12621
   // Open PRs: #6875, #12924
 
-  it.live(
-    "BUG: no headroom when limit.input is set — compaction should trigger near boundary but does not",
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const compact = yield* SessionCompaction.Service
+  test("BUG: no headroom when limit.input is set — compaction should trigger near boundary but does not", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
         // Simulate Claude with prompt caching: input limit = 200K, output limit = 32K
         const model = createModel({ context: 200_000, input: 200_000, output: 32_000 })
 
@@ -498,16 +460,16 @@ describe("session.compaction.isOverflow", () => {
 
         // With 198K used and only 2K headroom, the next turn will overflow.
         // Compaction MUST trigger here.
-        expect(yield* compact.isOverflow({ tokens, model })).toBe(true)
-      }),
-    ),
-  )
+        expect(await SessionCompaction.isOverflow({ tokens, model })).toBe(true)
+      },
+    })
+  })
 
-  it.live(
-    "BUG: without limit.input, same token count correctly triggers compaction",
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const compact = yield* SessionCompaction.Service
+  test("BUG: without limit.input, same token count correctly triggers compaction", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
         // Same model but without limit.input — uses context - output instead
         const model = createModel({ context: 200_000, output: 32_000 })
 
@@ -517,17 +479,17 @@ describe("session.compaction.isOverflow", () => {
         // usable = context - output = 200K - 32K = 168K
         // 198K > 168K = true → compaction correctly triggered
 
-        const result = yield* compact.isOverflow({ tokens, model })
+        const result = await SessionCompaction.isOverflow({ tokens, model })
         expect(result).toBe(true) // ← Correct: headroom is reserved
-      }),
-    ),
-  )
+      },
+    })
+  })
 
-  it.live(
-    "BUG: asymmetry — limit.input model allows 30K more usage before compaction than equivalent model without it",
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const compact = yield* SessionCompaction.Service
+  test("BUG: asymmetry — limit.input model allows 30K more usage before compaction than equivalent model without it", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
         // Two models with identical context/output limits, differing only in limit.input
         const withInputLimit = createModel({ context: 200_000, input: 200_000, output: 32_000 })
         const withoutInputLimit = createModel({ context: 200_000, output: 32_000 })
@@ -535,66 +497,67 @@ describe("session.compaction.isOverflow", () => {
         // 170K total tokens — well above context-output (168K) but below input limit (200K)
         const tokens = { input: 166_000, output: 10_000, reasoning: 0, cache: { read: 5_000, write: 0 } }
 
-        const withLimit = yield* compact.isOverflow({ tokens, model: withInputLimit })
-        const withoutLimit = yield* compact.isOverflow({ tokens, model: withoutInputLimit })
+        const withLimit = await SessionCompaction.isOverflow({ tokens, model: withInputLimit })
+        const withoutLimit = await SessionCompaction.isOverflow({ tokens, model: withoutInputLimit })
 
         // Both models have identical real capacity — they should agree:
         expect(withLimit).toBe(true) // should compact (170K leaves no room for 32K output)
         expect(withoutLimit).toBe(true) // correctly compacts (170K > 168K)
-      }),
-    ),
-  )
+      },
+    })
+  })
 
-  it.live(
-    "returns false when model context limit is 0",
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const compact = yield* SessionCompaction.Service
+  test("returns false when model context limit is 0", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
         const model = createModel({ context: 0, output: 32_000 })
         const tokens = { input: 100_000, output: 10_000, reasoning: 0, cache: { read: 0, write: 0 } }
-        expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
-      }),
-    ),
-  )
-
-  it.live(
-    "returns false when compaction.auto is disabled",
-    provideTmpdirInstance(
-      () =>
-        Effect.gen(function* () {
-          const compact = yield* SessionCompaction.Service
-          const model = createModel({ context: 100_000, output: 32_000 })
-          const tokens = { input: 75_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } }
-          expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
-        }),
-      {
-        config: {
-          compaction: { auto: false },
-        },
+        expect(await SessionCompaction.isOverflow({ tokens, model })).toBe(false)
       },
-    ),
-  )
+    })
+  })
+
+  test("returns false when compaction.auto is disabled", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            compaction: { auto: false },
+          }),
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const model = createModel({ context: 100_000, output: 32_000 })
+        const tokens = { input: 75_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } }
+        expect(await SessionCompaction.isOverflow({ tokens, model })).toBe(false)
+      },
+    })
+  })
 })
 
 describe("session.compaction.create", () => {
-  it.live(
-    "creates a compaction user message and part",
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const compact = yield* SessionCompaction.Service
-        const ssn = yield* SessionNs.Service
+  test("creates a compaction user message and part", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
 
-        const info = yield* ssn.create({})
-
-        yield* compact.create({
-          sessionID: info.id,
+        await SessionCompaction.create({
+          sessionID: session.id,
           agent: "build",
           model: ref,
           auto: true,
           overflow: true,
         })
 
-        const msgs = yield* ssn.messages({ sessionID: info.id })
+        const msgs = await Session.messages({ sessionID: session.id })
         expect(msgs).toHaveLength(1)
         expect(msgs[0].info.role).toBe("user")
         expect(msgs[0].parts).toHaveLength(1)
@@ -603,923 +566,973 @@ describe("session.compaction.create", () => {
           auto: true,
           overflow: true,
         })
-
-        const v2 = yield* SessionV2.Service.use((svc) => svc.messages({ sessionID: info.id })).pipe(
-          Effect.provide(SessionV2.defaultLayer),
-        )
-        expect(v2.at(-1)).toMatchObject({
-          type: "compaction",
-          reason: "auto",
-          summary: "",
-        })
-      }),
-    ),
-  )
+      },
+    })
+  })
 })
 
 describe("session.compaction.prune", () => {
-  it.live(
-    "compacts old completed tool output",
-    provideTmpdirInstance(
-      (dir) =>
-        Effect.gen(function* () {
-          const compact = yield* SessionCompaction.Service
-          const ssn = yield* SessionNs.Service
-          const info = yield* ssn.create({})
-          const a = yield* ssn.updateMessage({
-            id: MessageID.ascending(),
-            role: "user",
-            sessionID: info.id,
-            agent: "build",
-            model: ref,
-            time: { created: Date.now() },
-          })
-          yield* ssn.updatePart({
-            id: PartID.ascending(),
-            messageID: a.id,
-            sessionID: info.id,
-            type: "text",
-            text: "first",
-          })
-          const b: MessageV2.Assistant = {
-            id: MessageID.ascending(),
-            role: "assistant",
-            sessionID: info.id,
-            mode: "build",
-            agent: "build",
-            path: { cwd: dir, root: dir },
-            cost: 0,
-            tokens: {
-              output: 0,
-              input: 0,
-              reasoning: 0,
-              cache: { read: 0, write: 0 },
-            },
-            modelID: ref.modelID,
-            providerID: ref.providerID,
-            parentID: a.id,
-            time: { created: Date.now() },
-            finish: "end_turn",
-          }
-          yield* ssn.updateMessage(b)
-          yield* ssn.updatePart({
-            id: PartID.ascending(),
-            messageID: b.id,
-            sessionID: info.id,
-            type: "tool",
-            callID: crypto.randomUUID(),
-            tool: "bash",
-            state: {
-              status: "completed",
-              input: {},
-              output: "x".repeat(200_000),
-              title: "done",
-              metadata: {},
-              time: { start: Date.now(), end: Date.now() },
-            },
-          })
-          for (const text of ["second", "third"]) {
-            const msg = yield* ssn.updateMessage({
-              id: MessageID.ascending(),
-              role: "user",
-              sessionID: info.id,
-              agent: "build",
-              model: ref,
-              time: { created: Date.now() },
-            })
-            yield* ssn.updatePart({
-              id: PartID.ascending(),
-              messageID: msg.id,
-              sessionID: info.id,
-              type: "text",
-              text,
-            })
-          }
+  test("compacts old completed tool output", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const a = await user(session.id, "first")
+        const b = await assistant(session.id, a.id, tmp.path)
+        await tool(session.id, b.id, "bash", "x".repeat(200_000))
+        await user(session.id, "second")
+        await user(session.id, "third")
 
-          yield* compact.prune({ sessionID: info.id })
+        await SessionCompaction.prune({ sessionID: session.id })
 
-          const msgs = yield* ssn.messages({ sessionID: info.id })
-          const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
-          expect(part?.type).toBe("tool")
-          expect(part?.state.status).toBe("completed")
-          if (part?.type === "tool" && part.state.status === "completed") {
-            expect(part.state.time.compacted).toBeNumber()
-          }
-        }),
-
-      {
-        config: {
-          compaction: { prune: true },
-        },
+        const msgs = await Session.messages({ sessionID: session.id })
+        const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+        expect(part?.type).toBe("tool")
+        expect(part?.state.status).toBe("completed")
+        if (part?.type === "tool" && part.state.status === "completed") {
+          expect(part.state.time.compacted).toBeNumber()
+        }
       },
-    ),
-  )
+    })
+  })
 
-  it.live(
-    "skips protected skill tool output",
-    provideTmpdirInstance((dir) =>
-      Effect.gen(function* () {
-        const compact = yield* SessionCompaction.Service
-        const ssn = yield* SessionNs.Service
-        const info = yield* ssn.create({})
-        const a = yield* ssn.updateMessage({
-          id: MessageID.ascending(),
-          role: "user",
-          sessionID: info.id,
-          agent: "build",
-          model: ref,
-          time: { created: Date.now() },
-        })
-        yield* ssn.updatePart({
-          id: PartID.ascending(),
-          messageID: a.id,
-          sessionID: info.id,
-          type: "text",
-          text: "first",
-        })
-        const b: MessageV2.Assistant = {
-          id: MessageID.ascending(),
-          role: "assistant",
-          sessionID: info.id,
-          mode: "build",
-          agent: "build",
-          path: { cwd: dir, root: dir },
-          cost: 0,
-          tokens: {
-            output: 0,
-            input: 0,
-            reasoning: 0,
-            cache: { read: 0, write: 0 },
-          },
-          modelID: ref.modelID,
-          providerID: ref.providerID,
-          parentID: a.id,
-          time: { created: Date.now() },
-          finish: "end_turn",
-        }
-        yield* ssn.updateMessage(b)
-        yield* ssn.updatePart({
-          id: PartID.ascending(),
-          messageID: b.id,
-          sessionID: info.id,
-          type: "tool",
-          callID: crypto.randomUUID(),
-          tool: "skill",
-          state: {
-            status: "completed",
-            input: {},
-            output: "x".repeat(200_000),
-            title: "done",
-            metadata: {},
-            time: { start: Date.now(), end: Date.now() },
-          },
-        })
-        for (const text of ["second", "third"]) {
-          const msg = yield* ssn.updateMessage({
-            id: MessageID.ascending(),
-            role: "user",
-            sessionID: info.id,
-            agent: "build",
-            model: ref,
-            time: { created: Date.now() },
-          })
-          yield* ssn.updatePart({
-            id: PartID.ascending(),
-            messageID: msg.id,
-            sessionID: info.id,
-            type: "text",
-            text,
-          })
-        }
+  test("skips protected skill tool output", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const a = await user(session.id, "first")
+        const b = await assistant(session.id, a.id, tmp.path)
+        await tool(session.id, b.id, "skill", "x".repeat(200_000))
+        await user(session.id, "second")
+        await user(session.id, "third")
 
-        yield* compact.prune({ sessionID: info.id })
+        await SessionCompaction.prune({ sessionID: session.id })
 
-        const msgs = yield* ssn.messages({ sessionID: info.id })
+        const msgs = await Session.messages({ sessionID: session.id })
         const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
         expect(part?.type).toBe("tool")
         if (part?.type === "tool" && part.state.status === "completed") {
           expect(part.state.time.compacted).toBeUndefined()
         }
-      }),
-    ),
-  )
+      },
+    })
+  })
 })
 
 describe("session.compaction.process", () => {
-  it.instance(
-    "throws when parent is not a user message",
-    Effect.gen(function* () {
-      const test = yield* TestInstance
-      const ssn = yield* SessionNs.Service
-      const session = yield* ssn.create({})
-      const msg = yield* createUserMessage(session.id, "hello")
-      const reply = yield* createAssistantMessage(session.id, msg.id, test.directory)
-      const msgs = yield* ssn.messages({ sessionID: session.id })
-
-      const exit = yield* Effect.exit(
-        SessionCompaction.use.process({
-          parentID: reply.id,
-          messages: msgs,
-          sessionID: session.id,
-          auto: false,
-        }),
-      )
-
-      expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isFailure(exit)) {
-        const error = Cause.squash(exit.cause)
-        expect(error).toBeInstanceOf(Error)
-        if (error instanceof Error) {
-          expect(error.message).toContain(`Compaction parent must be a user message: ${reply.id}`)
+  test("resolveModel falls back to requested model when local hybrid model is unavailable", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const mdl = ProviderTest.model({
+          id: ModelID.make("test-model"),
+          providerID: ProviderID.make("test"),
+          limit: { context: 100_000, output: 32_000 },
+        })
+        const provider = ProviderTest.fake({
+          model: mdl,
+          getModel: Effect.fn("TestProvider.getModel")((providerID, modelID) => {
+            if (providerID === ProviderID.make("local") && modelID === ModelID.make("offline")) {
+              return Effect.die(new Error("local unreachable"))
+            }
+            if (providerID === ProviderID.make("test") && modelID === ModelID.make("test-model")) {
+              return Effect.succeed(mdl)
+            }
+            return Effect.die(new Error(`Unknown test model: ${providerID}/${modelID}`))
+          }),
+        })
+        const rt = runtime(
+          "continue",
+          Plugin.defaultLayer,
+          provider,
+          Layer.mock(Config.Service)({
+            get: () =>
+              Effect.succeed({
+                ...Config.Info.parse({}),
+                hybrid: {
+                  enabled: true,
+                  local_model: { providerID: "local", modelID: "offline" },
+                  log_routing: false,
+                  compression_threshold: 10,
+                  compression_timeout_ms: 5000,
+                  compression_max_tokens: 4096,
+                  compression_tail_lines: 20,
+                },
+              }),
+          }),
+        )
+        try {
+          const resolved = await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.resolveModel({
+                model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+              }),
+            ),
+          )
+          expect(resolved.providerID).toBe(ProviderID.make("test"))
+          expect(resolved.id).toBe(ModelID.make("test-model"))
+        } finally {
+          await rt.dispose()
         }
-      }
-    }),
-  )
+      },
+    })
+  })
 
-  it.instance(
-    "publishes compacted event on continue",
-    Effect.gen(function* () {
-      const bus = yield* Bus.Service
-      const ssn = yield* SessionNs.Service
-      const session = yield* ssn.create({})
-      const msg = yield* createUserMessage(session.id, "hello")
-      const msgs = yield* ssn.messages({ sessionID: session.id })
-      const done = yield* Deferred.make<void, Error>()
-      let seen = false
-      const unsub = yield* bus.subscribeCallback(SessionCompaction.Event.Compacted, (evt) => {
-        if (evt.properties.sessionID !== session.id) return
-        seen = true
-        Deferred.doneUnsafe(done, Effect.void)
-      })
-      yield* Effect.addFinalizer(() => Effect.sync(unsub))
+  test("throws when parent is not a user message", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await user(session.id, "hello")
+        const reply = await assistant(session.id, msg.id, tmp.path)
+        const rt = runtime("continue")
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          await expect(
+            rt.runPromise(
+              SessionCompaction.Service.use((svc) =>
+                svc.process({
+                  parentID: reply.id,
+                  messages: msgs,
+                  sessionID: session.id,
+                  auto: false,
+                }),
+              ),
+            ),
+          ).rejects.toThrow(`Compaction parent must be a user message: ${reply.id}`)
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
 
-      const result = yield* SessionCompaction.use.process({
-        parentID: msg.id,
-        messages: msgs,
-        sessionID: session.id,
-        auto: false,
-      })
+  test("publishes compacted event on continue", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await user(session.id, "hello")
+        const msgs = await Session.messages({ sessionID: session.id })
+        const done = defer()
+        let seen = false
+        const rt = runtime("continue", Plugin.defaultLayer, wide())
+        let unsub: (() => void) | undefined
+        try {
+          unsub = await rt.runPromise(
+            Bus.Service.use((svc) =>
+              svc.subscribeCallback(SessionCompaction.Event.Compacted, (evt) => {
+                if (evt.properties.sessionID !== session.id) return
+                seen = true
+                done.resolve()
+              }),
+            ),
+          )
 
-      yield* Deferred.await(done).pipe(Effect.timeout("500 millis"))
-      expect(result).toBe("continue")
-      expect(seen).toBe(true)
-    }),
-  )
+          const result = await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: msg.id,
+                messages: msgs,
+                sessionID: session.id,
+                auto: false,
+              }),
+            ),
+          )
 
-  itCompaction.instance(
-    "marks summary message as errored on compact result",
-    Effect.gen(function* () {
-      const ssn = yield* SessionNs.Service
-      const session = yield* ssn.create({})
-      const msg = yield* createUserMessage(session.id, "hello")
-      const msgs = yield* ssn.messages({ sessionID: session.id })
+          await Promise.race([
+            done.promise,
+            wait(500).then(() => {
+              throw new Error("timed out waiting for compacted event")
+            }),
+          ])
+          expect(result).toBe("continue")
+          expect(seen).toBe(true)
+        } finally {
+          unsub?.()
+          await rt.dispose()
+        }
+      },
+    })
+  })
 
-      const result = yield* SessionCompaction.use.process({
-        parentID: msg.id,
-        messages: msgs,
-        sessionID: session.id,
-        auto: false,
-      })
+  test("marks summary message as errored on compact result", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await user(session.id, "hello")
+        const rt = runtime("compact", Plugin.defaultLayer, wide())
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          const result = await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: msg.id,
+                messages: msgs,
+                sessionID: session.id,
+                auto: false,
+              }),
+            ),
+          )
 
-      const summary = (yield* ssn.messages({ sessionID: session.id })).find(
-        (msg) => msg.info.role === "assistant" && msg.info.summary,
-      )
+          const summary = (await Session.messages({ sessionID: session.id })).find(
+            (msg) => msg.info.role === "assistant" && msg.info.summary,
+          )
 
-      expect(result).toBe("stop")
-      expect(summary?.info.role).toBe("assistant")
-      if (summary?.info.role === "assistant") {
-        expect(summary.info.finish).toBe("error")
-        expect(JSON.stringify(summary.info.error)).toContain("Session too large to compact")
-      }
-    }).pipe(withCompaction({ result: "compact" })),
-  )
+          expect(result).toBe("stop")
+          expect(summary?.info.role).toBe("assistant")
+          if (summary?.info.role === "assistant") {
+            expect(summary.info.finish).toBe("error")
+            expect(JSON.stringify(summary.info.error)).toContain("Session too large to compact")
+          }
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
 
-  it.instance(
-    "adds synthetic continue prompt when auto is enabled",
-    Effect.gen(function* () {
-      const ssn = yield* SessionNs.Service
-      const session = yield* ssn.create({})
-      const msg = yield* createUserMessage(session.id, "hello")
-      const msgs = yield* ssn.messages({ sessionID: session.id })
+  test("adds synthetic continue prompt when auto is enabled", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await user(session.id, "hello")
+        const rt = runtime("continue", Plugin.defaultLayer, wide())
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          const result = await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: msg.id,
+                messages: msgs,
+                sessionID: session.id,
+                auto: true,
+              }),
+            ),
+          )
 
-      const result = yield* SessionCompaction.use.process({
-        parentID: msg.id,
-        messages: msgs,
-        sessionID: session.id,
-        auto: true,
-      })
+          const all = await Session.messages({ sessionID: session.id })
+          const last = all.at(-1)
 
-      const all = yield* ssn.messages({ sessionID: session.id })
-      const last = all.at(-1)
+          expect(result).toBe("continue")
+          expect(last?.info.role).toBe("user")
+          expect(last?.parts[0]).toMatchObject({
+            type: "text",
+            synthetic: true,
+          })
+          if (last?.parts[0]?.type === "text") {
+            expect(last.parts[0].text).toContain("Continue if you have next steps")
+          }
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
 
-      expect(result).toBe("continue")
-      expect(last?.info.role).toBe("user")
-      expect(last?.parts[0]).toMatchObject({
-        type: "text",
-        synthetic: true,
-        metadata: { compaction_continue: true },
-      })
-      if (last?.parts[0]?.type === "text") {
-        expect(last.parts[0].text).toContain("Continue if you have next steps")
-      }
-    }),
-  )
+  test("allows plugins to disable synthetic continue prompt", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await user(session.id, "hello")
+        const rt = runtime("continue", autocontinue(false), wide())
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          const result = await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: msg.id,
+                messages: msgs,
+                sessionID: session.id,
+                auto: true,
+              }),
+            ),
+          )
 
-  itCompaction.instance(
-    "does not persist tail_start_id for serialized recent turns",
-    Effect.gen(function* () {
-      const ssn = yield* SessionNs.Service
-      const session = yield* ssn.create({})
-      yield* createUserMessage(session.id, "first")
-      yield* createUserMessage(session.id, "second")
-      yield* createUserMessage(session.id, "third")
-      yield* createSummaryCompaction(session.id)
+          const all = await Session.messages({ sessionID: session.id })
+          const last = all.at(-1)
 
-      const msgs = yield* ssn.messages({ sessionID: session.id })
-      const parent = msgs.at(-1)?.info.id
-      expect(parent).toBeTruthy()
-      yield* SessionCompaction.use.process({
-        parentID: parent!,
-        messages: msgs,
-        sessionID: session.id,
-        auto: false,
-      })
+          expect(result).toBe("continue")
+          expect(last?.info.role).toBe("assistant")
+          expect(
+            all.some(
+              (msg) =>
+                msg.info.role === "user" &&
+                msg.parts.some(
+                  (part) =>
+                    part.type === "text" && part.synthetic && part.text.includes("Continue if you have next steps"),
+                ),
+            ),
+          ).toBe(false)
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
 
-      const part = yield* readCompactionPart(session.id)
-      expect(part?.type).toBe("compaction")
-      expect(part?.tail_start_id).toBeUndefined()
-    }).pipe(withCompaction({ config: cfg({ tail_turns: 2, preserve_recent_tokens: 10_000 }) })),
-  )
-
-  itCompaction.instance(
-    "does not persist tail_start_id when shrinking serialized tail",
-    Effect.gen(function* () {
-      const ssn = yield* SessionNs.Service
-      const session = yield* ssn.create({})
-      yield* createUserMessage(session.id, "first")
-      yield* createUserMessage(session.id, "x".repeat(2_000))
-      yield* createUserMessage(session.id, "tiny")
-      yield* createSummaryCompaction(session.id)
-
-      const msgs = yield* ssn.messages({ sessionID: session.id })
-      const parent = msgs.at(-1)?.info.id
-      expect(parent).toBeTruthy()
-      yield* SessionCompaction.use.process({
-        parentID: parent!,
-        messages: msgs,
-        sessionID: session.id,
-        auto: false,
-      })
-
-      const part = yield* readCompactionPart(session.id)
-      expect(part?.type).toBe("compaction")
-      expect(part?.tail_start_id).toBeUndefined()
-    }).pipe(withCompaction({ config: cfg({ tail_turns: 2, preserve_recent_tokens: 100 }) })),
-  )
-
-  itCompaction.instance(
-    "falls back to full summary when even one recent turn exceeds preserve token budget",
-    () => {
-      const stub = llm()
-      let captured = ""
-      stub.push(reply("summary", (input) => (captured = JSON.stringify(input.messages))))
-      return Effect.gen(function* () {
-        const ssn = yield* SessionNs.Service
-        const session = yield* ssn.create({})
-        yield* createUserMessage(session.id, "first")
-        yield* createUserMessage(session.id, "y".repeat(2_000))
-        yield* createSummaryCompaction(session.id)
-
-        const msgs = yield* ssn.messages({ sessionID: session.id })
-        const parent = msgs.at(-1)?.info.id
-        expect(parent).toBeTruthy()
-        yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
-
-        const part = yield* readCompactionPart(session.id)
-        expect(part?.type).toBe("compaction")
-        expect(part?.tail_start_id).toBeUndefined()
-        expect(captured).toContain("yyyy")
-      }).pipe(withCompaction({ llm: stub.layer, config: cfg({ tail_turns: 1, preserve_recent_tokens: 20 }) }))
-    },
-    { git: true },
-  )
-
-  itCompaction.instance(
-    "serializes retained tail media as text in the summary input",
-    () => {
-      const stub = llm()
-      let captured = ""
-      stub.push(reply("summary", (input) => (captured = JSON.stringify(input.messages))))
-      return Effect.gen(function* () {
-        const ssn = yield* SessionNs.Service
-        const session = yield* ssn.create({})
-        yield* createUserMessage(session.id, "older")
-        const recent = yield* createUserMessage(session.id, "recent image turn")
-        yield* ssn.updatePart({
+  test("replays the prior user turn on overflow when earlier context exists", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await user(session.id, "root")
+        const replay = await user(session.id, "image")
+        await Session.updatePart({
           id: PartID.ascending(),
-          messageID: recent.id,
+          messageID: replay.id,
           sessionID: session.id,
           type: "file",
           mime: "image/png",
-          filename: "big.png",
-          url: `data:image/png;base64,${"a".repeat(4_000)}`,
+          filename: "cat.png",
+          url: "https://example.com/cat.png",
         })
-        yield* createSummaryCompaction(session.id)
-
-        const msgs = yield* ssn.messages({ sessionID: session.id })
-        const parent = msgs.at(-1)?.info.id
-        expect(parent).toBeTruthy()
-        yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
-
-        const part = yield* readCompactionPart(session.id)
-        expect(part?.type).toBe("compaction")
-        expect(part?.tail_start_id).toBeUndefined()
-        expect(captured).toContain("recent image turn")
-        expect(captured).toContain("Attached image/png: big.png")
-      }).pipe(withCompaction({ llm: stub.layer, config: cfg({ tail_turns: 1, preserve_recent_tokens: 100 }) }))
-    },
-    { git: true },
-  )
-
-  itCompaction.instance(
-    "retains a split turn suffix when a later message fits the preserve token budget",
-    () => {
-      const stub = llm()
-      let captured = ""
-      stub.push(reply("summary", (input) => (captured = JSON.stringify(input.messages))))
-      return Effect.gen(function* () {
-        const test = yield* TestInstance
-        const ssn = yield* SessionNs.Service
-        const session = yield* ssn.create({})
-        yield* createUserMessage(session.id, "older")
-        const recent = yield* createUserMessage(session.id, "recent turn")
-        const large = yield* createAssistantMessage(session.id, recent.id, test.directory)
-        yield* ssn.updatePart({
-          id: PartID.ascending(),
-          messageID: large.id,
-          sessionID: session.id,
-          type: "text",
-          text: "z".repeat(2_000),
-        })
-        const keep = yield* createAssistantMessage(session.id, recent.id, test.directory)
-        yield* ssn.updatePart({
-          id: PartID.ascending(),
-          messageID: keep.id,
-          sessionID: session.id,
-          type: "text",
-          text: "keep tail",
-        })
-        yield* createSummaryCompaction(session.id)
-
-        const msgs = yield* ssn.messages({ sessionID: session.id })
-        const parent = msgs.at(-1)?.info.id
-        expect(parent).toBeTruthy()
-        yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
-
-        const part = yield* readCompactionPart(session.id)
-        expect(part?.type).toBe("compaction")
-        expect(part?.tail_start_id).toBeUndefined()
-        expect(captured).toContain("zzzz")
-        expect(captured).toContain("keep tail")
-
-        const filtered = MessageV2.filterCompacted(MessageV2.stream(session.id))
-        expect(filtered.map((msg) => msg.info.id)).toEqual([parent!, expect.any(String)])
-        expect(filtered[1]?.info.role).toBe("assistant")
-        expect(filtered[1]?.info.role === "assistant" ? filtered[1].info.summary : false).toBe(true)
-        expect(filtered.map((msg) => msg.info.id)).not.toContain(large.id)
-        expect(filtered.map((msg) => msg.info.id)).not.toContain(keep.id)
-      }).pipe(withCompaction({ llm: stub.layer, config: cfg({ tail_turns: 1, preserve_recent_tokens: 100 }) }))
-    },
-    { git: true },
-  )
-
-  itCompaction.instance(
-    "allows plugins to disable synthetic continue prompt",
-    Effect.gen(function* () {
-      const ssn = yield* SessionNs.Service
-      const session = yield* ssn.create({})
-      const msg = yield* createUserMessage(session.id, "hello")
-      const msgs = yield* ssn.messages({ sessionID: session.id })
-
-      const result = yield* SessionCompaction.use.process({
-        parentID: msg.id,
-        messages: msgs,
-        sessionID: session.id,
-        auto: true,
-      })
-
-      const all = yield* ssn.messages({ sessionID: session.id })
-      const last = all.at(-1)
-
-      expect(result).toBe("continue")
-      expect(last?.info.role).toBe("assistant")
-      expect(
-        all.some(
-          (msg) =>
-            msg.info.role === "user" &&
-            msg.parts.some(
-              (part) => part.type === "text" && part.synthetic && part.text.includes("Continue if you have next steps"),
+        const msg = await user(session.id, "current")
+        const rt = runtime("continue", Plugin.defaultLayer, wide())
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          const result = await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: msg.id,
+                messages: msgs,
+                sessionID: session.id,
+                auto: true,
+                overflow: true,
+              }),
             ),
-        ),
-      ).toBe(false)
-    }).pipe(withCompaction({ plugin: autocontinue(false) })),
-  )
+          )
 
-  it.instance(
-    "replays the prior user turn on overflow when earlier context exists",
-    Effect.gen(function* () {
-      const ssn = yield* SessionNs.Service
-      const session = yield* ssn.create({})
-      yield* createUserMessage(session.id, "root")
-      const replay = yield* createUserMessage(session.id, "image")
-      yield* ssn.updatePart({
-        id: PartID.ascending(),
-        messageID: replay.id,
-        sessionID: session.id,
-        type: "file",
-        mime: "image/png",
-        filename: "cat.png",
-        url: "https://example.com/cat.png",
-      })
-      const msg = yield* createUserMessage(session.id, "current")
-      const msgs = yield* ssn.messages({ sessionID: session.id })
+          const last = (await Session.messages({ sessionID: session.id })).at(-1)
 
-      const result = yield* SessionCompaction.use.process({
-        parentID: msg.id,
-        messages: msgs,
-        sessionID: session.id,
-        auto: true,
-        overflow: true,
-      })
+          expect(result).toBe("continue")
+          expect(last?.info.role).toBe("user")
+          expect(last?.parts.some((part) => part.type === "file")).toBe(false)
+          expect(
+            last?.parts.some((part) => part.type === "text" && part.text.includes("Attached image/png: cat.png")),
+          ).toBe(true)
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
 
-      const last = (yield* ssn.messages({ sessionID: session.id })).at(-1)
+  test("falls back to overflow guidance when no replayable turn exists", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await user(session.id, "earlier")
+        const msg = await user(session.id, "current")
 
-      expect(result).toBe("continue")
-      expect(last?.info.role).toBe("user")
-      expect(last?.parts.some((part) => part.type === "file")).toBe(false)
-      expect(
-        last?.parts.some((part) => part.type === "text" && part.text.includes("Attached image/png: cat.png")),
-      ).toBe(true)
-    }),
-  )
+        const rt = runtime("continue", Plugin.defaultLayer, wide())
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          const result = await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: msg.id,
+                messages: msgs,
+                sessionID: session.id,
+                auto: true,
+                overflow: true,
+              }),
+            ),
+          )
 
-  it.instance(
-    "falls back to overflow guidance when no replayable turn exists",
-    Effect.gen(function* () {
-      const ssn = yield* SessionNs.Service
-      const session = yield* ssn.create({})
-      yield* createUserMessage(session.id, "earlier")
-      const msg = yield* createUserMessage(session.id, "current")
-      const msgs = yield* ssn.messages({ sessionID: session.id })
+          const last = (await Session.messages({ sessionID: session.id })).at(-1)
 
-      const result = yield* SessionCompaction.use.process({
-        parentID: msg.id,
-        messages: msgs,
-        sessionID: session.id,
-        auto: true,
-        overflow: true,
-      })
+          expect(result).toBe("continue")
+          expect(last?.info.role).toBe("user")
+          if (last?.parts[0]?.type === "text") {
+            expect(last.parts[0].text).toContain("previous request exceeded the provider's size limit")
+          }
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
 
-      const last = (yield* ssn.messages({ sessionID: session.id })).at(-1)
+  test("stops quickly when aborted during retry backoff", async () => {
+    const stub = llm()
+    const ready = defer()
+    stub.push(
+      Stream.fromAsyncIterable(
+        {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "start" } as LLM.Event
+            throw new APICallError({
+              message: "boom",
+              url: "https://example.com/v1/chat/completions",
+              requestBodyValues: {},
+              statusCode: 503,
+              responseHeaders: { "retry-after-ms": "10000" },
+              responseBody: '{"error":"boom"}',
+              isRetryable: true,
+            })
+          },
+        },
+        (err) => err,
+      ),
+    )
 
-      expect(result).toBe("continue")
-      expect(last?.info.role).toBe("user")
-      if (last?.parts[0]?.type === "text") {
-        expect(last.parts[0].text).toContain("previous request exceeded the provider's size limit")
-      }
-    }),
-  )
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await user(session.id, "hello")
+        const msgs = await Session.messages({ sessionID: session.id })
+        const abort = new AbortController()
+        const rt = liveRuntime(stub.layer, wide())
+        let off: (() => void) | undefined
+        let run: Promise<"continue" | "stop"> | undefined
+        try {
+          off = await rt.runPromise(
+            Bus.Service.use((svc) =>
+              svc.subscribeCallback(SessionStatus.Event.Status, (evt) => {
+                if (evt.properties.sessionID !== session.id) return
+                if (evt.properties.status.type !== "retry") return
+                ready.resolve()
+              }),
+            ),
+          )
 
-  itCompaction.instance(
-    "stops quickly when aborted during retry backoff",
-    () => {
-      const stub = llm()
-      stub.push(
-        Stream.fromAsyncIterable(
-          {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "start" } as LLM.Event
-              throw new APICallError({
-                message: "boom",
-                url: "https://example.com/v1/chat/completions",
-                requestBodyValues: {},
-                statusCode: 503,
-                responseHeaders: { "retry-after-ms": "10000" },
-                responseBody: '{"error":"boom"}',
-                isRetryable: true,
-              })
+          run = rt
+            .runPromiseExit(
+              SessionCompaction.Service.use((svc) =>
+                svc.process({
+                  parentID: msg.id,
+                  messages: msgs,
+                  sessionID: session.id,
+                  auto: false,
+                }),
+              ),
+              { signal: abort.signal },
+            )
+            .then((exit) => {
+              if (Exit.isFailure(exit)) {
+                if (Cause.hasInterrupts(exit.cause) && abort.signal.aborted) return "stop"
+                throw Cause.squash(exit.cause)
+              }
+              return exit.value
+            })
+
+          await Promise.race([
+            ready.promise,
+            wait(1000).then(() => {
+              throw new Error("timed out waiting for retry status")
+            }),
+          ])
+
+          const start = Date.now()
+          abort.abort()
+          const result = await Promise.race([
+            run.then((value) => ({ kind: "done" as const, value, ms: Date.now() - start })),
+            wait(250).then(() => ({ kind: "timeout" as const })),
+          ])
+
+          expect(result.kind).toBe("done")
+          if (result.kind === "done") {
+            expect(result.value).toBe("stop")
+            expect(result.ms).toBeLessThan(250)
+          }
+        } finally {
+          off?.()
+          abort.abort()
+          await rt.dispose()
+          await run?.catch(() => undefined)
+        }
+      },
+    })
+  })
+
+  test("does not leave a summary assistant when aborted before processor setup", async () => {
+    const ready = defer()
+
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await user(session.id, "hello")
+        const msgs = await Session.messages({ sessionID: session.id })
+        const abort = new AbortController()
+        const rt = runtime("continue", plugin(ready), wide())
+        let run: Promise<"continue" | "stop"> | undefined
+        try {
+          run = rt
+            .runPromiseExit(
+              SessionCompaction.Service.use((svc) =>
+                svc.process({
+                  parentID: msg.id,
+                  messages: msgs,
+                  sessionID: session.id,
+                  auto: false,
+                }),
+              ),
+              { signal: abort.signal },
+            )
+            .then((exit) => {
+              if (Exit.isFailure(exit)) {
+                if (Cause.hasInterrupts(exit.cause) && abort.signal.aborted) return "stop"
+                throw Cause.squash(exit.cause)
+              }
+              return exit.value
+            })
+
+          await Promise.race([
+            ready.promise,
+            wait(1000).then(() => {
+              throw new Error("timed out waiting for compaction hook")
+            }),
+          ])
+
+          abort.abort()
+          expect(await run).toBe("stop")
+
+          const all = await Session.messages({ sessionID: session.id })
+          expect(all.some((msg) => msg.info.role === "assistant" && msg.info.summary)).toBe(false)
+        } finally {
+          abort.abort()
+          await rt.dispose()
+          await run?.catch(() => undefined)
+        }
+      },
+    })
+  })
+
+  test("does not allow tool calls while generating the summary", async () => {
+    const stub = llm()
+    stub.push(
+      Stream.make(
+        { type: "start" } satisfies LLM.Event,
+        { type: "tool-input-start", id: "call-1", toolName: "_noop" } satisfies LLM.Event,
+        { type: "tool-call", toolCallId: "call-1", toolName: "_noop", input: {} } satisfies LLM.Event,
+        {
+          type: "finish-step",
+          finishReason: "tool-calls",
+          rawFinishReason: "tool_calls",
+          response: { id: "res", modelId: "test-model", timestamp: new Date() },
+          providerMetadata: undefined,
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            totalTokens: 2,
+            inputTokenDetails: {
+              noCacheTokens: undefined,
+              cacheReadTokens: undefined,
+              cacheWriteTokens: undefined,
+            },
+            outputTokenDetails: {
+              textTokens: undefined,
+              reasoningTokens: undefined,
             },
           },
-          (err) => err,
-        ),
-      )
+        } satisfies LLM.Event,
+        {
+          type: "finish",
+          finishReason: "tool-calls",
+          rawFinishReason: "tool_calls",
+          totalUsage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            totalTokens: 2,
+            inputTokenDetails: {
+              noCacheTokens: undefined,
+              cacheReadTokens: undefined,
+              cacheWriteTokens: undefined,
+            },
+            outputTokenDetails: {
+              textTokens: undefined,
+              reasoningTokens: undefined,
+            },
+          },
+        } satisfies LLM.Event,
+      ),
+    )
 
-      return Effect.gen(function* () {
-        const ssn = yield* SessionNs.Service
-        const bus = yield* Bus.Service
-        const ready = yield* Deferred.make<void>()
-        const session = yield* ssn.create({})
-        const msg = yield* createUserMessage(session.id, "hello")
-        const msgs = yield* ssn.messages({ sessionID: session.id })
-        const off = yield* bus.subscribeCallback(SessionStatus.Event.Status, (evt) => {
-          if (evt.properties.sessionID !== session.id) return
-          if (evt.properties.status.type !== "retry") return
-          Deferred.doneUnsafe(ready, Effect.void)
-        })
-        yield* Effect.addFinalizer(() => Effect.sync(off))
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await user(session.id, "hello")
+        const rt = liveRuntime(stub.layer, wide())
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: msg.id,
+                messages: msgs,
+                sessionID: session.id,
+                auto: false,
+              }),
+            ),
+          )
 
-        const fiber = yield* SessionCompaction.use
-          .process({
-            parentID: msg.id,
-            messages: msgs,
-            sessionID: session.id,
-            auto: false,
-          })
-          .pipe(Effect.forkChild)
+          const summary = (await Session.messages({ sessionID: session.id })).find(
+            (item) => item.info.role === "assistant" && item.info.summary,
+          )
 
-        yield* Deferred.await(ready).pipe(Effect.timeout("1 second"))
-        const start = Date.now()
-        yield* Fiber.interrupt(fiber)
-        const exit = yield* Fiber.await(fiber).pipe(Effect.timeout("250 millis"))
-
-        expect(Exit.isFailure(exit)).toBe(true)
-        if (Exit.isFailure(exit)) {
-          expect(Cause.hasInterrupts(exit.cause)).toBe(true)
-          expect(Date.now() - start).toBeLessThan(250)
+          expect(summary?.info.role).toBe("assistant")
+          expect(summary?.parts.some((part) => part.type === "tool")).toBe(false)
+        } finally {
+          await rt.dispose()
         }
-      }).pipe(withCompaction({ llm: stub.layer }))
-    },
-    { git: true },
-  )
+      },
+    })
+  })
 
-  itCompaction.instance(
-    "does not leave a summary assistant when aborted before processor setup",
-    () =>
-      Effect.gen(function* () {
-        const ready = yield* Deferred.make<void>()
-        return yield* Effect.gen(function* () {
-          const ssn = yield* SessionNs.Service
-          const session = yield* ssn.create({})
-          const msg = yield* createUserMessage(session.id, "hello")
-          const msgs = yield* ssn.messages({ sessionID: session.id })
-          const fiber = yield* SessionCompaction.use
-            .process({
-              parentID: msg.id,
-              messages: msgs,
-              sessionID: session.id,
-              auto: false,
-            })
-            .pipe(Effect.forkChild)
-
-          yield* Deferred.await(ready).pipe(Effect.timeout("1 second"))
-          yield* Fiber.interrupt(fiber)
-          const exit = yield* Fiber.await(fiber).pipe(Effect.timeout("250 millis"))
-          const all = yield* ssn.messages({ sessionID: session.id })
-
-          expect(Exit.isFailure(exit)).toBe(true)
-          if (Exit.isFailure(exit)) expect(Cause.hasInterrupts(exit.cause)).toBe(true)
-          expect(all.some((msg) => msg.info.role === "assistant" && msg.info.summary)).toBe(false)
-        }).pipe(withCompaction({ plugin: plugin(ready) }))
-      }),
-    { git: true },
-  )
-
-  itCompaction.instance(
-    "does not allow tool calls while generating the summary",
-    () => {
-      const stub = llm()
-      stub.push(
-        Stream.make(
-          { type: "start" } satisfies LLM.Event,
-          { type: "tool-input-start", id: "call-1", toolName: "_noop" } satisfies LLM.Event,
-          { type: "tool-call", toolCallId: "call-1", toolName: "_noop", input: {} } satisfies LLM.Event,
-          {
-            type: "finish-step",
-            finishReason: "tool-calls",
-            rawFinishReason: "tool_calls",
-            response: { id: "res", modelId: "test-model", timestamp: new Date() },
-            providerMetadata: undefined,
-            usage: {
-              inputTokens: 1,
-              outputTokens: 1,
-              totalTokens: 2,
-              inputTokenDetails: {
-                noCacheTokens: undefined,
-                cacheReadTokens: undefined,
-                cacheWriteTokens: undefined,
-              },
-              outputTokenDetails: {
-                textTokens: undefined,
-                reasoningTokens: undefined,
-              },
-            },
-          } satisfies LLM.Event,
-          {
-            type: "finish",
-            finishReason: "tool-calls",
-            rawFinishReason: "tool_calls",
-            totalUsage: {
-              inputTokens: 1,
-              outputTokens: 1,
-              totalTokens: 2,
-              inputTokenDetails: {
-                noCacheTokens: undefined,
-                cacheReadTokens: undefined,
-                cacheWriteTokens: undefined,
-              },
-              outputTokenDetails: {
-                textTokens: undefined,
-                reasoningTokens: undefined,
-              },
-            },
-          } satisfies LLM.Event,
-        ),
-      )
-      return Effect.gen(function* () {
-        const ssn = yield* SessionNs.Service
-        const session = yield* ssn.create({})
-        const msg = yield* createUserMessage(session.id, "hello")
-        const msgs = yield* ssn.messages({ sessionID: session.id })
-        yield* SessionCompaction.use.process({ parentID: msg.id, messages: msgs, sessionID: session.id, auto: false })
-
-        const summary = (yield* ssn.messages({ sessionID: session.id })).find(
-          (item) => item.info.role === "assistant" && item.info.summary,
-        )
-
-        expect(summary?.info.role).toBe("assistant")
-        expect(summary?.parts.some((part) => part.type === "tool")).toBe(false)
-      }).pipe(withCompaction({ llm: stub.layer }))
-    },
-    { git: true },
-  )
-
-  itCompaction.instance(
-    "summarizes the head while serializing recent tail into summary input",
-    () => {
-      const stub = llm()
-      let captured: LLM.StreamInput["messages"] = []
-      stub.push(
-        reply("summary", (input) => {
-          captured = input.messages
-        }),
-      )
-      return Effect.gen(function* () {
-        const ssn = yield* SessionNs.Service
-        const session = yield* ssn.create({})
-        yield* createUserMessage(session.id, "older context")
-        yield* createUserMessage(session.id, "keep this turn")
-        yield* createUserMessage(session.id, "and this one too")
-        yield* createCompactionMarker(session.id)
-
-        const msgs = yield* ssn.messages({ sessionID: session.id })
-        const parent = msgs.at(-1)?.info.id
-        expect(parent).toBeTruthy()
-        yield* SessionCompaction.use.process({
-          parentID: parent!,
-          messages: msgs,
+  test("persists tail_start_id for retained recent turns", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await user(session.id, "first")
+        const keep = await user(session.id, "second")
+        await user(session.id, "third")
+        await SessionCompaction.create({
           sessionID: session.id,
+          agent: "build",
+          model: ref,
           auto: false,
         })
 
-        const head = JSON.stringify(captured.slice(0, -1))
-        const prompt = JSON.stringify(captured.at(-1))
-        expect(head).toContain("older context")
-        expect(head).not.toContain("keep this turn")
-        expect(head).not.toContain("and this one too")
-        expect(prompt).toContain("keep this turn")
-        expect(prompt).toContain("and this one too")
-        expect(prompt).toContain("recent-conversation-tail")
-        expect(prompt).not.toContain("What did we do so far?")
-      }).pipe(withCompaction({ llm: stub.layer }))
-    },
-    { git: true },
-  )
+        const rt = runtime(
+          "continue",
+          Plugin.defaultLayer,
+          wide(),
+          cfg({ tail_turns: 2, preserve_recent_tokens: 10_000 }),
+        )
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          const parent = msgs.at(-1)?.info.id
+          expect(parent).toBeTruthy()
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: parent!,
+                messages: msgs,
+                sessionID: session.id,
+                auto: false,
+              }),
+            ),
+          )
 
-  itCompaction.instance(
-    "anchors repeated compactions with the previous summary",
-    () => {
-      const stub = llm()
-      let captured = ""
-      stub.push(reply("summary one"))
-      stub.push(
-        reply("summary two", (input) => {
-          captured = JSON.stringify(input.messages)
-        }),
-      )
-
-      return Effect.gen(function* () {
-        const ssn = yield* SessionNs.Service
-        const session = yield* ssn.create({})
-        yield* createUserMessage(session.id, "older context")
-        yield* createUserMessage(session.id, "keep this turn")
-        yield* createCompactionMarker(session.id)
-
-        let msgs = yield* ssn.messages({ sessionID: session.id })
-        let parent = msgs.at(-1)?.info.id
-        expect(parent).toBeTruthy()
-        yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
-
-        yield* createUserMessage(session.id, "latest turn")
-        yield* createCompactionMarker(session.id)
-
-        msgs = MessageV2.filterCompacted(MessageV2.stream(session.id))
-        parent = msgs.at(-1)?.info.id
-        expect(parent).toBeTruthy()
-        yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
-
-        expect(captured).toContain("<previous-summary>")
-        expect(captured).toContain("summary one")
-        expect(captured.match(/summary one/g)?.length).toBe(1)
-        expect(captured).toContain("## Constraints & Preferences")
-        expect(captured).toContain("## Progress")
-      }).pipe(withCompaction({ llm: stub.layer }))
-    },
-    { git: true },
-  )
-
-  itCompaction.instance("does not replay recent pre-compaction turns across repeated compactions", () => {
-    const stub = llm()
-    stub.push(reply("summary one"))
-    stub.push(reply("summary two"))
-
-    return Effect.gen(function* () {
-      const ssn = yield* SessionNs.Service
-      const session = yield* ssn.create({})
-      const u1 = yield* createUserMessage(session.id, "one")
-      const u2 = yield* createUserMessage(session.id, "two")
-      const u3 = yield* createUserMessage(session.id, "three")
-      yield* createCompactionMarker(session.id)
-
-      let msgs = yield* ssn.messages({ sessionID: session.id })
-      let parent = msgs.at(-1)?.info.id
-      expect(parent).toBeTruthy()
-      yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
-
-      const u4 = yield* createUserMessage(session.id, "four")
-      yield* createCompactionMarker(session.id)
-
-      msgs = MessageV2.filterCompacted(MessageV2.stream(session.id))
-      parent = msgs.at(-1)?.info.id
-      expect(parent).toBeTruthy()
-      yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
-
-      const filtered = MessageV2.filterCompacted(MessageV2.stream(session.id))
-      const ids = filtered.map((msg) => msg.info.id)
-
-      expect(ids).not.toContain(u1.id)
-      expect(ids).not.toContain(u2.id)
-      expect(ids).not.toContain(u3.id)
-      expect(ids).not.toContain(u4.id)
-      expect(filtered.some((msg) => msg.info.role === "assistant" && msg.info.summary)).toBe(true)
-      expect(
-        filtered.some((msg) => msg.info.role === "user" && msg.parts.some((part) => part.type === "compaction")),
-      ).toBe(true)
-    }).pipe(withCompaction({ llm: stub.layer, config: cfg({ tail_turns: 2, preserve_recent_tokens: 10_000 }) }))
+          const part = await lastCompactionPart(session.id)
+          expect(part?.type).toBe("compaction")
+          expect(part?.tail_start_id).toBe(keep.id)
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
   })
 
-  itCompaction.instance(
-    "ignores previous summaries when sizing the serialized tail",
-    Effect.gen(function* () {
-      const ssn = yield* SessionNs.Service
-      const test = yield* TestInstance
-      const session = yield* ssn.create({})
-      yield* createUserMessage(session.id, "older")
-      const keep = yield* createUserMessage(session.id, "keep this turn")
-      const keepReply = yield* createAssistantMessage(session.id, keep.id, test.directory)
-      yield* ssn.updatePart({
-        id: PartID.ascending(),
-        messageID: keepReply.id,
-        sessionID: session.id,
-        type: "text",
-        text: "keep reply",
-      })
+  test("shrinks retained tail to fit preserve token budget", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await user(session.id, "first")
+        await user(session.id, "x".repeat(2_000))
+        const keep = await user(session.id, "tiny")
+        await SessionCompaction.create({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          auto: false,
+        })
 
-      yield* createCompactionMarker(session.id)
-      const firstCompaction = (yield* ssn.messages({ sessionID: session.id })).at(-1)?.info.id
-      expect(firstCompaction).toBeTruthy()
-      yield* createSummaryAssistantMessage(session.id, firstCompaction!, test.directory, "summary ".repeat(800))
+        const rt = runtime("continue", Plugin.defaultLayer, wide(), cfg({ tail_turns: 2, preserve_recent_tokens: 100 }))
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          const parent = msgs.at(-1)?.info.id
+          expect(parent).toBeTruthy()
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: parent!,
+                messages: msgs,
+                sessionID: session.id,
+                auto: false,
+              }),
+            ),
+          )
 
-      const recent = yield* createUserMessage(session.id, "recent turn")
-      const recentReply = yield* createAssistantMessage(session.id, recent.id, test.directory)
-      yield* ssn.updatePart({
-        id: PartID.ascending(),
-        messageID: recentReply.id,
-        sessionID: session.id,
-        type: "text",
-        text: "recent reply",
-      })
+          const part = await lastCompactionPart(session.id)
+          expect(part?.type).toBe("compaction")
+          expect(part?.tail_start_id).toBe(keep.id)
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
 
-      yield* createCompactionMarker(session.id)
-      const msgs = yield* ssn.messages({ sessionID: session.id })
-      const parent = msgs.at(-1)?.info.id
-      expect(parent).toBeTruthy()
-      yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
+  test("falls back to full summary when even one recent turn exceeds preserve token budget", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const stub = llm()
+    let captured = ""
+    stub.push(
+      reply("summary", (input) => {
+        captured = JSON.stringify(input.messages)
+      }),
+    )
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await user(session.id, "first")
+        await user(session.id, "y".repeat(2_000))
+        await SessionCompaction.create({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          auto: false,
+        })
 
-      const part = yield* readCompactionPart(session.id)
-      expect(part?.type).toBe("compaction")
-      expect(part?.tail_start_id).toBeUndefined()
-    }).pipe(withCompaction({ config: cfg({ tail_turns: 2, preserve_recent_tokens: 500 }) })),
-  )
+        const rt = liveRuntime(stub.layer, wide(), cfg({ tail_turns: 1, preserve_recent_tokens: 20 }))
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          const parent = msgs.at(-1)?.info.id
+          expect(parent).toBeTruthy()
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: parent!,
+                messages: msgs,
+                sessionID: session.id,
+                auto: false,
+              }),
+            ),
+          )
+
+          const part = await lastCompactionPart(session.id)
+          expect(part?.type).toBe("compaction")
+          expect(part?.tail_start_id).toBeUndefined()
+          expect(captured).toContain("yyyy")
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
+
+  test("summarizes only the head while keeping recent tail out of summary input", async () => {
+    const stub = llm()
+    let captured = ""
+    stub.push(
+      reply("summary", (input) => {
+        captured = JSON.stringify(input.messages)
+      }),
+    )
+
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await user(session.id, "older context")
+        await user(session.id, "keep this turn")
+        await user(session.id, "and this one too")
+        await SessionCompaction.create({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          auto: false,
+        })
+
+        const rt = liveRuntime(stub.layer, wide())
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          const parent = msgs.at(-1)?.info.id
+          expect(parent).toBeTruthy()
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: parent!,
+                messages: msgs,
+                sessionID: session.id,
+                auto: false,
+              }),
+            ),
+          )
+
+          expect(captured).toContain("older context")
+          expect(captured).not.toContain("keep this turn")
+          expect(captured).not.toContain("and this one too")
+          expect(captured).not.toContain("What did we do so far?")
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
+
+  test("anchors repeated compactions with the previous summary", async () => {
+    const stub = llm()
+    let captured = ""
+    stub.push(reply("summary one"))
+    stub.push(
+      reply("summary two", (input) => {
+        captured = JSON.stringify(input.messages)
+      }),
+    )
+
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await user(session.id, "older context")
+        await user(session.id, "keep this turn")
+        await SessionCompaction.create({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          auto: false,
+        })
+
+        const rt = liveRuntime(stub.layer, wide())
+        try {
+          let msgs = await Session.messages({ sessionID: session.id })
+          let parent = msgs.at(-1)?.info.id
+          expect(parent).toBeTruthy()
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: parent!,
+                messages: msgs,
+                sessionID: session.id,
+                auto: false,
+              }),
+            ),
+          )
+
+          await user(session.id, "latest turn")
+          await SessionCompaction.create({
+            sessionID: session.id,
+            agent: "build",
+            model: ref,
+            auto: false,
+          })
+
+          msgs = MessageV2.filterCompacted(MessageV2.stream(session.id))
+          parent = msgs.at(-1)?.info.id
+          expect(parent).toBeTruthy()
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: parent!,
+                messages: msgs,
+                sessionID: session.id,
+                auto: false,
+              }),
+            ),
+          )
+
+          expect(captured).toContain("<previous-summary>")
+          expect(captured).toContain("summary one")
+          expect(captured.match(/summary one/g)?.length).toBe(1)
+          expect(captured).toContain("## Goal")
+          expect(captured).toContain("## What Happened")
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
+
+  test("ignores previous summaries when sizing the retained tail", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await user(session.id, "older")
+        const keep = await user(session.id, "keep this turn")
+        const keepReply = await assistant(session.id, keep.id, tmp.path)
+        await Session.updatePart({
+          id: PartID.ascending(),
+          messageID: keepReply.id,
+          sessionID: session.id,
+          type: "text",
+          text: "keep reply",
+        })
+
+        await SessionCompaction.create({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          auto: false,
+        })
+        const firstCompaction = (await Session.messages({ sessionID: session.id })).at(-1)?.info.id
+        expect(firstCompaction).toBeTruthy()
+        await summaryAssistant(session.id, firstCompaction!, tmp.path, "summary ".repeat(800))
+
+        const recent = await user(session.id, "recent turn")
+        const recentReply = await assistant(session.id, recent.id, tmp.path)
+        await Session.updatePart({
+          id: PartID.ascending(),
+          messageID: recentReply.id,
+          sessionID: session.id,
+          type: "text",
+          text: "recent reply",
+        })
+
+        await SessionCompaction.create({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          auto: false,
+        })
+
+        const rt = runtime("continue", Plugin.defaultLayer, wide(), cfg({ tail_turns: 2, preserve_recent_tokens: 500 }))
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          const parent = msgs.at(-1)?.info.id
+          expect(parent).toBeTruthy()
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({
+                parentID: parent!,
+                messages: msgs,
+                sessionID: session.id,
+                auto: false,
+              }),
+            ),
+          )
+
+          const part = await lastCompactionPart(session.id)
+          expect(part?.type).toBe("compaction")
+          expect(part?.tail_start_id).toBe(keep.id)
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
 })
 
 describe("util.token.estimate", () => {
@@ -1538,24 +1551,15 @@ describe("util.token.estimate", () => {
   })
 })
 
-describe("SessionNs.getUsage", () => {
+describe("session.getUsage", () => {
   test("normalizes standard usage to token format", () => {
     const model = createModel({ context: 100_000, output: 32_000 })
-    const result = SessionNs.getUsage({
+    const result = Session.getUsage({
       model,
       usage: {
         inputTokens: 1000,
         outputTokens: 500,
         totalTokens: 1500,
-        inputTokenDetails: {
-          noCacheTokens: undefined,
-          cacheReadTokens: undefined,
-          cacheWriteTokens: undefined,
-        },
-        outputTokenDetails: {
-          textTokens: undefined,
-          reasoningTokens: undefined,
-        },
       },
     })
 
@@ -1568,21 +1572,13 @@ describe("SessionNs.getUsage", () => {
 
   test("extracts cached tokens to cache.read", () => {
     const model = createModel({ context: 100_000, output: 32_000 })
-    const result = SessionNs.getUsage({
+    const result = Session.getUsage({
       model,
       usage: {
         inputTokens: 1000,
         outputTokens: 500,
         totalTokens: 1500,
-        inputTokenDetails: {
-          noCacheTokens: 800,
-          cacheReadTokens: 200,
-          cacheWriteTokens: undefined,
-        },
-        outputTokenDetails: {
-          textTokens: undefined,
-          reasoningTokens: undefined,
-        },
+        cachedInputTokens: 200,
       },
     })
 
@@ -1592,21 +1588,12 @@ describe("SessionNs.getUsage", () => {
 
   test("handles anthropic cache write metadata", () => {
     const model = createModel({ context: 100_000, output: 32_000 })
-    const result = SessionNs.getUsage({
+    const result = Session.getUsage({
       model,
       usage: {
         inputTokens: 1000,
         outputTokens: 500,
         totalTokens: 1500,
-        inputTokenDetails: {
-          noCacheTokens: undefined,
-          cacheReadTokens: undefined,
-          cacheWriteTokens: undefined,
-        },
-        outputTokenDetails: {
-          textTokens: undefined,
-          reasoningTokens: undefined,
-        },
       },
       metadata: {
         anthropic: {
@@ -1621,21 +1608,13 @@ describe("SessionNs.getUsage", () => {
   test("subtracts cached tokens for anthropic provider", () => {
     const model = createModel({ context: 100_000, output: 32_000 })
     // AI SDK v6 normalizes inputTokens to include cached tokens for all providers
-    const result = SessionNs.getUsage({
+    const result = Session.getUsage({
       model,
       usage: {
         inputTokens: 1000,
         outputTokens: 500,
         totalTokens: 1500,
-        inputTokenDetails: {
-          noCacheTokens: 800,
-          cacheReadTokens: 200,
-          cacheWriteTokens: undefined,
-        },
-        outputTokenDetails: {
-          textTokens: undefined,
-          reasoningTokens: undefined,
-        },
+        cachedInputTokens: 200,
       },
       metadata: {
         anthropic: {},
@@ -1648,21 +1627,13 @@ describe("SessionNs.getUsage", () => {
 
   test("separates reasoning tokens from output tokens", () => {
     const model = createModel({ context: 100_000, output: 32_000 })
-    const result = SessionNs.getUsage({
+    const result = Session.getUsage({
       model,
       usage: {
         inputTokens: 1000,
         outputTokens: 500,
         totalTokens: 1500,
-        inputTokenDetails: {
-          noCacheTokens: undefined,
-          cacheReadTokens: undefined,
-          cacheWriteTokens: undefined,
-        },
-        outputTokenDetails: {
-          textTokens: 400,
-          reasoningTokens: 100,
-        },
+        reasoningTokens: 100,
       },
     })
 
@@ -1682,21 +1653,13 @@ describe("SessionNs.getUsage", () => {
         cache: { read: 0, write: 0 },
       },
     })
-    const result = SessionNs.getUsage({
+    const result = Session.getUsage({
       model,
       usage: {
         inputTokens: 0,
         outputTokens: 1_000_000,
         totalTokens: 1_000_000,
-        inputTokenDetails: {
-          noCacheTokens: undefined,
-          cacheReadTokens: undefined,
-          cacheWriteTokens: undefined,
-        },
-        outputTokenDetails: {
-          textTokens: 750_000,
-          reasoningTokens: 250_000,
-        },
+        reasoningTokens: 250_000,
       },
     })
 
@@ -1707,21 +1670,12 @@ describe("SessionNs.getUsage", () => {
 
   test("handles undefined optional values gracefully", () => {
     const model = createModel({ context: 100_000, output: 32_000 })
-    const result = SessionNs.getUsage({
+    const result = Session.getUsage({
       model,
       usage: {
         inputTokens: 0,
         outputTokens: 0,
         totalTokens: 0,
-        inputTokenDetails: {
-          noCacheTokens: undefined,
-          cacheReadTokens: undefined,
-          cacheWriteTokens: undefined,
-        },
-        outputTokenDetails: {
-          textTokens: undefined,
-          reasoningTokens: undefined,
-        },
       },
     })
 
@@ -1743,21 +1697,12 @@ describe("SessionNs.getUsage", () => {
         cache: { read: 0.3, write: 3.75 },
       },
     })
-    const result = SessionNs.getUsage({
+    const result = Session.getUsage({
       model,
       usage: {
         inputTokens: 1_000_000,
         outputTokens: 100_000,
         totalTokens: 1_100_000,
-        inputTokenDetails: {
-          noCacheTokens: undefined,
-          cacheReadTokens: undefined,
-          cacheWriteTokens: undefined,
-        },
-        outputTokenDetails: {
-          textTokens: undefined,
-          reasoningTokens: undefined,
-        },
       },
     })
 
@@ -1773,18 +1718,10 @@ describe("SessionNs.getUsage", () => {
         inputTokens: 1000,
         outputTokens: 500,
         totalTokens: 1500,
-        inputTokenDetails: {
-          noCacheTokens: 800,
-          cacheReadTokens: 200,
-          cacheWriteTokens: undefined,
-        },
-        outputTokenDetails: {
-          textTokens: undefined,
-          reasoningTokens: undefined,
-        },
+        cachedInputTokens: 200,
       }
       if (npm === "@ai-sdk/amazon-bedrock") {
-        const result = SessionNs.getUsage({
+        const result = Session.getUsage({
           model,
           usage,
           metadata: {
@@ -1805,7 +1742,7 @@ describe("SessionNs.getUsage", () => {
         return
       }
 
-      const result = SessionNs.getUsage({
+      const result = Session.getUsage({
         model,
         usage,
         metadata: {
@@ -1826,21 +1763,13 @@ describe("SessionNs.getUsage", () => {
 
   test("extracts cache write tokens from vertex metadata key", () => {
     const model = createModel({ context: 100_000, output: 32_000, npm: "@ai-sdk/google-vertex/anthropic" })
-    const result = SessionNs.getUsage({
+    const result = Session.getUsage({
       model,
       usage: {
         inputTokens: 1000,
         outputTokens: 500,
         totalTokens: 1500,
-        inputTokenDetails: {
-          noCacheTokens: 800,
-          cacheReadTokens: 200,
-          cacheWriteTokens: undefined,
-        },
-        outputTokenDetails: {
-          textTokens: undefined,
-          reasoningTokens: undefined,
-        },
+        cachedInputTokens: 200,
       },
       metadata: {
         vertex: {
@@ -1852,5 +1781,161 @@ describe("SessionNs.getUsage", () => {
     expect(result.tokens.input).toBe(500)
     expect(result.tokens.cache.read).toBe(200)
     expect(result.tokens.cache.write).toBe(300)
+  })
+
+  test("uses matching context cost tier before over-200k fallback", () => {
+    const model = createModel({
+      context: 1_000_000,
+      output: 32_000,
+      cost: {
+        input: 1,
+        output: 2,
+        cache: { read: 0.1, write: 0.5 },
+        tiers: [
+          {
+            input: 3,
+            output: 4,
+            cache: { read: 0.3, write: 1.5 },
+            tier: { type: "context", size: 200_000 },
+          },
+          {
+            input: 5,
+            output: 6,
+            cache: { read: 0.5, write: 2.5 },
+            tier: { type: "context", size: 500_000 },
+          },
+        ],
+        experimentalOver200K: {
+          input: 100,
+          output: 100,
+          cache: { read: 100, write: 100 },
+        },
+      },
+    })
+    const result = Session.getUsage({
+      model,
+      usage: {
+        inputTokens: 650_000,
+        outputTokens: 100_000,
+        totalTokens: 750_000,
+        cachedInputTokens: 100_000,
+      },
+    })
+
+    expect(result.tokens.input).toBe(550_000)
+    expect(result.cost).toBe(2.75 + 0.6 + 0.05)
+  })
+
+  test("falls back to over-200k pricing when no cost tier matches", () => {
+    const model = createModel({
+      context: 1_000_000,
+      output: 32_000,
+      cost: {
+        input: 1,
+        output: 2,
+        cache: { read: 0.1, write: 0.5 },
+        tiers: [
+          {
+            input: 5,
+            output: 6,
+            cache: { read: 0.5, write: 2.5 },
+            tier: { type: "context", size: 500_000 },
+          },
+        ],
+        experimentalOver200K: {
+          input: 3,
+          output: 4,
+          cache: { read: 0.3, write: 1.5 },
+        },
+      },
+    })
+    const result = Session.getUsage({
+      model,
+      usage: {
+        inputTokens: 300_000,
+        outputTokens: 100_000,
+        totalTokens: 400_000,
+      },
+    })
+
+    expect(result.tokens.input).toBe(300_000)
+    expect(result.cost).toBe((300_000 * 3) / 1_000_000 + (100_000 * 4) / 1_000_000)
+  })
+})
+
+describe("session.compaction.prune aggressive", () => {
+  test("aggressive mode uses lower threshold", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const a = await user(session.id, "first")
+        const b = await assistant(session.id, a.id, tmp.path)
+        // 100_000 chars = 25_000 tokens, above PRUNE_PROTECT/2 (20_000) but below PRUNE_PROTECT (40_000)
+        await tool(session.id, b.id, "bash", "x".repeat(100_000))
+        await user(session.id, "second")
+        await user(session.id, "third")
+
+        await SessionCompaction.prune({ sessionID: session.id, aggressive: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+        expect(part?.type).toBe("tool")
+        if (part?.type === "tool" && part.state.status === "completed") {
+          expect(part.state.time.compacted).toBeNumber()
+        }
+      },
+    })
+  })
+
+  test("non-aggressive mode does not prune below full threshold", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const a = await user(session.id, "first")
+        const b = await assistant(session.id, a.id, tmp.path)
+        // 100_000 chars = 25_000 tokens, below PRUNE_PROTECT (40_000)
+        await tool(session.id, b.id, "bash", "x".repeat(100_000))
+        await user(session.id, "second")
+        await user(session.id, "third")
+
+        await SessionCompaction.prune({ sessionID: session.id })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+        expect(part?.type).toBe("tool")
+        if (part?.type === "tool" && part.state.status === "completed") {
+          expect(part.state.time.compacted).toBeUndefined()
+        }
+      },
+    })
+  })
+
+  test("aggressive flag is optional and defaults to non-aggressive", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const a = await user(session.id, "first")
+        const b = await assistant(session.id, a.id, tmp.path)
+        // 200_000 chars = 50_000 tokens, above PRUNE_PROTECT (40_000) — prunes without aggressive
+        await tool(session.id, b.id, "bash", "x".repeat(200_000))
+        await user(session.id, "second")
+        await user(session.id, "third")
+
+        await SessionCompaction.prune({ sessionID: session.id })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+        expect(part?.type).toBe("tool")
+        if (part?.type === "tool" && part.state.status === "completed") {
+          expect(part.state.time.compacted).toBeNumber()
+        }
+      },
+    })
   })
 })
