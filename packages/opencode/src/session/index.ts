@@ -512,7 +512,7 @@ export namespace Session {
             if (!cfg.experimental?.hooks) return
             const rules = await Hook.load()
             await Effect.runPromise(Hook.dispatch("Stop", { sessionID }, rules).pipe(Effect.asVoid, Effect.ignore))
-          }).pipe(Effect.ignore)
+          }).pipe(Effect.catchCause(() => Effect.void))
           const kids = yield* children(sessionID)
           for (const child of kids) {
             yield* remove(child.id)

@@ -735,7 +735,7 @@ export namespace MessageV2 {
         }
         const hasSignedReasoning = msg.parts.some((part) => {
           if (part.type !== "reasoning") return false
-          return part.metadata?.anthropic?.signature != null
+          return part.metadata?.anthropic?.signature != null || part.metadata?.bedrock?.signature != null
         })
         for (const part of msg.parts) {
           if (part.type === "text") {
@@ -1046,6 +1046,16 @@ export namespace MessageV2 {
   export const filterCompactedEffect = Effect.fnUntraced(function* (sessionID: SessionID) {
     return filterCompacted(stream(sessionID))
   })
+
+  /**
+   * Returns a stable order-aware fingerprint for a message list. // [fork-perf] cache-stability
+   * Detects reorders (e.g. filterCompacted) that don't change array length but
+   * would break Anthropic cache breakpoints.
+   * Format: "id:partsLen|id:partsLen|..."
+   */
+  export function msgsFingerprint(msgs: WithParts[]): string {
+    return msgs.map((m) => `${m.info.id}:${m.parts.length}`).join("|")
+  }
 
   // filterCompacted reorders messages for model consumption
   // ([compaction-user, summary, ...retained tail..., continue-user]), so array

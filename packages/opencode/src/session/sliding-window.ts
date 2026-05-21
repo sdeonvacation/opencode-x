@@ -54,8 +54,16 @@ export namespace SlidingWindow {
   export const compact = Effect.fn("SlidingWindow.compact")(function* (input: CompactInput) {
     if (!should(input)) return input.msgs
 
-    if (input.cfg.experimental?.cache_sliding_window) {
-      const key = `${input.msgs.length}:${input.msgs.at(-1)?.info.id}`
+    // [fork-perf] cache-stability: auto-enable cache when sliding-window enabled.
+    // peekCompacted synthetic restoration only fires when this flag is set; without
+    // it, the synthetic re-generates every loop iteration and we re-summarise
+    // the same head — defeats the optimisation. Default true when feature on.
+    const cacheEnabled = input.cfg.experimental?.cache_sliding_window !== false
+    if (cacheEnabled) {
+      // [fork-perf] cache-stability: order-aware fingerprint as cache key —
+      // filterCompacted reorders (same length, same last id, different order)
+      // must invalidate the cache so we don't serve a stale generation.
+      const key = MessageV2.msgsFingerprint(input.msgs)
       const prev = lastCompact.get(input.sessionID)
       if (prev && lastGen.get(input.sessionID) === key) {
         log.info("cache_generation_hit", { sessionID: input.sessionID })
@@ -72,7 +80,7 @@ export namespace SlidingWindow {
     const opts = input.cfg.compaction?.sliding_window
     const threshold = opts?.threshold ?? deriveThresholdFromConfig(input.model, opts) ?? 50_000 // [fork-perf] Phase 5: proactive_ratio support
 
-    const caching = input.cfg.experimental?.cache_sliding_window
+    const caching = input.cfg.experimental?.cache_sliding_window !== false // [fork-perf] default-on
     const stash = (out: MessageV2.WithParts[]) => {
       if (caching) lastCompact.set(input.sessionID, out)
       return out
@@ -179,6 +187,17 @@ export namespace SlidingWindow {
     lastGen.delete(sessionID)
     lastCompact.delete(sessionID)
     log.info("invalidate", { sessionID })
+  }
+
+  /**
+   * Returns the last compacted message array for a session. // [fork-perf] cache-stability
+   * Callers (agent loop) restore the in-memory synthetic summary message
+   * across iterations — the synthetic is never persisted to DB so
+   * filterCompactedEffect cannot see it. Without restoration, the
+   * SlidingWindow optimisation is undone every loop.
+   */
+  export function peekCompacted(sessionID: SessionID): MessageV2.WithParts[] | undefined {
+    return lastCompact.get(sessionID)
   }
 
   // [fork-perf] Phase 5: derive threshold from proactive_ratio * model context limit

@@ -416,9 +416,9 @@ export namespace LLM {
     const result = new Map<string, ToolMeta>()
     for (const key of Object.keys(tools)) {
       const meta = input.toolMeta?.get(key)
-      // [fork-perf] treat function-form parallelSafe as statically safe for the parallel gate; dynamic evaluation is Phase 3
-      const isStaticSafe = meta?.parallelSafe === true || typeof meta?.parallelSafe === "function"
-      result.set(key, { parallelSafe: isStaticSafe })
+      // [fork-perf] only static `parallelSafe: true` qualifies at request-time.
+      // Function-form predicates are input-dependent — Phase 3 dispatcher's job.
+      result.set(key, { parallelSafe: meta?.parallelSafe === true })
     }
     return result
   }

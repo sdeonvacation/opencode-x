@@ -325,6 +325,8 @@ export namespace ProviderTransform {
     for (const msg of targets) {
       const useMessageLevelOptions =
         model.providerID === "anthropic" ||
+        model.providerID === "google-vertex-anthropic" || // [fork-perf] cache-stability fix
+        model.api.npm === "@ai-sdk/google-vertex/anthropic" || // [fork-perf] cache-stability fix
         model.providerID.includes("bedrock") ||
         model.api.npm === "@ai-sdk/amazon-bedrock"
       const shouldUseContentOptions = !useMessageLevelOptions && Array.isArray(msg.content) && msg.content.length > 0
@@ -417,7 +419,7 @@ export namespace ProviderTransform {
     const keys = Object.keys(tools)
     if (keys.length === 0) return tools
 
-    const hash = keys.join(",")
+    const hash = [...keys].sort().join(",") // [fork-perf] cache-stability fix
     const key = sessionID ? `${sessionID}:${model.id}` : undefined
 
     if (key) {
@@ -1178,9 +1180,8 @@ export namespace ProviderTransform {
     }
   }) {
     if (input.provider?.parallelToolCalls === false) return {}
-    if (!input.enabled) return {}
     if (input.model.api.npm === "@ai-sdk/openai" || input.model.api.npm === "@ai-sdk/github-copilot") {
-      return { parallelToolCalls: true }
+      return { parallelToolCalls: input.enabled }
     }
     return {}
   }
