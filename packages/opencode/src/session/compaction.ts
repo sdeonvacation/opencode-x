@@ -41,8 +41,8 @@ export namespace SessionCompaction {
   const DEFAULT_TAIL_TURNS = 2
   const MIN_PRESERVE_RECENT_TOKENS = 2_000
   const MAX_PRESERVE_RECENT_TOKENS = 8_000
-  export const SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the section order unchanged:
----
+  export const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
+<template>
 ## Goal
 - [1-2 sentence summary of the overall session task — not just the first user message]
 
@@ -67,7 +67,7 @@ export namespace SessionCompaction {
 ## Next Steps
 - [numbered, specific actions: file to edit, what to change, test to run]
 - [or "(none)"]
----
+</template>
 
 Rules:
 - Keep every section, even when empty (use "(none)").
