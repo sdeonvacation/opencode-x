@@ -34,7 +34,7 @@ export namespace Tool {
     id: string
     description: string
     parameters: Parameters
-    parallelSafe?: boolean
+    parallelSafe?: boolean | ((input: z.infer<Parameters>) => boolean) // [fork-perf] function form for input-aware safety
     execute(
       args: z.infer<Parameters>,
       ctx: Context,
@@ -54,8 +54,19 @@ export namespace Tool {
 
   export interface Info<Parameters extends z.ZodType = z.ZodType, M extends Metadata = Metadata> {
     id: string
-    parallelSafe?: boolean
+    parallelSafe?: boolean | ((input: any) => boolean) // [fork-perf] function form for input-aware safety
     init: (ctx?: InitContext) => Promise<DefWithoutID<Parameters, M>>
+  }
+
+  /**
+   * [fork-perf] Evaluate the parallelSafe field of a Tool.Info against a concrete input.
+   * Returns false when undefined; calls the function when it is a predicate; returns the boolean as-is.
+   */
+  export function evalParallelSafe(info: Pick<Info, "parallelSafe">, input: any): boolean {
+    const ps = info.parallelSafe
+    if (ps === undefined) return false
+    if (typeof ps === "function") return ps(input)
+    return ps
   }
 
   export type InferParameters<T> =
@@ -116,10 +127,11 @@ export namespace Tool {
   export function define<Parameters extends z.ZodType, Result extends Metadata, ID extends string = string>(
     id: ID,
     init: ((ctx?: InitContext) => Promise<DefWithoutID<Parameters, Result>>) | DefWithoutID<Parameters, Result>,
+    parallelSafeOverride?: boolean | ((input: any) => boolean), // [fork-perf] explicit override for function-based tool defs
   ): Info<Parameters, Result> & { id: ID } {
     return {
       id,
-      parallelSafe: init instanceof Function ? undefined : init.parallelSafe,
+      parallelSafe: parallelSafeOverride ?? (init instanceof Function ? undefined : init.parallelSafe), // [fork-perf]
       init: wrap(id, init),
     }
   }

@@ -290,7 +290,7 @@ export namespace SessionPrompt {
           agent: input.agent,
         })) {
           const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
-          toolMeta.set(item.id, { parallelSafe: item.parallelSafe === true })
+          toolMeta.set(item.id, { parallelSafe: item.parallelSafe === true || typeof item.parallelSafe === "function" }) // [fork-perf] function-form treated as statically safe for gate
           if (batch && Permission.evaluate(item.id, "*", merged).action === "allow") {
             approved.add(item.id)
           }

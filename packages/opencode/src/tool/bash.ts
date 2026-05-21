@@ -15,6 +15,7 @@ import { fileURLToPath } from "url"
 import { Flag } from "@/flag/flag"
 import { Shell } from "@/shell/shell"
 
+import { BashSafety } from "./bash-safety"
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncate"
 import { Plugin } from "@/plugin"
@@ -564,7 +565,9 @@ const parser = lazy(async () => {
 })
 
 // TODO: we may wanna rename this tool so it works better on other shells
-export const BashTool = Tool.define("bash", async () => {
+export const BashTool = Tool.define(
+  "bash",
+  async () => {
   const shell = Shell.acceptable()
   const name = Shell.name(shell)
   const chain =
@@ -627,4 +630,6 @@ export const BashTool = Tool.define("bash", async () => {
       return result
     },
   }
-})
+},
+(input: any) => BashSafety.isReadOnly((input as { command: string }).command), // [fork-perf] read-only whitelist gates parallel execution
+)

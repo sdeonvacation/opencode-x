@@ -38,7 +38,8 @@ describe("tool parallelSafe metadata", () => {
   })
 
   test("leaves stateful tools non-parallel-safe", () => {
-    expect(BashTool.parallelSafe).toBeUndefined()
+    // [fork-perf] BashTool now carries a function predicate for read-only command detection (Phase 2)
+    expect(typeof BashTool.parallelSafe).toBe("function")
     expect(EditTool.parallelSafe).toBeUndefined()
     expect(WriteTool.parallelSafe).toBeUndefined()
     // TaskTool is an Effect-based tool; parallelSafe is evaluated after init
