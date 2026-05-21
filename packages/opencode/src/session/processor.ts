@@ -102,6 +102,7 @@ export namespace SessionProcessor {
     lastSnapshotAt?: string // [fork-perf] Phase 4: hash of last successful track()
     doomLoop: DoomLoopDetector.DoomLoopDetector | undefined // [fork-perf] Phase 1B: ring-buffer detector
     compactedReactively: boolean // [fork-perf] Phase 5: prevent double-compact on retry
+    agentPermission: Permission.Ruleset // [fork-perf] doom-loop: per-process agent permission ruleset
   }
 
   type StreamEvent = Event
@@ -181,6 +182,7 @@ export namespace SessionProcessor {
           lastSnapshotAt: undefined, // [fork-perf] Phase 4
           doomLoop: doomLoopDetector, // [fork-perf] Phase 1B
           compactedReactively: false, // [fork-perf] Phase 5
+          agentPermission: [], // [fork-perf] doom-loop: set per-process from streamInput.agent
         }
         let aborted = false
 
@@ -495,14 +497,13 @@ export namespace SessionProcessor {
                 return
               }
 
-              const agent = yield* agents.get(ctx.assistantMessage.agent)
               yield* permission.ask({
                 permission: "doom_loop",
                 patterns: [value.toolName],
                 sessionID: ctx.assistantMessage.sessionID,
                 metadata: { tool: value.toolName, input: value.input },
                 always: [value.toolName],
-                ruleset: agent.permission,
+                ruleset: ctx.agentPermission, // [fork-perf] doom-loop: use per-process ruleset
               })
               return
             }
@@ -721,6 +722,7 @@ export namespace SessionProcessor {
           ctx.hadText = false
           ctx.hadToolCalls = false
           ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
+          ctx.agentPermission = streamInput.agent.permission // [fork-perf] doom-loop: use streamInput agent ruleset
 
           // [fork-perf] Phase 5: inner runStream extracted so reactive compact can retry once
           const runStream = (input: LLM.StreamInput) =>
