@@ -1079,6 +1079,43 @@ describe("session.message-v2.toModelMessage", () => {
       expect(toolCall.providerOptions).not.toHaveProperty("terminal")
     }
   })
+
+  // [fork-perf] regression: reasoning parts with empty text + valid anthropic
+  // signature must round-trip with the signature intact. AI SDK's
+  // ProviderTransform.applyCaching keeps these (transform.ts:64-73) — losing
+  // the signature mid-prefix invalidates Anthropic's prompt cache and
+  // produces a 400 on next turn.
+  test("preserves anthropic signature on empty-text reasoning part", async () => {
+    const messageID = "m-asst"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("m-user"),
+        parts: [{ ...basePart("m-user", "p1"), type: "text", text: "hi" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(messageID, "m-user"),
+        parts: [
+          {
+            ...basePart(messageID, "r1"),
+            type: "reasoning",
+            text: "",
+            metadata: { anthropic: { signature: "sig_test_abc123" } },
+            time: { start: 0, end: 1 },
+          },
+          {
+            ...basePart(messageID, "t1"),
+            type: "text",
+            text: "answer",
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+    const result = await MessageV2.toModelMessages(input, model)
+    const assistantMsg = result.find((m) => m.role === "assistant") as any
+    const reasoning = (assistantMsg.content as any[]).find((c) => c.type === "reasoning")
+    expect(reasoning).toBeDefined()
+    expect(reasoning.providerOptions?.anthropic?.signature).toBe("sig_test_abc123")
+  })
 })
 
 describe("session.message-v2.fromError", () => {
@@ -1351,5 +1388,206 @@ describe("session.message-v2.latest", () => {
     expect(state.user?.id).toBe(NEW_COMPACTION_USER)
     expect(state.tasks).toHaveLength(1)
     expect(state.tasks[0]).toMatchObject({ type: "compaction", auto: true })
+  })
+})
+
+describe("session.message-v2.stripThinkingTags", () => {
+  // Test 1: default off — flag false leaves text unchanged
+  test("default off: text with thinking tags is unchanged when flag not set", async () => {
+    const msgID = "m-strip-off"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("u-strip-off"),
+        parts: [{ ...basePart("u-strip-off", "u1"), type: "text", text: "hello" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(msgID, "u-strip-off"),
+        parts: [
+          { ...basePart(msgID, "a1"), type: "step-start" },
+          { ...basePart(msgID, "a2"), type: "text", text: "<thinking>foo</thinking>bar" },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model, { stripThinkingText: false })
+    const assistantMsg = result.find((m) => m.role === "assistant")
+    expect(assistantMsg).toBeDefined()
+    const textContent = (assistantMsg!.content as { type: string; text?: string }[]).find(
+      (c) => c.type === "text",
+    )
+    expect(textContent?.text).toBe("<thinking>foo</thinking>bar")
+  })
+
+  // Test 2: flag on — thinking tags stripped
+  test("flag on: strips <thinking>...</thinking> from assistant text part", async () => {
+    const msgID = "m-strip-on"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("u-strip-on"),
+        parts: [{ ...basePart("u-strip-on", "u1"), type: "text", text: "hello" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(msgID, "u-strip-on"),
+        parts: [
+          { ...basePart(msgID, "a1"), type: "step-start" },
+          { ...basePart(msgID, "a2"), type: "text", text: "<thinking>foo</thinking>bar" },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model, { stripThinkingText: true })
+    const assistantMsg = result.find((m) => m.role === "assistant")
+    expect(assistantMsg).toBeDefined()
+    const textContent = (assistantMsg!.content as { type: string; text?: string }[]).find(
+      (c) => c.type === "text",
+    )
+    expect(textContent?.text).toBe("bar")
+  })
+
+  // Test 3: multiple tags stripped
+  test("flag on: strips multiple <thinking> blocks", async () => {
+    const msgID = "m-strip-multi"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("u-strip-multi"),
+        parts: [{ ...basePart("u-strip-multi", "u1"), type: "text", text: "q" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(msgID, "u-strip-multi"),
+        parts: [
+          { ...basePart(msgID, "a1"), type: "step-start" },
+          {
+            ...basePart(msgID, "a2"),
+            type: "text",
+            text: "before<thinking>x</thinking>middle<thinking>y</thinking>after",
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model, { stripThinkingText: true })
+    const assistantMsg = result.find((m) => m.role === "assistant")
+    const textContent = (assistantMsg!.content as { type: string; text?: string }[]).find(
+      (c) => c.type === "text",
+    )
+    expect(textContent?.text).toBe("beforemiddleafter")
+  })
+
+  // Test 4: unclosed tag stripped to end-of-string
+  test("flag on: unclosed <thinking> tag stripped to end of text", async () => {
+    const msgID = "m-strip-unclosed"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("u-strip-unclosed"),
+        parts: [{ ...basePart("u-strip-unclosed", "u1"), type: "text", text: "q" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(msgID, "u-strip-unclosed"),
+        parts: [
+          { ...basePart(msgID, "a1"), type: "step-start" },
+          { ...basePart(msgID, "a2"), type: "text", text: "start<thinking>partial" },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model, { stripThinkingText: true })
+    const assistantMsg = result.find((m) => m.role === "assistant")
+    const textContent = (assistantMsg!.content as { type: string; text?: string }[]).find(
+      (c) => c.type === "text",
+    )
+    expect(textContent?.text).toBe("start")
+  })
+
+  // Test 5: reasoning part text is NOT touched by stripThinkingText
+  test("flag on: reasoning part text is not modified", async () => {
+    const anthropicModel: typeof model = {
+      ...model,
+      api: { ...model.api, npm: "@ai-sdk/anthropic" },
+    }
+    const msgID = "m-strip-reason"
+    const signature = "sig-abc"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("u-strip-reason"),
+        parts: [{ ...basePart("u-strip-reason", "u1"), type: "text", text: "q" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(msgID, "u-strip-reason"),
+        parts: [
+          { ...basePart(msgID, "a1"), type: "step-start" },
+          {
+            ...basePart(msgID, "a2"),
+            type: "reasoning",
+            text: "native reasoning",
+            time: { start: 0 },
+            metadata: { anthropic: { signature } },
+          },
+          { ...basePart(msgID, "a3"), type: "text", text: " " },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model, { stripThinkingText: true })
+    const assistantMsg = result.find((m) => m.role === "assistant")
+    expect(assistantMsg).toBeDefined()
+    // reasoning content should be present untouched
+    const reasoningContent = (assistantMsg!.content as { type: string; text?: string }[]).find(
+      (c) => c.type === "reasoning",
+    )
+    expect(reasoningContent?.text).toBe("native reasoning")
+  })
+
+  // Test 6: signature preserved on reasoning part when flag on
+  test("flag on: reasoning part with signature has providerOptions preserved", async () => {
+    const anthropicModel: typeof model = {
+      ...model,
+      providerID: ProviderID.make("anthropic"),
+      api: { ...model.api, npm: "@ai-sdk/anthropic", id: "claude-test" },
+    }
+    const msgID = "m-strip-sig"
+    const signature = "sig-xyz"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("u-strip-sig"),
+        parts: [{ ...basePart("u-strip-sig", "u1"), type: "text", text: "q" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(msgID, "u-strip-sig", undefined, {
+          providerID: anthropicModel.providerID,
+          modelID: anthropicModel.id,
+        }),
+        parts: [
+          { ...basePart(msgID, "a1"), type: "step-start" },
+          {
+            ...basePart(msgID, "a2"),
+            type: "reasoning",
+            text: "",
+            time: { start: 0 },
+            metadata: { anthropic: { signature } },
+          },
+          { ...basePart(msgID, "a3"), type: "text", text: " " },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, anthropicModel, { stripThinkingText: true })
+    const assistantMsg = result.find((m) => m.role === "assistant")
+    expect(assistantMsg).toBeDefined()
+    // The reasoning part's providerMetadata (signature) must survive
+    const reasoningContent = (assistantMsg!.content as { type: string; providerOptions?: unknown }[]).find(
+      (c) => c.type === "reasoning",
+    )
+    expect(reasoningContent).toBeDefined()
+    // providerOptions should contain the anthropic signature
+    expect((reasoningContent as any)?.providerOptions?.anthropic?.signature).toBe(signature)
+  })
+
+  // Unit test for stripThinkingTags helper directly
+  test("stripThinkingTags helper: basic stripping", () => {
+    expect(MessageV2.stripThinkingTags("<thinking>foo</thinking>bar")).toBe("bar")
+    expect(MessageV2.stripThinkingTags("start<thinking>partial")).toBe("start")
+    expect(MessageV2.stripThinkingTags("a<thinking>x</thinking>b<thinking>y</thinking>c")).toBe("abc")
+    expect(MessageV2.stripThinkingTags("no tags here")).toBe("no tags here")
+    expect(MessageV2.stripThinkingTags("")).toBe("")
   })
 })

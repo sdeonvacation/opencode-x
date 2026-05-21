@@ -18,6 +18,8 @@ export namespace SlidingWindow {
   const lastGen = new Map<SessionID, string>()
   const lastCompact = new Map<SessionID, MessageV2.WithParts[]>()
   const inflight = new Set<SessionID>()
+  // [fork-perf] hysteresis: cheap-estimate recorded at last successful compact
+  const lastCompactTailEstimate = new Map<SessionID, number>()
 
   type Metrics = {
     total: number
@@ -90,14 +92,46 @@ export namespace SlidingWindow {
     const cheap = input.msgs.reduce((acc, m) => acc + cheapEstimate(m), 0)
     if (cheap < threshold && !input.hint) return stash(input.msgs)
 
-    const estimated = yield* estimate(input.msgs, input.model)
+    // [fork-perf] hysteresis: after a compact, suppress next compact until the fresh tail
+    // has grown by at least hysteresis_min_tokens. Prevents thrash when user bounces near threshold.
+    // Compares cheap-tail-now vs cheap-tail-at-last-compact (tail-vs-tail, not total-vs-tail).
+    const hysteresisMin = opts?.hysteresis_min_tokens ?? 30_000
+    if (hysteresisMin > 0) {
+      const lastTail = lastCompactTailEstimate.get(input.sessionID)
+      if (lastTail !== undefined) {
+        // Find current synthetic-summary boundary; everything after is the active tail.
+        let tailStart = 0
+        for (let i = 0; i < input.msgs.length; i++) {
+          const m = input.msgs[i]
+          if (
+            m.info.role === "user" &&
+            m.parts.some((p) => p.type === "text" && (p as { synthetic?: boolean }).synthetic === true)
+          ) {
+            tailStart = i + 1
+          }
+        }
+        const currentTailCheap = input.msgs.slice(tailStart).reduce((acc, m) => acc + cheapEstimate(m), 0)
+        if (currentTailCheap - lastTail < hysteresisMin) {
+          log.info("skip_hysteresis", {
+            sessionID: input.sessionID,
+            currentTail: currentTailCheap,
+            lastTail,
+            growth: currentTailCheap - lastTail,
+            hysteresisMin,
+          })
+          return stash(input.msgs)
+        }
+      }
+    }
+
+    const estimated = yield* estimate(input.msgs, input.model, { stripThinkingText: input.cfg.experimental?.strip_thinking_text === true }) // [fork-perf] strip-thinking
     const total = input.hint !== undefined ? Math.max(input.hint, estimated) : estimated
     if (total < threshold) {
       log.info("skip_below_threshold", { sessionID: input.sessionID, total, estimated, hint: input.hint, threshold })
       return stash(input.msgs)
     }
 
-    const tail = yield* last(input.msgs, input.model)
+    const tail = yield* last(input.msgs, input.model, { stripThinkingText: input.cfg.experimental?.strip_thinking_text === true }) // [fork-perf] strip-thinking
     const budget = Math.min(Math.max(Math.floor(estimated * (opts?.tail_ratio ?? 0.5)), tail), estimated - MIN)
     const split = yield* divide(input.msgs, input.model, budget, estimated)
     if (!split) {
@@ -105,7 +139,7 @@ export namespace SlidingWindow {
       return stash(input.msgs)
     }
 
-    const size = yield* estimate(split.head, input.model)
+    const size = yield* estimate(split.head, input.model, { stripThinkingText: input.cfg.experimental?.strip_thinking_text === true }) // [fork-perf] strip-thinking
     if (size < MIN) {
       log.info("skip_small_head", { sessionID: input.sessionID, head: size, min: MIN, total, budget, tail })
       return stash(input.msgs)
@@ -119,7 +153,7 @@ export namespace SlidingWindow {
       log.info("cache_hit", { sessionID: input.sessionID, headEndID, total, budget, head: size })
       touch(input.sessionID, hit)
       const result = [synthetic(hit.summary, input), ...split.tail]
-      const actual = yield* estimate(result, input.model)
+      const actual = yield* estimate(result, input.model, { stripThinkingText: input.cfg.experimental?.strip_thinking_text === true }) // [fork-perf] strip-thinking
       const ratio = estimated > 0 ? actual / estimated : 1
       const sent = Math.round(total * ratio)
       metrics.set(input.sessionID, {
@@ -155,8 +189,12 @@ export namespace SlidingWindow {
     }
 
     store(input.sessionID, { headEndID, summary, ts: Date.now() })
+    // [fork-perf] hysteresis: record cheap-estimate of the fresh tail (post-compact baseline).
+    // Future calls compare their cheap against this to measure tail growth since last compact.
+    const splitTailCheap = split.tail.reduce((acc, m) => acc + cheapEstimate(m), 0)
+    lastCompactTailEstimate.set(input.sessionID, splitTailCheap)
     const result = [synthetic(summary, input), ...split.tail]
-    const actual = yield* estimate(result, input.model)
+    const actual = yield* estimate(result, input.model, { stripThinkingText: input.cfg.experimental?.strip_thinking_text === true }) // [fork-perf] strip-thinking
     const ratio = estimated > 0 ? actual / estimated : 1
     const sent = Math.round(total * ratio)
     metrics.set(input.sessionID, {
@@ -186,6 +224,7 @@ export namespace SlidingWindow {
     metrics.delete(sessionID)
     lastGen.delete(sessionID)
     lastCompact.delete(sessionID)
+    lastCompactTailEstimate.delete(sessionID) // [fork-perf] hysteresis
     log.info("invalidate", { sessionID })
   }
 
@@ -249,15 +288,24 @@ export namespace SlidingWindow {
     return true
   }
 
-  const estimate = Effect.fn("SlidingWindow.estimate")(function* (msgs: MessageV2.WithParts[], model: Provider.Model) {
-    const out = yield* MessageV2.toModelMessagesEffect(msgs, model, { stripMedia: true })
+  // [fork-perf] strip-thinking: options forwarded so estimate reflects actual sent payload
+  const estimate = Effect.fn("SlidingWindow.estimate")(function* (
+    msgs: MessageV2.WithParts[],
+    model: Provider.Model,
+    opts?: { stripThinkingText?: boolean },
+  ) {
+    const out = yield* MessageV2.toModelMessagesEffect(msgs, model, { stripMedia: true, stripThinkingText: opts?.stripThinkingText }) // [fork-perf] strip-thinking
     return Token.estimate(JSON.stringify(out))
   })
 
-  const last = Effect.fn("SlidingWindow.last")(function* (msgs: MessageV2.WithParts[], model: Provider.Model) {
+  const last = Effect.fn("SlidingWindow.last")(function* (
+    msgs: MessageV2.WithParts[],
+    model: Provider.Model,
+    opts?: { stripThinkingText?: boolean }, // [fork-perf] strip-thinking
+  ) {
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i]?.info.role !== "user") continue
-      return yield* estimate(msgs.slice(i), model)
+      return yield* estimate(msgs.slice(i), model, opts) // [fork-perf] strip-thinking
     }
     return 0
   })
@@ -350,7 +398,11 @@ export namespace SlidingWindow {
       .map((msg) => {
         const body = msg.parts
           .flatMap((part) => {
-            if (part.type === "text") return part.text.trim() ? [part.text.trim()] : []
+            if (part.type === "text") {
+              // [fork-perf] strip-thinking-summary: drop CoT tags before summarizer; pure cost win
+              const cleaned = part.text.replace(/<thinking>[\s\S]*?(?:<\/thinking>|$)/g, "").trim()
+              return cleaned ? [cleaned] : []
+            }
             if (part.type === "reasoning") return part.text.trim() ? [`[reasoning]\n${part.text.trim()}`] : []
             if (part.type === "tool" && part.state.status === "completed") {
               const out =
@@ -418,10 +470,16 @@ export namespace SlidingWindow {
       if (!key) break
       lastGen.delete(key)
       lastCompact.delete(key)
+      lastCompactTailEstimate.delete(key) // [fork-perf] hysteresis
     }
   }
 
   export function getMetrics(sessionID: SessionID) {
     return metrics.get(sessionID)
+  }
+
+  /** @internal test-only: override the hysteresis baseline for a session */
+  export function _setLastCompactTailEstimate(sessionID: SessionID, value: number) { // [fork-perf] hysteresis
+    lastCompactTailEstimate.set(sessionID, value)
   }
 }

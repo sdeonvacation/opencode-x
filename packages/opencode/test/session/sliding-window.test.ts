@@ -10,11 +10,13 @@ const state = {
   calls: 0,
   err: undefined as unknown,
   text: "summary",
+  lastPrompt: undefined as string | undefined,
 }
 
 mock.module("ai", () => ({
-  generateText: async () => {
+  generateText: async (opts: { messages?: Array<{ content: string }> }) => {
     state.calls++
+    state.lastPrompt = opts?.messages?.[0]?.content
     if (state.err) throw state.err
     return { text: state.text }
   },
@@ -30,6 +32,7 @@ beforeEach(() => {
   state.calls = 0
   state.err = undefined
   state.text = "summary"
+  state.lastPrompt = undefined
 })
 
 function model() {
@@ -438,6 +441,291 @@ describe("sliding-window", () => {
       type: "text",
       synthetic: true,
       text: "<context-summary>\nestimate-wins\n</context-summary>",
+    })
+  })
+
+  describe("render: strip <thinking> tags from summarizer input", () => {
+    function msgWithText(sessionID: SessionID, textContent: string): MessageV2.WithParts {
+      const id = MessageID.ascending()
+      return {
+        info: {
+          id,
+          role: "user" as const,
+          sessionID,
+          time: { created: Date.now() },
+          agent: "build",
+          model: {
+            providerID: ProviderID.make("test"),
+            modelID: ModelID.make("test-model"),
+          },
+        },
+        parts: [
+          {
+            id: PartID.ascending(),
+            sessionID,
+            messageID: id,
+            type: "text" as const,
+            text: textContent,
+          },
+        ],
+      }
+    }
+
+    function msgWithReasoning(sessionID: SessionID, textContent: string): MessageV2.WithParts {
+      const id = MessageID.ascending()
+      return {
+        info: {
+          id,
+          role: "assistant" as const,
+          sessionID,
+          parentID: MessageID.ascending(),
+          mode: "build",
+          agent: "build",
+          path: { cwd: "/tmp", root: "/tmp" },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          modelID: ModelID.make("test-model"),
+          providerID: ProviderID.make("test"),
+          time: { created: Date.now() },
+          finish: "stop",
+        },
+        parts: [
+          {
+            id: PartID.ascending(),
+            sessionID,
+            messageID: id,
+            type: "reasoning" as const,
+            text: textContent,
+            time: { start: Date.now() },
+          },
+        ],
+      }
+    }
+
+    async function renderPromptFor(msgs: MessageV2.WithParts[], sessionID: SessionID): Promise<string> {
+      // Force compaction by using minimum allowed threshold so summarize() is always called.
+      // We inspect the prompt passed to generateText via state.lastPrompt.
+      await compact(
+        input(sessionID, msgs, "primary", { threshold: 10000 }),
+      )
+      return state.lastPrompt ?? ""
+    }
+
+    test("strips inline thinking tag from text part", async () => {
+      const sessionID = SessionID.make("session_sw_strip_inline")
+      // Put target FIRST so it lands in head (head gets summarized; tail does not).
+      const target = msgWithText(sessionID, "before<thinking>foo</thinking>after")
+      const big = user(sessionID, 20_000)
+      const bigAssist = assistant(sessionID, big.info.id, 20_000)
+      const tailUser = user(sessionID, 500)
+      const tailAssist = assistant(sessionID, tailUser.info.id, 500)
+      const msgs = [target, big, bigAssist, tailUser, tailAssist]
+
+      const prompt = await renderPromptFor(msgs, sessionID)
+
+      expect(prompt).toContain("beforeafter")
+      expect(prompt).not.toContain("<thinking>")
+      expect(prompt).not.toContain("foo")
+    })
+
+    test("strips multiple thinking tags from text part", async () => {
+      const sessionID = SessionID.make("session_sw_strip_multi")
+      const target = msgWithText(sessionID, "alpha<thinking>SECRET1</thinking>beta<thinking>SECRET2</thinking>gamma")
+      const big = user(sessionID, 20_000)
+      const bigAssist = assistant(sessionID, big.info.id, 20_000)
+      const tailUser = user(sessionID, 500)
+      const tailAssist = assistant(sessionID, tailUser.info.id, 500)
+      const msgs = [target, big, bigAssist, tailUser, tailAssist]
+
+      const prompt = await renderPromptFor(msgs, sessionID)
+
+      expect(prompt).toContain("alphabetagamma")
+      expect(prompt).not.toContain("<thinking>")
+      expect(prompt).not.toContain("SECRET1")
+      expect(prompt).not.toContain("SECRET2")
+    })
+
+    test("strips unclosed thinking tag to end of text", async () => {
+      const sessionID = SessionID.make("session_sw_strip_unclosed")
+      const target = msgWithText(sessionID, "start<thinking>partial")
+      const big = user(sessionID, 20_000)
+      const bigAssist = assistant(sessionID, big.info.id, 20_000)
+      const tailUser = user(sessionID, 500)
+      const tailAssist = assistant(sessionID, tailUser.info.id, 500)
+      const msgs = [target, big, bigAssist, tailUser, tailAssist]
+
+      const prompt = await renderPromptFor(msgs, sessionID)
+
+      expect(prompt).toContain("start")
+      expect(prompt).not.toContain("<thinking>")
+      expect(prompt).not.toContain("partial")
+    })
+
+    test("reasoning part with <thinking> text is NOT stripped", async () => {
+      const sessionID = SessionID.make("session_sw_strip_reasoning_safe")
+      const target = msgWithReasoning(sessionID, "<thinking>this is reasoning</thinking>")
+      const big = user(sessionID, 20_000)
+      const bigAssist = assistant(sessionID, big.info.id, 20_000)
+      const tailUser = user(sessionID, 500)
+      const tailAssist = assistant(sessionID, tailUser.info.id, 500)
+      const msgs = [target, big, bigAssist, tailUser, tailAssist]
+
+      const prompt = await renderPromptFor(msgs, sessionID)
+
+      // reasoning branch wraps with [reasoning]\n prefix; the text inside should be intact
+      expect(prompt).toContain("[reasoning]")
+      expect(prompt).toContain("<thinking>this is reasoning</thinking>")
+    })
+  })
+
+  describe("hysteresis", () => {
+    function cheapOf(msgs: MessageV2.WithParts[]) {
+      return msgs.reduce(
+        (acc, m) =>
+          acc +
+          Math.round(
+            m.parts.reduce((s, p) => {
+              if (p.type === "text" || p.type === "reasoning") return s + (p.text?.length ?? 0)
+              return s
+            }, 0) / 4,
+          ),
+        0,
+      )
+    }
+
+    test("suppresses second compact when tail growth is below hysteresis_min_tokens", async () => {
+      const sessionID = SessionID.make("session_sw_hysteresis_suppress")
+      const { msgs } = history(sessionID)
+      state.text = "first-compact"
+
+      // First compact succeeds — this sets lastCompactTailEstimate internally
+      const first = await compact(input(sessionID, msgs, "primary", { threshold: 10_000 }))
+      expect(state.calls).toBe(1)
+      expect(first[0]?.parts[0]).toMatchObject({ synthetic: true })
+
+      // Override baseline: set it so cheap - baseline < 30_000 (default hysteresis_min_tokens)
+      // This simulates tiny post-compact growth
+      const currentCheap = cheapOf(msgs)
+      SlidingWindow._setLastCompactTailEstimate(sessionID, currentCheap - 500) // only 500 tokens of growth
+
+      // Add a new tail msg so generation key differs and we hit the hysteresis branch
+      // (without this, lastGen cache short-circuits and returns the prior compacted output).
+      const extraTail = user(sessionID, 200)
+      const msgs2 = [...msgs, extraTail]
+
+      const callsBefore = state.calls
+      const second = await compact(input(sessionID, msgs2, "primary", { threshold: 10_000 }))
+
+      // No new summarize call — hysteresis suppressed it
+      expect(state.calls).toBe(callsBefore)
+      // Returns msgs2 unchanged (stash path — not the compacted result)
+      expect(second).toBe(msgs2)
+    })
+
+    test("allows compact when tail growth meets hysteresis_min_tokens", async () => {
+      const sessionID = SessionID.make("session_sw_hysteresis_allow")
+      const { msgs } = history(sessionID)
+      state.text = "allow-compact"
+
+      // First compact
+      await compact(input(sessionID, msgs, "primary", { threshold: 10_000 }))
+      expect(state.calls).toBe(1)
+
+      // Set baseline very low so cheap - baseline >> 30_000: growth exceeds threshold
+      SlidingWindow._setLastCompactTailEstimate(sessionID, 0)
+      SlidingWindow.invalidate(sessionID) // clear summary cache so summarize runs again
+
+      state.text = "second-compact"
+      const second = await compact(input(sessionID, msgs, "primary", { threshold: 10_000 }))
+
+      expect(state.calls).toBe(2)
+      expect(second[0]?.parts[0]).toMatchObject({
+        type: "text",
+        synthetic: true,
+        text: "<context-summary>\nsecond-compact\n</context-summary>",
+      })
+    })
+
+    test("hysteresis_min_tokens=0 disables hysteresis suppression", async () => {
+      const sessionID = SessionID.make("session_sw_hysteresis_zero")
+      const { msgs } = history(sessionID)
+      state.text = "no-hysteresis"
+
+      const noHysteresisCfg = Config.Info.parse({
+        provider: { test: { id: ProviderID.make("test"), name: "Test", env: [] } },
+        hybrid: {
+          enabled: true,
+          local_model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+        },
+        compaction: {
+          sliding_window: {
+            enabled: true,
+            threshold: 10_000,
+            tail_ratio: 0.5,
+            primary_only: true,
+            timeout_ms: 1_000,
+            hysteresis_min_tokens: 0,
+          },
+        },
+      })
+
+      const run = (txt: string) => {
+        state.text = txt
+        return Effect.runPromise(
+          SlidingWindow.compact({
+            msgs,
+            model: model(),
+            provider: provider(),
+            cfg: noHysteresisCfg,
+            sessionID,
+            agent: { name: "build", mode: "primary" },
+          }),
+        )
+      }
+
+      await run("first")
+      expect(state.calls).toBe(1)
+
+      // Set baseline that would suppress if hysteresis were active
+      const cheap = cheapOf(msgs)
+      SlidingWindow._setLastCompactTailEstimate(sessionID, cheap - 100)
+      SlidingWindow.invalidate(sessionID)
+
+      // With hysteresis_min_tokens=0, compact should proceed
+      const second = await run("second")
+      expect(state.calls).toBe(2)
+      expect(second[0]?.parts[0]).toMatchObject({ synthetic: true })
+    })
+
+    test("hysteresis baseline cleared on invalidate, allowing compact to run", async () => {
+      const sessionID = SessionID.make("session_sw_hysteresis_inv_clears")
+      const { msgs } = history(sessionID)
+      state.text = "after-invalidate"
+
+      // First compact sets baseline
+      await compact(input(sessionID, msgs, "primary", { threshold: 10_000 }))
+      expect(state.calls).toBe(1)
+
+      // Set baseline close to current cheap — triggers suppression
+      const cheap = cheapOf(msgs)
+      SlidingWindow._setLastCompactTailEstimate(sessionID, cheap - 100)
+
+      const beforeInvalidate = state.calls
+      await compact(input(sessionID, msgs, "primary", { threshold: 10_000 }))
+      expect(state.calls).toBe(beforeInvalidate) // suppressed
+
+      // Invalidate clears hysteresis baseline along with summary cache
+      SlidingWindow.invalidate(sessionID)
+
+      state.text = "post-invalidate"
+      const result = await compact(input(sessionID, msgs, "primary", { threshold: 10_000 }))
+
+      expect(state.calls).toBe(beforeInvalidate + 1) // compact ran
+      expect(result[0]?.parts[0]).toMatchObject({
+        type: "text",
+        synthetic: true,
+        text: "<context-summary>\npost-invalidate\n</context-summary>",
+      })
     })
   })
 })

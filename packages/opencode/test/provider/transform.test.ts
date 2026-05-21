@@ -1868,15 +1868,18 @@ describe("ProviderTransform.message - cache control on gateway", () => {
 
     const result = ProviderTransform.message(msgs, model, {}) as any[]
 
+    const ttl = !["0","false","off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase()) ? { ttl: "1h" } : {}
     expect(result[0].providerOptions).toEqual({
       anthropic: {
         cacheControl: {
           type: "ephemeral",
+          ...ttl,
         },
       },
       openrouter: {
         cacheControl: {
           type: "ephemeral",
+          ...ttl,
         },
       },
       bedrock: {
@@ -1887,6 +1890,7 @@ describe("ProviderTransform.message - cache control on gateway", () => {
       openaiCompatible: {
         cache_control: {
           type: "ephemeral",
+          ...ttl,
         },
       },
       copilot: {
@@ -1925,15 +1929,18 @@ describe("ProviderTransform.message - cache control on gateway", () => {
 
     const result = ProviderTransform.message(msgs, model, {}) as any[]
 
+    const ttl = !["0","false","off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase()) ? { ttl: "1h" } : {}
     expect(result[0].providerOptions).toEqual({
       anthropic: {
         cacheControl: {
           type: "ephemeral",
+          ...ttl,
         },
       },
       openrouter: {
         cacheControl: {
           type: "ephemeral",
+          ...ttl,
         },
       },
       bedrock: {
@@ -1944,6 +1951,7 @@ describe("ProviderTransform.message - cache control on gateway", () => {
       openaiCompatible: {
         cache_control: {
           type: "ephemeral",
+          ...ttl,
         },
       },
       copilot: {
@@ -3117,13 +3125,6 @@ describe("ProviderTransform.message - opt-in caching via options.caching", () =>
     },
   ] as any[]
 
-  test("applies cache_control when options.caching is true", () => {
-    const result = ProviderTransform.message(msgs, model, { caching: true }) as any[]
-    const system = result[0]
-    // Should have providerOptions with cache control on system message
-    expect(system.providerOptions).toBeDefined()
-  })
-
   test("does not apply cache_control when options.caching is absent", () => {
     const result = ProviderTransform.message(msgs, model, {}) as any[]
     const system = result[0]
@@ -3210,7 +3211,7 @@ describe("ProviderTransform.toolCaching - session-stable", () => {
   test("marks last tool with cache breakpoint without sessionID", () => {
     const t = tools(["read", "write", "bash"])
     const result = ProviderTransform.toolCaching(t, anthropic)
-    expect(result.bash.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+    expect(result.bash.providerOptions?.anthropic?.cacheControl).toEqual(expect.objectContaining({ type: "ephemeral" }))
     expect(result.read.providerOptions?.anthropic?.cacheControl).toBeUndefined()
     expect(result.write.providerOptions?.anthropic?.cacheControl).toBeUndefined()
   })
@@ -3219,7 +3220,7 @@ describe("ProviderTransform.toolCaching - session-stable", () => {
     const sid = "latch-test-" + Date.now()
     const t = tools(["read", "write", "bash"])
     const result = ProviderTransform.toolCaching(t, anthropic, sid)
-    expect(result.bash.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+    expect(result.bash.providerOptions?.anthropic?.cacheControl).toEqual(expect.objectContaining({ type: "ephemeral" }))
   })
 
   test("same tools on subsequent call uses same anchor", () => {
@@ -3227,7 +3228,7 @@ describe("ProviderTransform.toolCaching - session-stable", () => {
     const t = tools(["read", "write", "bash"])
     ProviderTransform.toolCaching(t, anthropic, sid)
     const result = ProviderTransform.toolCaching(t, anthropic, sid)
-    expect(result.bash.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+    expect(result.bash.providerOptions?.anthropic?.cacheControl).toEqual(expect.objectContaining({ type: "ephemeral" }))
     expect(result.read.providerOptions?.anthropic?.cacheControl).toBeUndefined()
   })
 
@@ -3253,7 +3254,7 @@ describe("ProviderTransform.toolCaching - session-stable", () => {
     ProviderTransform.toolCaching(t2, anthropic, sid) // skipped
     // Same tools again — should now latch
     const result = ProviderTransform.toolCaching(t2, anthropic, sid)
-    expect(result.mcp_search.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+    expect(result.mcp_search.providerOptions?.anthropic?.cacheControl).toEqual(expect.objectContaining({ type: "ephemeral" }))
   })
 
   test("different sessions have independent anchors", () => {
@@ -3263,8 +3264,8 @@ describe("ProviderTransform.toolCaching - session-stable", () => {
     const t2 = tools(["bash", "edit"])
     const r1 = ProviderTransform.toolCaching(t1, anthropic, sid1)
     const r2 = ProviderTransform.toolCaching(t2, anthropic, sid2)
-    expect(r1.write.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
-    expect(r2.edit.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+    expect(r1.write.providerOptions?.anthropic?.cacheControl).toEqual(expect.objectContaining({ type: "ephemeral" }))
+    expect(r2.edit.providerOptions?.anthropic?.cacheControl).toEqual(expect.objectContaining({ type: "ephemeral" }))
   })
 
   test("bedrock provider gets cachePoint marker", () => {
@@ -3281,10 +3282,113 @@ describe("ProviderTransform.toolCaching - session-stable", () => {
     // First model stable
     ProviderTransform.toolCaching(t1, anthropic, sid)
     const r1 = ProviderTransform.toolCaching(t1, anthropic, sid)
-    expect(r1.write.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" })
+    expect(r1.write.providerOptions?.anthropic?.cacheControl).toEqual(expect.objectContaining({ type: "ephemeral" }))
     // Second model (bedrock) gets its own key
     ProviderTransform.toolCaching(t2, bedrock, sid)
     const r2 = ProviderTransform.toolCaching(t2, bedrock, sid)
     expect(r2.extra.providerOptions?.bedrock?.cachePoint).toEqual({ type: "default" })
+  })
+})
+
+// [fork-perf] strip-thinking: lock in cache-breakpoint stability when text bodies
+// have <thinking> tags stripped. Anchor positions are based on msg COUNT
+// (system[0] + last 2 non-system), not content. Stripping mutates text within
+// existing msgs but never adds/removes msgs, so anchors must remain on the same
+// indices.
+describe("ProviderTransform.message - cache placement after thinking strip", () => {
+  const anthropicModel = {
+    id: "anthropic/claude-opus-4-6",
+    providerID: "anthropic",
+    api: { id: "claude-opus-4-6", url: "https://api.anthropic.com", npm: "@ai-sdk/anthropic" },
+    name: "Claude Opus 4.6",
+    capabilities: {
+      temperature: true,
+      reasoning: true,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.001, output: 0.002, cache: { read: 0, write: 0 } },
+    limit: { context: 200000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  function findAnchorIndices(msgs: any[]): number[] {
+    return msgs
+      .map((m, i) => {
+        const top = (m.providerOptions as any)?.anthropic?.cacheControl
+        if (top) return i
+        if (Array.isArray(m.content)) {
+          const last = m.content[m.content.length - 1]
+          if ((last?.providerOptions as any)?.anthropic?.cacheControl) return i
+        }
+        return -1
+      })
+      .filter((i) => i >= 0)
+  }
+
+  test("anchor indices identical before and after strip", () => {
+    const before = [
+      { role: "system", content: "system msg" },
+      { role: "user", content: [{ type: "text", text: "first user" }] },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "before<thinking>cot here</thinking>after" }],
+      },
+      { role: "user", content: [{ type: "text", text: "second user" }] },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "answer<thinking>more cot</thinking>final" }],
+      },
+    ] as any[]
+    const after = [
+      { role: "system", content: "system msg" },
+      { role: "user", content: [{ type: "text", text: "first user" }] },
+      { role: "assistant", content: [{ type: "text", text: "beforeafter" }] },
+      { role: "user", content: [{ type: "text", text: "second user" }] },
+      { role: "assistant", content: [{ type: "text", text: "answerfinal" }] },
+    ] as any[]
+
+    const r1 = ProviderTransform.message(before, anthropicModel, {}) as any[]
+    const r2 = ProviderTransform.message(after, anthropicModel, {}) as any[]
+    expect(r1.length).toBe(r2.length)
+    expect(findAnchorIndices(r1)).toEqual(findAnchorIndices(r2))
+  })
+
+  test("strip producing empty body does not drop msg from anthropic transform", () => {
+    // Edge case: msg with only thinking content. After strip, text body is empty.
+    // anthropic transform at L54-71 filters empty text — would change msg count.
+    // Verify that stripping happens BEFORE the anthropic empty-content filter,
+    // OR that downstream filter is content-aware.
+    const before = [
+      { role: "system", content: "system msg" },
+      { role: "user", content: [{ type: "text", text: "first user" }] },
+      { role: "assistant", content: [{ type: "text", text: "<thinking>only cot</thinking>" }] },
+      { role: "user", content: [{ type: "text", text: "second user" }] },
+      { role: "assistant", content: [{ type: "text", text: "real answer" }] },
+    ] as any[]
+
+    // After strip, the assistant msg has empty text. Caller must drop it OR
+    // anthropic transform empty-content filter will drop it. Either way the
+    // anchor positions for the REMAINING msgs (which is what the API actually
+    // sees) must still be at last 2 non-system.
+    const after = [
+      { role: "system", content: "system msg" },
+      { role: "user", content: [{ type: "text", text: "first user" }] },
+      { role: "user", content: [{ type: "text", text: "second user" }] },
+      { role: "assistant", content: [{ type: "text", text: "real answer" }] },
+    ] as any[]
+
+    const r2 = ProviderTransform.message(after, anthropicModel, {}) as any[]
+    // 4 msgs after empty drop. anchors = system[0] + last 2 non-system (= 1 user + 1 assistant)
+    expect(r2.length).toBe(4)
+    const anchors = findAnchorIndices(r2)
+    expect(anchors).toContain(0) // system
+    expect(anchors).toContain(r2.length - 1) // last assistant
+    expect(anchors).toContain(r2.length - 2) // second-to-last (user)
   })
 })

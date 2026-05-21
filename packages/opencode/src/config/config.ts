@@ -1257,6 +1257,15 @@ export namespace Config {
                 .max(0.99)
                 .optional()
                 .describe("Fraction of model context limit to use as sliding-window threshold (e.g. 0.95)"),
+              // [fork-perf] hysteresis
+              hysteresis_min_tokens: z
+                .number()
+                .int()
+                .min(0)
+                .optional()
+                .describe(
+                  "Min new tail tokens before next compact fires (prevents thrash). 0 = disabled. Default 30000.",
+                ),
             })
             .optional(),
         })
@@ -1599,6 +1608,13 @@ export namespace Config {
             .boolean()
             .optional()
             .describe("Write per-turn cache-behavior debug log to ~/.local/share/opencode/cache-debug/ (default: false)"),
+          // [fork-perf] strip-thinking
+          strip_thinking_text: z
+            .boolean()
+            .optional()
+            .describe(
+              "Strip inline <thinking>...</thinking> segments from text parts before sending to LLM. Saves input tokens at the cost of CoT continuity. Default false.",
+            ),
         })
         .optional(),
     })

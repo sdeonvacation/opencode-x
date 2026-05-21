@@ -1534,7 +1534,7 @@ describe("session.llm.stream", () => {
                 input: { pattern: "**/*.pdf", path: "/root" },
                 cache_control: {
                   type: "ephemeral",
-                  ...(process.env.ENABLE_PROMPT_CACHING_1H ? { ttl: "1h" } : {}),
+                  ...(!["0","false","off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase()) ? { ttl: "1h" } : {}),
                 },
               },
             ],
@@ -1553,7 +1553,7 @@ describe("session.llm.stream", () => {
                 content: "No files found",
                 cache_control: {
                   type: "ephemeral",
-                  ...(process.env.ENABLE_PROMPT_CACHING_1H ? { ttl: "1h" } : {}),
+                  ...(!["0","false","off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase()) ? { ttl: "1h" } : {}),
                 },
               },
             ],

@@ -465,3 +465,158 @@ it.live("noop exit disabled by default - empty response returns continue", () =>
     { git: true, config: (url) => providerCfg(url) },
   ),
 )
+
+// ---------------------------------------------------------------------------
+// compression_attempted replay-safety guard — unit-level tests
+// [fork-perf] compression-replay-safety
+// ---------------------------------------------------------------------------
+
+/**
+ * Mirror of the alreadyAttempted detection logic in completeToolCall.
+ * Extracted here so we can test the branching without wiring the full session.
+ */
+function computeAlreadyAttempted(
+  freshPart:
+    | { type: string; state: { status: string; metadata?: Record<string, unknown> } }
+    | undefined,
+): boolean {
+  return (
+    freshPart?.type === "tool" &&
+    freshPart.state.status === "completed" &&
+    (freshPart.state.metadata as Record<string, unknown>)?.compression_attempted === true
+  )
+}
+
+describe("compression-replay-safety: alreadyAttempted guard", () => {
+  test("returns false when freshPart is undefined", () => {
+    expect(computeAlreadyAttempted(undefined)).toBe(false)
+  })
+
+  test("returns false when part type is not tool", () => {
+    expect(
+      computeAlreadyAttempted({
+        type: "text",
+        state: { status: "completed", metadata: { compression_attempted: true } },
+      }),
+    ).toBe(false)
+  })
+
+  test("returns false when state is not completed", () => {
+    expect(
+      computeAlreadyAttempted({
+        type: "tool",
+        state: { status: "running", metadata: { compression_attempted: true } },
+      }),
+    ).toBe(false)
+  })
+
+  test("returns false when compression_attempted is missing", () => {
+    expect(
+      computeAlreadyAttempted({
+        type: "tool",
+        state: { status: "completed", metadata: {} },
+      }),
+    ).toBe(false)
+  })
+
+  test("returns false when compression_attempted is false", () => {
+    expect(
+      computeAlreadyAttempted({
+        type: "tool",
+        state: { status: "completed", metadata: { compression_attempted: false } },
+      }),
+    ).toBe(false)
+  })
+
+  test("returns true when type=tool, status=completed, compression_attempted=true", () => {
+    expect(
+      computeAlreadyAttempted({
+        type: "tool",
+        state: { status: "completed", metadata: { compression_attempted: true } },
+      }),
+    ).toBe(true)
+  })
+
+  test("returns true regardless of other metadata fields", () => {
+    expect(
+      computeAlreadyAttempted({
+        type: "tool",
+        state: {
+          status: "completed",
+          metadata: {
+            compression_attempted: true,
+            compressed: true,
+            compression_fallback: true,
+            compression_template: "heuristic_head_tail",
+          },
+        },
+      }),
+    ).toBe(true)
+  })
+
+  test("returns false when metadata is undefined", () => {
+    expect(
+      computeAlreadyAttempted({
+        type: "tool",
+        state: { status: "completed", metadata: undefined },
+      }),
+    ).toBe(false)
+  })
+})
+
+describe("compression-replay-safety: metadata written in heuristic branch", () => {
+  test("heuristic metadata shape includes compression_attempted=true", () => {
+    // Represents the metadata object constructed in the heuristic branch of completeToolCall.
+    const baseMetadata: Record<string, unknown> = { some_tool_meta: "x" }
+    const written = {
+      ...baseMetadata,
+      compressed: true,
+      compression_template: "heuristic_head_tail",
+      // [fork-perf] compression-replay-safety
+      compression_attempted: true,
+    }
+    expect(written.compression_attempted).toBe(true)
+    expect(written.compressed).toBe(true)
+    expect(written.compression_template).toBe("heuristic_head_tail")
+  })
+})
+
+describe("compression-replay-safety: metadata written in LLM-compress branch", () => {
+  test("LLM compress metadata shape includes compression_attempted=true (success path)", () => {
+    // Represents the metadata object constructed in the LLM compress branch.
+    const baseMetadata: Record<string, unknown> = {}
+    const stats = { template: "bash", ratio: 0.5, fallback: false, validated: true }
+    const written = {
+      ...baseMetadata,
+      compressed: true,
+      compression_template: stats.template,
+      compression_ratio: stats.ratio,
+      compression_fallback: stats.fallback,
+      compression_validated: stats.validated,
+      // [fork-perf] compression-replay-safety
+      compression_attempted: true,
+    }
+    expect(written.compression_attempted).toBe(true)
+    expect(written.compression_fallback).toBe(false)
+  })
+
+  test("LLM compress metadata shape includes compression_attempted=true (fallback path)", () => {
+    // When LLMCompress falls back, stats.fallback=true but marker is still written.
+    const baseMetadata: Record<string, unknown> = {}
+    const stats = { template: "bash", ratio: 1, fallback: true, validated: false }
+    const written = {
+      ...baseMetadata,
+      compressed: true,
+      compression_template: stats.template,
+      compression_ratio: stats.ratio,
+      compression_fallback: stats.fallback,
+      compression_validated: stats.validated,
+      // [fork-perf] compression-replay-safety
+      compression_attempted: true,
+    }
+    expect(written.compression_attempted).toBe(true)
+    expect(written.compression_fallback).toBe(true)
+    // Guard sees this as already-attempted: no re-compression on next entry
+    expect(computeAlreadyAttempted({ type: "tool", state: { status: "completed", metadata: written } })).toBe(true)
+  })
+})

@@ -325,6 +325,16 @@ export namespace MessageV2 {
     return `${text.slice(0, maxChars)}\n[Tool output truncated for compaction: omitted ${omitted} chars]`
   }
 
+  // [fork-perf] strip-thinking
+  // Strips inline <thinking>...</thinking> blocks from assistant text parts.
+  // These are transient CoT emitted by models without extended-thinking enabled
+  // (e.g. claude-opus-4-6/4-7 in standard mode). They add ~300-1000 input tokens
+  // per turn without aiding the model's next reasoning step.
+  // Unclosed tags (streaming partial) are stripped to end-of-string via (?:</thinking>|$).
+  export function stripThinkingTags(text: string): string {
+    return text.replace(/<thinking>[\s\S]*?(?:<\/thinking>|$)/g, "").trim()
+  }
+
   export const ToolStateError = z
     .object({
       status: z.literal("error"),
@@ -613,7 +623,7 @@ export namespace MessageV2 {
   export const toModelMessagesEffect = Effect.fnUntraced(function* (
     input: WithParts[],
     model: Provider.Model,
-    options?: { stripMedia?: boolean; toolOutputMaxChars?: number },
+    options?: { stripMedia?: boolean; toolOutputMaxChars?: number; stripThinkingText?: boolean }, // [fork-perf] strip-thinking
   ) {
     const result: UIMessage[] = []
     const toolNames = new Set<string>()
@@ -744,7 +754,9 @@ export namespace MessageV2 {
         })
         for (const part of msg.parts) {
           if (part.type === "text") {
-            const text = part.text === "" && hasSignedReasoning ? " " : part.text
+            const rawText = part.text === "" && hasSignedReasoning ? " " : part.text
+            // [fork-perf] strip-thinking: remove inline CoT tags from assistant text before sending to model
+            const text = options?.stripThinkingText ? stripThinkingTags(rawText) : rawText
             assistantMessage.parts.push({
               type: "text",
               text,
@@ -877,7 +889,7 @@ export namespace MessageV2 {
   export function toModelMessages(
     input: WithParts[],
     model: Provider.Model,
-    options?: { stripMedia?: boolean; toolOutputMaxChars?: number },
+    options?: { stripMedia?: boolean; toolOutputMaxChars?: number; stripThinkingText?: boolean }, // [fork-perf] strip-thinking
   ): Promise<ModelMessage[]> {
     return Effect.runPromise(toModelMessagesEffect(input, model, options))
   }

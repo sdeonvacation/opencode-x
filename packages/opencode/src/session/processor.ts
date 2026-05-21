@@ -253,7 +253,26 @@ export namespace SessionProcessor {
             },
           })
           const enabled = cfg.hybrid?.enabled ?? Flag.OPENCODE_HYBRID_ROUTING
-          if (enabled && ctx.localModel && shouldCompress(output.output, match.part.tool, ctx.compressionThresholds)) {
+          // [fork-perf] compression-replay-safety: only compress once per part.
+          // Re-read the persisted part so that if a previous run already wrote
+          // compression_attempted=true (e.g. LLM fallback, then reload), we skip
+          // re-compression and avoid producing a different output that would bust
+          // the Anthropic prompt cache prefix.
+          const freshPart = yield* session.getPart({
+            partID: match.part.id,
+            messageID: match.part.messageID,
+            sessionID: match.part.sessionID,
+          })
+          const alreadyAttempted =
+            freshPart?.type === "tool" &&
+            freshPart.state.status === "completed" &&
+            (freshPart.state.metadata as Record<string, unknown>)?.compression_attempted === true
+          if (
+            !alreadyAttempted &&
+            enabled &&
+            ctx.localModel &&
+            shouldCompress(output.output, match.part.tool, ctx.compressionThresholds)
+          ) {
             const heuristic =
               (match.part.tool === "grep" || match.part.tool === "glob") &&
               cfg.experimental?.compression_heuristic !== false
@@ -273,6 +292,8 @@ export namespace SessionProcessor {
                     ...output.metadata,
                     compressed: true,
                     compression_template: "heuristic_head_tail",
+                    // [fork-perf] compression-replay-safety
+                    compression_attempted: true,
                   },
                   title: output.title,
                   time: { start: match.part.state.time.start, end: Date.now() },
@@ -305,6 +326,8 @@ export namespace SessionProcessor {
                     compression_ratio: result.stats.ratio,
                     compression_fallback: result.stats.fallback,
                     compression_validated: result.stats.validated,
+                    // [fork-perf] compression-replay-safety
+                    compression_attempted: true,
                   },
                   title: output.title,
                   time: { start: match.part.state.time.start, end: Date.now() },
@@ -792,7 +815,9 @@ export namespace SessionProcessor {
                     ctx.compactedReactively = true
                     // Rebuild model messages from compacted session messages
                     const retryMsgs = yield* Effect.promise(() =>
-                      MessageV2.toModelMessages(compacted, ctx.model),
+                      MessageV2.toModelMessages(compacted, ctx.model, {
+                        stripThinkingText: cfg.experimental?.strip_thinking_text === true, // [fork-perf]
+                      }),
                     )
                     yield* runStream({ ...streamInput, messages: retryMsgs })
                   }),

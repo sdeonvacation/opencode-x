@@ -190,7 +190,7 @@ export namespace SessionPrompt {
             (yield* provider.getModel(input.providerID, input.modelID)))
         const msgs = onlySubtasks
           ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
-          : yield* MessageV2.toModelMessagesEffect(context, mdl)
+          : yield* MessageV2.toModelMessagesEffect(context, mdl, { stripThinkingText: cfg.experimental?.strip_thinking_text === true }) // [fork-perf] strip-thinking
         const text = yield* Effect.promise(async (signal) => {
           const result = await LLM.stream({
             agent: ag,
@@ -1167,6 +1167,7 @@ export namespace SessionPrompt {
                 messages: await MessageV2.toModelMessages(
                   MessageV2.filterCompacted(MessageV2.stream(input.sessionID)),
                   model,
+                  { stripThinkingText: cfg.experimental?.strip_thinking_text === true }, // [fork-perf] strip-thinking
                 ),
                 tools: {},
                 model,
@@ -1739,8 +1740,8 @@ export namespace SessionPrompt {
                 // [fork-perf] Phase 1: use historyCache when enabled — incremental ModelMessage rebuild.
                 // The cache invalidates on compaction (see seams above) so msg-array drift is bounded.
                 historyCache
-                  ? historyCache.get({ sessionID, model }).pipe(Effect.map((r) => r.modelMessages))
-                  : MessageV2.toModelMessagesEffect(msgs, model),
+                  ? historyCache.get({ sessionID, model, stripThinkingText: cfg.experimental?.strip_thinking_text === true }).pipe(Effect.map((r) => r.modelMessages)) // [fork-perf] strip-thinking
+                  : MessageV2.toModelMessagesEffect(msgs, model, { stripThinkingText: cfg.experimental?.strip_thinking_text === true }), // [fork-perf] strip-thinking
               ])
               const system: string[] = []
               // Prompt split caching: stable prefix (one joined entry) then dynamic suffix

@@ -261,7 +261,7 @@ export namespace ProviderTransform {
     return msgs
   }
 
-  function applyCaching(msgs: ModelMessage[], model: Provider.Model): ModelMessage[] {
+  function applyCaching(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown> = {}): ModelMessage[] { // [fork-perf] options.caching opt-in
     // Providers that also get a tool-level cache marker via toolCaching() must
     // reserve one breakpoint slot (4 max for Anthropic).  We allocate 3 message
     // markers and let the 4th go to tool definitions (3000-8000 tokens, often
@@ -288,42 +288,27 @@ export namespace ProviderTransform {
       targets = unique([...system, ...final])
     }
 
-    const cacheTtl = process.env.ENABLE_PROMPT_CACHING_1H ? "1h" : undefined
-
-    // Build provider-specific cache options — only include keys relevant to this model
-    // so that unrelated provider keys (e.g. anthropic.*) are never injected into
-    // messages destined for OpenAI or other non-Anthropic providers.
-    const isAnthropicLike =
-      model.providerID === "anthropic" ||
-      model.providerID === "google-vertex-anthropic" ||
-      model.api.id.includes("anthropic") ||
-      model.api.id.includes("claude") ||
-      model.id.includes("anthropic") ||
-      model.id.includes("claude") ||
-      model.api.npm === "@ai-sdk/anthropic"
-    const isOpenRouter = model.providerID === "openrouter" || model.api.npm === "@openrouter/ai-sdk-provider"
-    const isBedrock = model.providerID.includes("bedrock") || model.api.npm === "@ai-sdk/amazon-bedrock"
-    const isAlibaba = model.api.npm === "@ai-sdk/alibaba"
-    const isCopilot = model.api.npm === "@github/copilot-language-server"
-
+    // [fork-perf] Include all provider cache keys unconditionally — the AI SDK silently ignores
+    // unknown namespace keys, so injecting all of them is safe and keeps providerOptions
+    // stable regardless of which provider is active.
+    // [fork-perf] 1h cache TTL is opt-out, default-on. Only `0` / `false` / `off` disables.
+    const cachingDisabled = ["0", "false", "off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase())
+    const cacheTtl = cachingDisabled ? undefined : "1h"
+    const ttl = cacheTtl ? { ttl: cacheTtl } : {}
     const providerOptions: Record<string, unknown> = {
-      ...(isAnthropicLike && {
-        anthropic: { cacheControl: { type: "ephemeral", ...(cacheTtl ? { ttl: cacheTtl } : {}) } },
-      }),
-      ...(isOpenRouter && {
-        openrouter: { cacheControl: { type: "ephemeral", ...(cacheTtl ? { ttl: cacheTtl } : {}) } },
-      }),
-      ...(isBedrock && { bedrock: { cachePoint: { type: "default" } } }),
-      ...(isAlibaba && { alibaba: { cacheControl: { type: "ephemeral" } } }),
-      ...(isCopilot && { copilot: { copilot_cache_control: { type: "ephemeral" } } }),
-      // All other providers (e.g. openaiCompatible) use content-level cache_control
-      ...(!isAnthropicLike && !isOpenRouter && !isBedrock && !isAlibaba && !isCopilot && {
-        openaiCompatible: { cache_control: { type: "ephemeral" } },
-      }),
+      anthropic: { cacheControl: { type: "ephemeral", ...ttl } },
+      openrouter: { cacheControl: { type: "ephemeral", ...ttl } },
+      bedrock: { cachePoint: { type: "default" } },
+      alibaba: { cacheControl: { type: "ephemeral" } },
+      copilot: { copilot_cache_control: { type: "ephemeral" } },
+      openaiCompatible: { cache_control: { type: "ephemeral", ...ttl } },
     }
 
+    // [fork-perf] Build patched versions of target messages without mutating originals
+    const patched = new Map<ModelMessage, ModelMessage>()
     for (const msg of targets) {
       const useMessageLevelOptions =
+        options.caching === true || // [fork-perf] opt-in caching uses message-level
         model.providerID === "anthropic" ||
         model.providerID === "google-vertex-anthropic" || // [fork-perf] cache-stability fix
         model.api.npm === "@ai-sdk/google-vertex/anthropic" || // [fork-perf] cache-stability fix
@@ -339,18 +324,27 @@ export namespace ProviderTransform {
           lastContent.type !== "tool-approval-request" &&
           lastContent.type !== "tool-approval-response"
         ) {
-          lastContent.providerOptions = mergeDeep(
-            lastContent.providerOptions ?? {},
-            providerOptions,
-          ) as typeof lastContent.providerOptions
+          const newLastContent = {
+            ...lastContent,
+            providerOptions: mergeDeep(
+              lastContent.providerOptions ?? {},
+              providerOptions,
+            ) as typeof lastContent.providerOptions,
+          }
+          const newContent = [...msg.content]
+          newContent[newContent.length - 1] = newLastContent
+          patched.set(msg, { ...msg, content: newContent as typeof msg.content } as ModelMessage)
           continue
         }
       }
 
-      msg.providerOptions = mergeDeep(msg.providerOptions ?? {}, providerOptions) as typeof msg.providerOptions
+      patched.set(msg, {
+        ...msg,
+        providerOptions: mergeDeep(msg.providerOptions ?? {}, providerOptions) as typeof msg.providerOptions,
+      })
     }
 
-    return msgs
+    return msgs.map((msg) => patched.get(msg) ?? msg)
   }
 
   function unsupportedParts(msgs: ModelMessage[], model: Provider.Model): ModelMessage[] {
@@ -438,7 +432,9 @@ export namespace ProviderTransform {
 
     const anchor = key ? toolAnchors.get(key)!.anchor : keys[keys.length - 1]
     const target = keys.includes(anchor) ? anchor : keys[keys.length - 1]
-    const cacheTtl = process.env.ENABLE_PROMPT_CACHING_1H ? { ttl: "1h" } : {}
+    // [fork-perf] 1h cache TTL is opt-out, default-on. Only `0` / `false` / `off` disables.
+    const cachingDisabled = ["0", "false", "off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase())
+    const cacheTtl = cachingDisabled ? {} : { ttl: "1h" }
     return {
       ...tools,
       [target]: {
@@ -462,7 +458,7 @@ export namespace ProviderTransform {
     msgs = unsupportedParts(msgs, model)
     msgs = normalizeMessages(msgs, model, options)
     if (
-      ((model.providerID === "anthropic" ||
+      (model.providerID === "anthropic" ||
         model.providerID === "google-vertex-anthropic" ||
         model.providerID === "openrouter" ||
         model.api.id.includes("anthropic") ||
@@ -472,10 +468,9 @@ export namespace ProviderTransform {
         model.api.npm === "@ai-sdk/anthropic" ||
         model.api.npm === "@openrouter/ai-sdk-provider" ||
         model.api.npm === "@ai-sdk/alibaba") &&
-        model.api.npm !== "@ai-sdk/gateway") ||
-      options.caching !== false
+      model.api.npm !== "@ai-sdk/gateway"
     ) {
-      msgs = applyCaching(msgs, model)
+      msgs = applyCaching(msgs, model, options)
     }
 
     // Remap providerOptions keys from stored providerID to expected SDK key
