@@ -33,6 +33,8 @@ import { Config } from "../config/config"
 import { resolveLocal, resolveLocalAsync } from "./resolve-local"
 import { SessionSummary } from "./summary"
 import { SlidingWindow } from "./sliding-window"
+// [fork-perf] Phase 1: history cache (incremental rebuild + ModelMessage memoization)
+import * as HistoryCache from "./history-cache"
 import { NamedError } from "@opencode-ai/util/error"
 import { SessionProcessor } from "./processor"
 import { Tool } from "@/tool/tool"
@@ -1328,6 +1330,11 @@ export namespace SessionPrompt {
           // Cache system prompt fragments that are stable within a single runLoop call
           let cachedSkills: { key: string; value: string | undefined } | undefined
           let cachedEnv: { key: string; value: string[] } | undefined
+          // [fork-perf] Phase 1: per-runLoop history cache; rebuilds ModelMessages
+          // incrementally as new messages arrive, invalidated explicitly on compaction.
+          const _cfgPerf = yield* config.get()
+          const historyCache =
+            _cfgPerf.experimental?.history_cache !== false ? HistoryCache.create() : undefined
 
           while (true) {
             yield* status.set(sessionID, { type: "busy" })
@@ -1382,6 +1389,7 @@ export namespace SessionPrompt {
 
             if (task?.type === "compaction") {
               SlidingWindow.invalidate(sessionID)
+              historyCache?.invalidate() // [fork-perf] Phase 1
               const result = yield* compaction.process({
                 messages: msgs,
                 parentID: lastUser.id,
@@ -1500,6 +1508,7 @@ export namespace SessionPrompt {
                   : undefined,
               })
               log.info("compact", { sessionID, before, after: msgs.length })
+              if (msgs.length !== before) historyCache?.invalidate() // [fork-perf] Phase 1
               const sw = SlidingWindow.getMetrics(sessionID)
               if (sw) {
                 handle.message.compaction = { total: sw.total, savings: sw.savings, msgs: sw.msgs }
@@ -1572,7 +1581,11 @@ export namespace SessionPrompt {
                   return val
                 }),
                 instruction.system().pipe(Effect.orDie),
-                MessageV2.toModelMessagesEffect(msgs, model),
+                // [fork-perf] Phase 1: use historyCache when enabled — incremental ModelMessage rebuild.
+                // The cache invalidates on compaction (see seams above) so msg-array drift is bounded.
+                historyCache
+                  ? historyCache.get({ sessionID, model }).pipe(Effect.map((r) => r.modelMessages))
+                  : MessageV2.toModelMessagesEffect(msgs, model),
               ])
               const system: string[] = []
               // Prompt split caching: stable prefix (one joined entry) then dynamic suffix

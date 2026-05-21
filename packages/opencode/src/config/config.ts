@@ -1388,6 +1388,60 @@ export namespace Config {
             .optional()
             .describe("Enable safe parallel tool calls when all active tools are pre-approved and parallel-safe"),
           parallel_read: z.boolean().optional().describe("Allow the read tool to participate in parallel tool calls"),
+          // [fork-perf] Phase 1: history-cache (incremental ModelMessage rebuild per turn)
+          history_cache: z
+            .boolean()
+            .optional()
+            .describe("Cache ModelMessage rebuild across loop iterations; invalidates on compaction"),
+          // [fork-perf] Phase 1: part-coalescer (batch updatePart writes during stream)
+          part_coalescer: z
+            .boolean()
+            .optional()
+            .describe("Coalesce part updates during streaming; flush on terminal-state or window timer"),
+          coalesce_window_ms: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Coalescer flush window in ms (default: 300)"),
+          // [fork-perf] Phase 1: doom-loop ring buffer detector
+          doom_loop_ring: z.boolean().optional().describe("Use ring-buffer doom-loop detector"),
+          // [fork-perf] Phase 1: tool registry init() result cache
+          registry_cache: z.boolean().optional().describe("Cache Tool.init() results across runs"),
+          // [fork-perf] Phase 1: server-side SSE event filter (already wired by buddy commit)
+          // [fork-perf] Phase 2: read-only bash whitelist for parallel safety
+          parallel_bash_readonly: z
+            .boolean()
+            .optional()
+            .describe("Allow read-only bash commands (ls/cat/grep/...) to run in parallel"),
+          // [fork-perf] Phase 3: mid-stream tool dispatch (default off, gated)
+          midstream_tool_dispatch: z
+            .boolean()
+            .optional()
+            .describe("EXPERIMENTAL: dispatch tool execution on tool-input-end (gated)"),
+          // [fork-perf] Phase 4: skip snapshot when no FS-mutating tool fired
+          skip_snapshot_no_fs: z
+            .boolean()
+            .optional()
+            .describe("Skip snapshot.track/patch when no FS-mutating tool fired in step"),
+          // [fork-perf] Phase 5: reactive (413-driven) compaction
+          reactive_compaction: z
+            .boolean()
+            .optional()
+            .describe("Trigger compaction inline on 413/overflow and retry the same turn"),
+          async_compaction: z
+            .boolean()
+            .optional()
+            .describe("EXPERIMENTAL: spawn proactive compaction on a fiber (gated)"),
+          // [fork-perf] Phase 6: plugin and provider-transform fast paths
+          plugin_fast_path: z
+            .boolean()
+            .optional()
+            .describe("Short-circuit plugin.trigger when no listeners registered"),
+          transform_cache: z
+            .boolean()
+            .optional()
+            .describe("Memoize ProviderTransform.toolCaching/message middleware results"),
           openTelemetry: z
             .boolean()
             .optional()
