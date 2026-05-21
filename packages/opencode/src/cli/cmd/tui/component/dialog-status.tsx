@@ -1,5 +1,6 @@
 import { TextAttributes } from "@opentui/core"
 import { fileURLToPath } from "bun"
+import os from "os"
 import { useTheme } from "../context/theme"
 import { useDialog } from "@tui/ui/dialog"
 import { useSync } from "@tui/context/sync"
@@ -19,6 +20,31 @@ export function DialogStatus() {
   const sid = createMemo(() => (route.data.type === "session" ? route.data.sessionID : undefined))
 
   const enabledFormatters = createMemo(() => sync.data.formatter.filter((f) => f.enabled))
+
+  const hooks = createMemo(() => {
+    const cfg = sync.data.config.hooks
+    if (!cfg) return []
+    const home = os.homedir()
+    const events = Object.keys(cfg) as Array<keyof typeof cfg>
+    return events.flatMap((event) => {
+      const rules = cfg[event]
+      if (!rules) return []
+      return rules.map((rule) => ({
+        event,
+        matcher: rule.matcher,
+        commands: rule.hooks.map((h) =>
+          h.command
+            .replace(/"([^"]+)"|(\S+)/g, (_, quoted, bare) => {
+              const token = quoted || bare
+              if (token.startsWith(home)) return token.replace(home, "~")
+              if (token.startsWith("/") && token.includes("/", 1)) return token.split("/").pop()!
+              return quoted ? `"${token}"` : token
+            })
+            .trim(),
+        ),
+      }))
+    })
+  })
 
   const plugins = createMemo(() => {
     const list = sync.data.config.plugin ?? []
@@ -180,6 +206,30 @@ export function DialogStatus() {
                 <text wrapMode="word" fg={theme.text}>
                   <b>{item.name}</b>
                   {item.version && <span style={{ fg: theme.textMuted }}> @{item.version}</span>}
+                </text>
+              </box>
+            )}
+          </For>
+        </box>
+      </Show>
+      <Show when={hooks().length > 0}>
+        <box>
+          <text fg={theme.text}>{hooks().length} Hooks</text>
+          <For each={hooks()}>
+            {(item) => (
+              <box flexDirection="row" gap={1}>
+                <text
+                  flexShrink={0}
+                  style={{
+                    fg: theme.success,
+                  }}
+                >
+                  •
+                </text>
+                <text wrapMode="word" fg={theme.text}>
+                  <b>{item.event}</b>
+                  {item.matcher && <span style={{ fg: theme.textMuted }}> ({item.matcher})</span>}
+                  <span style={{ fg: theme.textMuted }}> {item.commands.join(", ")}</span>
                 </text>
               </box>
             )}

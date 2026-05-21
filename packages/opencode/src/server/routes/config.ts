@@ -3,6 +3,7 @@ import { describeRoute, validator, resolver } from "hono-openapi"
 import z from "zod"
 import { Config } from "../../config/config"
 import { Provider } from "../../provider/provider"
+import { Hook } from "../../hook/hook"
 import { mapValues } from "remeda"
 import { errors } from "../error"
 import { Log } from "../../util/log"
@@ -30,7 +31,13 @@ export const ConfigRoutes = lazy(() =>
         },
       }),
       async (c) => {
-        return c.json(await Config.get())
+        const config = await Config.get()
+        if (!config.hooks) {
+          const rules = await Hook.load()
+          const active = Object.fromEntries(Object.entries(rules).filter(([, v]) => v.length > 0))
+          if (Object.keys(active).length > 0) config.hooks = active as any
+        }
+        return c.json(config)
       },
     )
     .patch(
