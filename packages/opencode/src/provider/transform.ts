@@ -289,25 +289,37 @@ export namespace ProviderTransform {
     }
 
     const cacheTtl = process.env.ENABLE_PROMPT_CACHING_1H ? "1h" : undefined
-    const providerOptions = {
-      anthropic: {
-        cacheControl: { type: "ephemeral", ...(cacheTtl ? { ttl: cacheTtl } : {}) },
-      },
-      openrouter: {
-        cacheControl: { type: "ephemeral", ...(cacheTtl ? { ttl: cacheTtl } : {}) },
-      },
-      bedrock: {
-        cachePoint: { type: "default" },
-      },
-      openaiCompatible: {
-        cache_control: { type: "ephemeral" },
-      },
-      copilot: {
-        copilot_cache_control: { type: "ephemeral" },
-      },
-      alibaba: {
-        cacheControl: { type: "ephemeral" },
-      },
+
+    // Build provider-specific cache options — only include keys relevant to this model
+    // so that unrelated provider keys (e.g. anthropic.*) are never injected into
+    // messages destined for OpenAI or other non-Anthropic providers.
+    const isAnthropicLike =
+      model.providerID === "anthropic" ||
+      model.providerID === "google-vertex-anthropic" ||
+      model.api.id.includes("anthropic") ||
+      model.api.id.includes("claude") ||
+      model.id.includes("anthropic") ||
+      model.id.includes("claude") ||
+      model.api.npm === "@ai-sdk/anthropic"
+    const isOpenRouter = model.providerID === "openrouter" || model.api.npm === "@openrouter/ai-sdk-provider"
+    const isBedrock = model.providerID.includes("bedrock") || model.api.npm === "@ai-sdk/amazon-bedrock"
+    const isAlibaba = model.api.npm === "@ai-sdk/alibaba"
+    const isCopilot = model.api.npm === "@github/copilot-language-server"
+
+    const providerOptions: Record<string, unknown> = {
+      ...(isAnthropicLike && {
+        anthropic: { cacheControl: { type: "ephemeral", ...(cacheTtl ? { ttl: cacheTtl } : {}) } },
+      }),
+      ...(isOpenRouter && {
+        openrouter: { cacheControl: { type: "ephemeral", ...(cacheTtl ? { ttl: cacheTtl } : {}) } },
+      }),
+      ...(isBedrock && { bedrock: { cachePoint: { type: "default" } } }),
+      ...(isAlibaba && { alibaba: { cacheControl: { type: "ephemeral" } } }),
+      ...(isCopilot && { copilot: { copilot_cache_control: { type: "ephemeral" } } }),
+      // All other providers (e.g. openaiCompatible) use content-level cache_control
+      ...(!isAnthropicLike && !isOpenRouter && !isBedrock && !isAlibaba && !isCopilot && {
+        openaiCompatible: { cache_control: { type: "ephemeral" } },
+      }),
     }
 
     for (const msg of targets) {
@@ -325,12 +337,15 @@ export namespace ProviderTransform {
           lastContent.type !== "tool-approval-request" &&
           lastContent.type !== "tool-approval-response"
         ) {
-          lastContent.providerOptions = mergeDeep(lastContent.providerOptions ?? {}, providerOptions)
+          lastContent.providerOptions = mergeDeep(
+            lastContent.providerOptions ?? {},
+            providerOptions,
+          ) as typeof lastContent.providerOptions
           continue
         }
       }
 
-      msg.providerOptions = mergeDeep(msg.providerOptions ?? {}, providerOptions)
+      msg.providerOptions = mergeDeep(msg.providerOptions ?? {}, providerOptions) as typeof msg.providerOptions
     }
 
     return msgs
