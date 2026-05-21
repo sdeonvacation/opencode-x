@@ -20,6 +20,7 @@ import { Auth } from "@/auth"
 import { Installation } from "@/installation"
 import { resolveHybridRoute } from "@/session/route-classifier"
 import { WorkflowApproval } from "./llm/workflow-approval"
+import { ReactiveCompact } from "./llm/reactive-compact" // [fork-perf] Phase 5
 
 export namespace LLM {
   const log = Log.create({ service: "llm" })
@@ -79,7 +80,7 @@ export namespace LLM {
 
                 return Stream.fromAsyncIterable(result.fullStream, (e) =>
                   e instanceof Error ? e : new Error(String(e)),
-                )
+                ) // [fork-perf] Phase 5: overflow events propagate to processor halt() → ReactiveCompact.isOverflow
               }),
             ),
           )
@@ -319,9 +320,12 @@ export namespace LLM {
 
     return streamText({
       onError(error) {
-        l.error("stream error", {
-          error,
-        })
+        // [fork-perf] Phase 5: log overflow errors; processor.halt() catches and sets needsCompaction
+        if (ReactiveCompact.isOverflow(error)) {
+          l.warn("stream overflow", { error })
+        } else {
+          l.error("stream error", { error })
+        }
       },
       stopWhen: input.maxSteps && input.maxSteps > 1 ? stepCountIs(input.maxSteps) : undefined,
       async experimental_repairToolCall(failed) {

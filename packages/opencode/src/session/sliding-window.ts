@@ -70,7 +70,7 @@ export namespace SlidingWindow {
     }
 
     const opts = input.cfg.compaction?.sliding_window
-    const threshold = opts?.threshold ?? 50_000
+    const threshold = opts?.threshold ?? deriveThresholdFromConfig(input.model, opts) ?? 50_000 // [fork-perf] Phase 5: proactive_ratio support
 
     const caching = input.cfg.experimental?.cache_sliding_window
     const stash = (out: MessageV2.WithParts[]) => {
@@ -179,6 +179,21 @@ export namespace SlidingWindow {
     lastGen.delete(sessionID)
     lastCompact.delete(sessionID)
     log.info("invalidate", { sessionID })
+  }
+
+  // [fork-perf] Phase 5: derive threshold from proactive_ratio * model context limit
+  // Reconciliation note: HLD §4.6 says "0.85 → 0.95 ratio" but the actual code uses absolute
+  // threshold (50_000). We add proactive_ratio as an additive config knob; when absent the
+  // absolute threshold path is unchanged.
+  function deriveThresholdFromConfig(
+    model: Provider.Model,
+    opts: NonNullable<NonNullable<Config.Info["compaction"]>["sliding_window"]> | undefined,
+  ): number | undefined {
+    const ratio = (opts as any)?.proactive_ratio as number | undefined
+    if (!ratio) return undefined
+    const limit = model.limit?.context
+    if (!limit || limit === 0) return undefined
+    return Math.floor(limit * ratio)
   }
 
   function should(input: CompactInput) {

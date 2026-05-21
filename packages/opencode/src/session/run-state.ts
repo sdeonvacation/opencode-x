@@ -8,6 +8,12 @@ import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
 
 export namespace SessionRunState {
+  // [fork-perf] Phase 4: per-step snapshot-gate state fields (used by ProcessorContext)
+  export interface SnapshotGateFields {
+    fsToolFired: boolean
+    lastSnapshotAt?: string
+  }
+
   export interface Interface {
     readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void>
     readonly cancel: (sessionID: SessionID) => Effect.Effect<void>

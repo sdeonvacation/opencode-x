@@ -1236,6 +1236,13 @@ export namespace Config {
                 .optional()
                 .default(30_000)
                 .describe("Timeout for summary generation call (default: 30000)"),
+              // [fork-perf] Phase 5: proactive_ratio — derive threshold from model context limit
+              proactive_ratio: z
+                .number()
+                .min(0.5)
+                .max(0.99)
+                .optional()
+                .describe("Fraction of model context limit to use as sliding-window threshold (e.g. 0.95)"),
             })
             .optional(),
         })

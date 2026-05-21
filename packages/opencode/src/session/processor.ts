@@ -1,4 +1,4 @@
-import { Cause, Deferred, Effect, Layer, Option, ServiceMap } from "effect"
+import { Cause, Deferred, Effect, Layer, Option, ServiceMap } from "effect" // [fork-perf]
 import * as Stream from "effect/Stream"
 import { Agent } from "@/agent/agent"
 import { Bus } from "@/bus"
@@ -25,6 +25,9 @@ import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
 import { isRecord } from "@/util/record"
 import { Flag } from "@/flag/flag"
+import * as PartCoalescer from "./part-coalescer" // [fork-perf] Phase 1B
+import * as DoomLoopDetector from "./doom-loop" // [fork-perf] Phase 1B
+import { SnapshotGate } from "./snapshot-gate" // [fork-perf] Phase 4
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -94,6 +97,10 @@ export namespace SessionProcessor {
     doom: Map<string, number>
     hadText: boolean
     hadToolCalls: boolean
+    fsToolFired: boolean // [fork-perf] Phase 4: set true when FS-mutating tool fires
+    lastSnapshotAt?: string // [fork-perf] Phase 4: hash of last successful track()
+    doomLoop: DoomLoopDetector.DoomLoopDetector | undefined // [fork-perf] Phase 1B: ring-buffer detector
+    compactedReactively: boolean // [fork-perf] Phase 5: prevent double-compact on retry
   }
 
   type StreamEvent = Event
@@ -137,6 +144,16 @@ export namespace SessionProcessor {
               Provider.getModel(ProviderID.make(ref.providerID), ModelID.make(ref.modelID)),
             ).pipe(Effect.option)
           : Option.none<Provider.Model>()
+        // [fork-perf] Phase 1B: coalescer instance per processor.create call
+        const coalescer =
+          cfg.experimental?.part_coalescer !== false
+            ? PartCoalescer.create({ flush: (part) => session.updatePart(part).pipe(Effect.asVoid) })
+            : undefined
+        // [fork-perf] Phase 1B: ring-buffer doom-loop detector (alongside existing SELECT-based check)
+        const doomLoopDetector: DoomLoopDetector.DoomLoopDetector | undefined =
+          cfg.experimental?.doom_loop_ring === true
+            ? DoomLoopDetector.create({ threshold: DOOM_LOOP_THRESHOLD })
+            : undefined
         const ctx: ProcessorContext = {
           assistantMessage: input.assistantMessage,
           sessionID: input.sessionID,
@@ -157,6 +174,10 @@ export namespace SessionProcessor {
           doom: new Map(),
           hadText: false,
           hadToolCalls: false,
+          fsToolFired: false, // [fork-perf] Phase 4
+          lastSnapshotAt: undefined, // [fork-perf] Phase 4
+          doomLoop: doomLoopDetector, // [fork-perf] Phase 1B
+          compactedReactively: false, // [fork-perf] Phase 5
         }
         let aborted = false
 
@@ -420,6 +441,22 @@ export namespace SessionProcessor {
                   ? { ...value.providerMetadata, providerExecuted: true }
                   : value.providerMetadata,
               }))
+              // [fork-perf] Phase 4: track FS-mutating tools for snapshot gate
+              SnapshotGate.onToolCall(ctx, value.toolName)
+
+              // [fork-perf] Phase 1B: ring-buffer detector (runs before SELECT-based check)
+              if (ctx.doomLoop) {
+                ctx.doomLoop.record({ toolName: value.toolName, input: value.input })
+                if (ctx.doomLoop.detect({ toolName: value.toolName, input: value.input })) {
+                  yield* failToolCall(
+                    value.toolCallId,
+                    `Doom loop detected (ring): tool '${value.toolName}' called ${DOOM_LOOP_THRESHOLD} times with identical input. Aborting.`,
+                  )
+                  ctx.shouldBreak = true
+                  ctx.blocked = true
+                  return
+                }
+              }
 
               const parts = MessageV2.parts(ctx.assistantMessage.id)
               const recentParts = parts.filter((part) => part.type === "tool").slice(-DOOM_LOOP_THRESHOLD)
@@ -477,7 +514,8 @@ export namespace SessionProcessor {
               throw value.error
 
             case "start-step":
-              if (!ctx.snapshot) ctx.snapshot = yield* snapshot.track()
+              // [fork-perf] Phase 4: gated snapshot track — skip when no FS tool fired
+              if (!ctx.snapshot) ctx.snapshot = yield* SnapshotGate.track(ctx, snapshot, cfg.experimental?.skip_snapshot_no_fs !== false)
               yield* session.updatePart({
                 id: PartID.ascending(),
                 messageID: ctx.assistantMessage.id,
@@ -499,7 +537,8 @@ export namespace SessionProcessor {
               yield* session.updatePart({
                 id: PartID.ascending(),
                 reason: value.finishReason,
-                snapshot: yield* snapshot.track(),
+                // [fork-perf] Phase 4: gated snapshot track
+                snapshot: yield* SnapshotGate.track(ctx, snapshot, cfg.experimental?.skip_snapshot_no_fs !== false),
                 messageID: ctx.assistantMessage.id,
                 sessionID: ctx.assistantMessage.sessionID,
                 type: "step-finish",
@@ -508,8 +547,9 @@ export namespace SessionProcessor {
               })
               yield* session.updateMessage(ctx.assistantMessage)
               if (ctx.snapshot) {
-                const patch = yield* snapshot.patch(ctx.snapshot)
-                if (patch.files.length) {
+                // [fork-perf] Phase 4: gated snapshot patch — returns undefined when no FS tool fired
+                const patch = yield* SnapshotGate.patch(ctx, snapshot, cfg.experimental?.skip_snapshot_no_fs !== false)
+                if (patch !== undefined && patch.files.length) {
                   yield* session.updatePart({
                     id: PartID.ascending(),
                     messageID: ctx.assistantMessage.id,
@@ -593,8 +633,9 @@ export namespace SessionProcessor {
 
         const cleanup = Effect.fn("SessionProcessor.cleanup")(function* () {
           if (ctx.snapshot) {
-            const patch = yield* snapshot.patch(ctx.snapshot)
-            if (patch.files.length) {
+            // [fork-perf] Phase 4: gated snapshot patch (second site — sliding-window v2 / cleanup path)
+            const patch = yield* SnapshotGate.patch(ctx, snapshot, cfg.experimental?.skip_snapshot_no_fs !== false)
+            if (patch !== undefined && patch.files.length) {
               yield* session.updatePart({
                 id: PartID.ascending(),
                 messageID: ctx.assistantMessage.id,
@@ -685,11 +726,12 @@ export namespace SessionProcessor {
                 },
               })
 
+              // [fork-perf] Phase 1B: wrap stream loop with coalescer dispose in finally
               yield* stream.pipe(
                 Stream.tap((event) => handleEvent(event)),
                 Stream.takeUntil(() => ctx.needsCompaction),
                 Stream.runDrain,
-              )
+              ).pipe(Effect.ensuring(coalescer ? coalescer.dispose() : Effect.void))
             }).pipe(
               Effect.onInterrupt(() =>
                 Effect.gen(function* () {

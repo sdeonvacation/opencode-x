@@ -15,12 +15,13 @@ import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
 import { NotFoundError } from "@/storage/db"
 import { ModelID, ProviderID } from "@/provider/schema"
-import { Effect, Layer, ServiceMap } from "effect"
+import { Effect, Layer, ServiceMap } from "effect" // [fork-perf] Phase 5: forkChild used below
 import { makeRuntime } from "@/effect/run-service"
 import { InstanceState } from "@/effect/instance-state"
 import { isOverflow as overflow } from "./overflow"
 import { resolveLocal } from "./resolve-local"
 import { ProviderTransform } from "@/provider/transform"
+import { SlidingWindow } from "./sliding-window" // [fork-perf] Phase 5
 
 export namespace SessionCompaction {
   const log = Log.create({ service: "session.compaction" })
@@ -669,4 +670,11 @@ Rules:
     }),
     (input) => runPromise((svc) => svc.create(input)),
   )
+
+  // [fork-perf] Phase 5: async-compaction fork variant — spawns SlidingWindow.compact on a fiber
+  // Consumer is responsible for gating on cfg.experimental?.async_compaction === true.
+  export const compactAsync = (
+    input: SlidingWindow.CompactInput,
+  ): Effect.Effect<void> =>
+    SlidingWindow.compact(input).pipe(Effect.forkChild, Effect.asVoid) // [fork-perf] Phase 5
 }
