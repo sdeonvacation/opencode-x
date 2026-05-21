@@ -1389,7 +1389,6 @@ export namespace SessionPrompt {
 
             if (task?.type === "compaction") {
               SlidingWindow.invalidate(sessionID)
-              historyCache?.invalidate() // [fork-perf] Phase 1
               const result = yield* compaction.process({
                 messages: msgs,
                 parentID: lastUser.id,
@@ -1397,6 +1396,9 @@ export namespace SessionPrompt {
                 auto: task.auto,
                 overflow: task.overflow,
               })
+              // [fork-perf] Phase 1: invalidate AFTER compaction so next turn
+              // rebuilds from the post-compaction state, not pre-compaction stale messages.
+              historyCache?.invalidate()
               if (result === "stop") break
               continue
             }
@@ -1521,6 +1523,8 @@ export namespace SessionPrompt {
                 if (used > limit * 0.8) {
                   yield* compaction.prune({ sessionID, aggressive: true }).pipe(Effect.orElseSucceed(() => false))
                   msgs = yield* MessageV2.filterCompactedEffect(sessionID)
+                  // [fork-perf] Phase 1: msgs replaced — next turn must rebuild from fresh state
+                  historyCache?.invalidate()
                 }
               }
 
@@ -1535,6 +1539,7 @@ export namespace SessionPrompt {
                   lastFinished.tokens.input + lastFinished.tokens.cache.read + lastFinished.tokens.cache.write
                 const limit = model.limit?.context ?? 200_000
                 if (MicroCompact.shouldCompact({ input: used, context: limit })) {
+                  const prevLen = msgs.length
                   msgs = yield* (
                     MicroCompact.compact({
                       sessionID,
@@ -1544,6 +1549,8 @@ export namespace SessionPrompt {
                       cfg,
                     }) as Effect.Effect<MessageV2.WithParts[]>
                   ).pipe(Effect.orElseSucceed(() => msgs))
+                  // [fork-perf] Phase 1: invalidate only when MicroCompact actually changed msgs
+                  if (msgs.length !== prevLen) historyCache?.invalidate()
                 }
               }
 
@@ -1553,6 +1560,7 @@ export namespace SessionPrompt {
                   lastFinished.tokens.input + lastFinished.tokens.cache.read + lastFinished.tokens.cache.write
                 const limit = model.limit?.context ?? 200_000
                 if (ContextCollapse.shouldCollapse({ input: used, context: limit })) {
+                  const prevLen = msgs.length
                   msgs = yield* (
                     ContextCollapse.collapse({
                       sessionID,
@@ -1562,6 +1570,8 @@ export namespace SessionPrompt {
                       cfg,
                     }) as Effect.Effect<MessageV2.WithParts[]>
                   ).pipe(Effect.orElseSucceed(() => msgs))
+                  // [fork-perf] Phase 1: invalidate only when ContextCollapse actually changed msgs
+                  if (msgs.length !== prevLen) historyCache?.invalidate()
                 }
               }
 

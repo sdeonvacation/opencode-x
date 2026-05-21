@@ -28,6 +28,7 @@ import { Flag } from "@/flag/flag"
 import * as PartCoalescer from "./part-coalescer" // [fork-perf] Phase 1B
 import * as DoomLoopDetector from "./doom-loop" // [fork-perf] Phase 1B
 import { SnapshotGate } from "./snapshot-gate" // [fork-perf] Phase 4
+import { ReactiveCompact } from "./llm/reactive-compact" // [fork-perf] Phase 5
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -119,6 +120,7 @@ export namespace SessionProcessor {
     | Permission.Service
     | Plugin.Service
     | SessionStatus.Service
+    | Provider.Service // [fork-perf] Phase 5: needed for ReactiveCompact.handle
   > = Layer.effect(
     Service,
     Effect.gen(function* () {
@@ -131,6 +133,7 @@ export namespace SessionProcessor {
       const permission = yield* Permission.Service
       const plugin = yield* Plugin.Service
       const status = yield* SessionStatus.Service
+      const provider = yield* Provider.Service // [fork-perf] Phase 5
 
       const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
         // Pre-capture snapshot before the LLM stream starts. The AI SDK
@@ -258,6 +261,8 @@ export namespace SessionProcessor {
               const truncated = truncateHeadTail(output.output, head, tail)
               yield* session.updatePart({
                 ...match.part,
+                // [fork-perf] Phase 1: terminal=true so coalescer flushes before next API turn
+                metadata: { terminal: true },
                 state: {
                   status: "completed",
                   input: match.part.state.input,
@@ -271,7 +276,7 @@ export namespace SessionProcessor {
                   time: { start: match.part.state.time.start, end: Date.now() },
                   attachments: output.attachments,
                 },
-              })
+              } as any)
             } else {
               const result = yield* LLMCompress.compress({
                 tool: match.part.tool,
@@ -285,6 +290,8 @@ export namespace SessionProcessor {
               })
               yield* session.updatePart({
                 ...match.part,
+                // [fork-perf] Phase 1: terminal=true so coalescer flushes before next API turn
+                metadata: { terminal: true },
                 state: {
                   status: "completed",
                   input: match.part.state.input,
@@ -301,7 +308,7 @@ export namespace SessionProcessor {
                   time: { start: match.part.state.time.start, end: Date.now() },
                   attachments: output.attachments,
                 },
-              })
+              } as any)
             }
           }
           if (enabled) {
@@ -715,12 +722,13 @@ export namespace SessionProcessor {
           ctx.hadToolCalls = false
           ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
 
-          return yield* Effect.gen(function* () {
-            yield* Effect.gen(function* () {
+          // [fork-perf] Phase 5: inner runStream extracted so reactive compact can retry once
+          const runStream = (input: LLM.StreamInput) =>
+            Effect.gen(function* () {
               ctx.currentText = undefined
               ctx.reasoningMap = {}
               const stream = llm.stream({
-                ...streamInput,
+                ...input,
                 onModelResolved: (m) => {
                   ctx.model = m
                 },
@@ -756,6 +764,36 @@ export namespace SessionProcessor {
                       next: info.next,
                     }),
                 }),
+              ),
+            )
+
+          return yield* Effect.gen(function* () {
+            yield* runStream(streamInput).pipe(
+              // [fork-perf] Phase 5: reactive compact — on overflow, compact inline and retry once
+              Effect.catchIf(
+                (err) =>
+                  ReactiveCompact.isOverflow(err) &&
+                  cfg.experimental?.reactive_compaction !== false &&
+                  !ctx.compactedReactively,
+                (err) =>
+                  Effect.gen(function* () {
+                    log.warn("reactive compact triggered", { error: err })
+                    const msgs = yield* session.messages({ sessionID: ctx.sessionID })
+                    const { messages: compacted } = yield* ReactiveCompact.handle({
+                      msgs,
+                      model: ctx.model,
+                      provider,
+                      cfg,
+                      sessionID: ctx.sessionID,
+                      agent: streamInput.agent,
+                    })
+                    ctx.compactedReactively = true
+                    // Rebuild model messages from compacted session messages
+                    const retryMsgs = yield* Effect.promise(() =>
+                      MessageV2.toModelMessages(compacted, ctx.model),
+                    )
+                    yield* runStream({ ...streamInput, messages: retryMsgs })
+                  }),
               ),
               Effect.catch(halt),
               Effect.ensuring(cleanup()),
@@ -794,6 +832,7 @@ export namespace SessionProcessor {
       Layer.provide(SessionStatus.defaultLayer),
       Layer.provide(Bus.layer),
       Layer.provide(Config.defaultLayer),
+      Layer.provide(Provider.defaultLayer), // [fork-perf] Phase 5: reactive compact needs provider
     ),
   )
 }

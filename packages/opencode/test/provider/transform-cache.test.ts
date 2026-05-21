@@ -36,30 +36,34 @@ describe("TransformCache.memo", () => {
     expect(r2).toBe("value-b")
   })
 
-  test("FIFO eviction when cache exceeds 64 entries", () => {
-    // Fill cache with 64 entries using unique sessionIDs
-    for (let i = 0; i < 64; i++) {
+  test("LRU eviction: recently-accessed entry survives, least-recently-used is evicted", () => {
+    // Fill cache with 256 entries.
+    for (let i = 0; i < 256; i++) {
       TransformCache.memo({ modelID: "m", toolHash: "h", sessionID: `sess-${i}` }, () => `val-${i}`)
     }
 
-    // Adding the 65th entry triggers eviction of sess-0 (oldest, FIFO).
-    TransformCache.memo({ modelID: "m", toolHash: "h", sessionID: "sess-64" }, () => "val-64")
+    // Access sess-0 to make it most-recently-used.
+    TransformCache.memo({ modelID: "m", toolHash: "h", sessionID: "sess-0" }, () => "should-not-be-called")
 
-    // sess-0 should be evicted → fn is called again, and that insertion evicts sess-1.
-    let recalculated0 = false
+    // Adding sess-256 triggers eviction of the LRU entry, which is now sess-1
+    // (sess-0 was just promoted to tail).
+    TransformCache.memo({ modelID: "m", toolHash: "h", sessionID: "sess-256" }, () => "val-256")
+
+    // sess-0 should still be cached (it was recently accessed).
+    let sess0Recalculated = false
     TransformCache.memo({ modelID: "m", toolHash: "h", sessionID: "sess-0" }, () => {
-      recalculated0 = true
+      sess0Recalculated = true
       return "recomputed-0"
     })
-    expect(recalculated0).toBe(true)
+    expect(sess0Recalculated).toBe(false)
 
-    // sess-2 should still be cached (was not yet evicted at this point).
-    let sess2Recalculated = false
-    TransformCache.memo({ modelID: "m", toolHash: "h", sessionID: "sess-2" }, () => {
-      sess2Recalculated = true
-      return "recomputed"
+    // sess-1 should have been evicted (was LRU when sess-256 was inserted).
+    let sess1Recalculated = false
+    TransformCache.memo({ modelID: "m", toolHash: "h", sessionID: "sess-1" }, () => {
+      sess1Recalculated = true
+      return "recomputed-1"
     })
-    expect(sess2Recalculated).toBe(false)
+    expect(sess1Recalculated).toBe(true)
   })
 })
 
