@@ -29,6 +29,7 @@ import * as PartCoalescer from "./part-coalescer" // [fork-perf] Phase 1B
 import * as DoomLoopDetector from "./doom-loop" // [fork-perf] Phase 1B
 import { SnapshotGate } from "./snapshot-gate" // [fork-perf] Phase 4
 import { ReactiveCompact } from "./llm/reactive-compact" // [fork-perf] Phase 5
+import { DetachedNotes } from "./detached-notes"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -546,7 +547,8 @@ export namespace SessionProcessor {
 
             case "start-step":
               // [fork-perf] Phase 4: gated snapshot track — skip when no FS tool fired
-              if (!ctx.snapshot) ctx.snapshot = yield* SnapshotGate.track(ctx, snapshot, cfg.experimental?.skip_snapshot_no_fs !== false)
+              if (!ctx.snapshot)
+                ctx.snapshot = yield* SnapshotGate.track(ctx, snapshot, cfg.experimental?.skip_snapshot_no_fs !== false)
               yield* session.updatePart({
                 id: PartID.ascending(),
                 messageID: ctx.assistantMessage.id,
@@ -712,7 +714,7 @@ export namespace SessionProcessor {
               state: {
                 ...part.state,
                 status: "error",
-                error: "Tool execution aborted",
+                error: DetachedNotes.isDetaching(ctx.sessionID) ? "(background)" : "Tool execution aborted",
                 metadata: { ...metadata, interrupted: true },
                 time: { start: "time" in part.state ? part.state.time.start : end, end },
               },
@@ -760,11 +762,13 @@ export namespace SessionProcessor {
               })
 
               // [fork-perf] Phase 1B: wrap stream loop with coalescer dispose in finally
-              yield* stream.pipe(
-                Stream.tap((event) => handleEvent(event)),
-                Stream.takeUntil(() => ctx.needsCompaction),
-                Stream.runDrain,
-              ).pipe(Effect.ensuring(coalescer ? coalescer.dispose() : Effect.void))
+              yield* stream
+                .pipe(
+                  Stream.tap((event) => handleEvent(event)),
+                  Stream.takeUntil(() => ctx.needsCompaction),
+                  Stream.runDrain,
+                )
+                .pipe(Effect.ensuring(coalescer ? coalescer.dispose() : Effect.void))
             }).pipe(
               Effect.onInterrupt(() =>
                 Effect.gen(function* () {

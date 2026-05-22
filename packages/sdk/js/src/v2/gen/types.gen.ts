@@ -326,7 +326,7 @@ export type EventTuiBackgroundUpdate = {
     sessionID: string
     taskID: string
     title: string
-    state: "running" | "completed" | "error"
+    state: "running" | "completed" | "error" | "cancelled"
   }
 }
 
@@ -1431,6 +1431,10 @@ export type ProviderConfig = {
      * Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted.
      */
     chunkTimeout?: number
+    /**
+     * Enable explicit cache_control markers for this provider (e.g. Deepseek, Fireworks)
+     */
+    caching?: boolean
     [key: string]: unknown | string | boolean | number | false | number | undefined
   }
   models?: {
@@ -1521,6 +1525,10 @@ export type McpLocalConfig = {
    * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
    */
   timeout?: number
+  /**
+   * Allowlist of tool names to expose. If omitted, all tools are exposed.
+   */
+  tools?: Array<string>
 }
 
 export type McpOAuthConfig = {
@@ -1569,6 +1577,10 @@ export type McpRemoteConfig = {
    * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
    */
   timeout?: number
+  /**
+   * Allowlist of tool names to expose. If omitted, all tools are exposed.
+   */
+  tools?: Array<string>
 }
 
 /**
@@ -1620,6 +1632,14 @@ export type HybridConfig = {
    * Lines from end of bash output to always preserve verbatim after compression (default: 20)
    */
   compression_tail_lines?: number
+  /**
+   * Head lines to keep in heuristic truncation (default: 50)
+   */
+  heuristic_head?: number
+  /**
+   * Tail lines to keep in heuristic truncation (default: 20)
+   */
+  heuristic_tail?: number
   /**
    * Per-tool line count thresholds for compression eligibility
    */
@@ -1821,6 +1841,14 @@ export type Config = {
      * Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
      */
     reserved?: number
+    /**
+     * Number of recent user turns, including their following assistant/tool responses, to keep verbatim during compaction (default: 2)
+     */
+    tail_turns?: number
+    /**
+     * Token budget for retained recent turn spans during compaction
+     */
+    tail_tokens?: number
     sliding_window?: {
       /**
        * Enable proactive sliding-window compaction
@@ -1842,11 +1870,20 @@ export type Config = {
        * Timeout for summary generation call (default: 30000)
        */
       timeout_ms?: number
+      /**
+       * Fraction of model context limit to use as sliding-window threshold (e.g. 0.95)
+       */
+      proactive_ratio?: number
+      /**
+       * Min new tail tokens before next compact fires (prevents thrash). 0 = disabled. Default 30000.
+       */
+      hysteresis_min_tokens?: number
     }
   }
   hooks?: {
     PreToolUse?: Array<{
       matcher?: string
+      status_message?: string
       hooks: Array<{
         type: "command"
         command: string
@@ -1855,6 +1892,7 @@ export type Config = {
     }>
     PostToolUse?: Array<{
       matcher?: string
+      status_message?: string
       hooks: Array<{
         type: "command"
         command: string
@@ -1863,6 +1901,7 @@ export type Config = {
     }>
     PostToolUseFailure?: Array<{
       matcher?: string
+      status_message?: string
       hooks: Array<{
         type: "command"
         command: string
@@ -1871,6 +1910,7 @@ export type Config = {
     }>
     Notification?: Array<{
       matcher?: string
+      status_message?: string
       hooks: Array<{
         type: "command"
         command: string
@@ -1879,6 +1919,7 @@ export type Config = {
     }>
     Stop?: Array<{
       matcher?: string
+      status_message?: string
       hooks: Array<{
         type: "command"
         command: string
@@ -1887,6 +1928,7 @@ export type Config = {
     }>
     SubagentStart?: Array<{
       matcher?: string
+      status_message?: string
       hooks: Array<{
         type: "command"
         command: string
@@ -1895,6 +1937,7 @@ export type Config = {
     }>
     SubagentStop?: Array<{
       matcher?: string
+      status_message?: string
       hooks: Array<{
         type: "command"
         command: string
@@ -1903,6 +1946,7 @@ export type Config = {
     }>
     SessionStart?: Array<{
       matcher?: string
+      status_message?: string
       hooks: Array<{
         type: "command"
         command: string
@@ -1911,6 +1955,7 @@ export type Config = {
     }>
     UserPromptSubmit?: Array<{
       matcher?: string
+      status_message?: string
       hooks: Array<{
         type: "command"
         command: string
@@ -1932,6 +1977,54 @@ export type Config = {
      * Allow the read tool to participate in parallel tool calls
      */
     parallel_read?: boolean
+    /**
+     * Cache ModelMessage rebuild across loop iterations; invalidates on compaction
+     */
+    history_cache?: boolean
+    /**
+     * Coalesce part updates during streaming; flush on terminal-state or window timer
+     */
+    part_coalescer?: boolean
+    /**
+     * Coalescer flush window in ms (default: 300)
+     */
+    coalesce_window_ms?: number
+    /**
+     * Use ring-buffer doom-loop detector
+     */
+    doom_loop_ring?: boolean
+    /**
+     * Cache Tool.init() results across runs
+     */
+    registry_cache?: boolean
+    /**
+     * Allow read-only bash commands (ls/cat/grep/...) to run in parallel
+     */
+    parallel_bash_readonly?: boolean
+    /**
+     * EXPERIMENTAL: dispatch tool execution on tool-input-end (gated)
+     */
+    midstream_tool_dispatch?: boolean
+    /**
+     * Skip snapshot.track/patch when no FS-mutating tool fired in step
+     */
+    skip_snapshot_no_fs?: boolean
+    /**
+     * Trigger compaction inline on 413/overflow and retry the same turn
+     */
+    reactive_compaction?: boolean
+    /**
+     * EXPERIMENTAL: spawn proactive compaction on a fiber (gated)
+     */
+    async_compaction?: boolean
+    /**
+     * Short-circuit plugin.trigger when no listeners registered
+     */
+    plugin_fast_path?: boolean
+    /**
+     * Memoize ProviderTransform.toolCaching/message middleware results
+     */
+    transform_cache?: boolean
     /**
      * Enable OpenTelemetry spans for AI SDK calls (using the 'experimental_telemetry' flag)
      */
@@ -1999,6 +2092,10 @@ export type Config = {
      */
     compression_threshold?: number
     /**
+     * Use head+tail truncation for grep/glob instead of LLM compression (default: true)
+     */
+    compression_heuristic?: boolean
+    /**
      * Exit loop early when model returns empty response with no tool calls
      */
     noop_exit?: boolean
@@ -2050,6 +2147,22 @@ export type Config = {
      * Enable cross-session persistent memory
      */
     persistent_memory?: boolean
+    /**
+     * Enable multi-step streamText for safe tool chains (default: true)
+     */
+    multi_step?: boolean
+    /**
+     * Max SDK-internal steps when multi_step enabled (default: 5)
+     */
+    multi_step_count?: number
+    /**
+     * Write per-turn cache-behavior debug log to ~/.local/share/opencode/cache-debug/ (default: false)
+     */
+    cache_debug_log?: boolean
+    /**
+     * Strip inline <thinking>...</thinking> segments from text parts before sending to LLM. Saves input tokens at the cost of CoT continuity. Default false.
+     */
+    strip_thinking_text?: boolean
   }
 }
 
@@ -3941,6 +4054,42 @@ export type SessionAbortResponses = {
 }
 
 export type SessionAbortResponse = SessionAbortResponses[keyof SessionAbortResponses]
+
+export type SessionBackgroundData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/background"
+}
+
+export type SessionBackgroundErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionBackgroundError = SessionBackgroundErrors[keyof SessionBackgroundErrors]
+
+export type SessionBackgroundResponses = {
+  /**
+   * Background detach result
+   */
+  200: {
+    success: boolean
+  }
+}
+
+export type SessionBackgroundResponse = SessionBackgroundResponses[keyof SessionBackgroundResponses]
 
 export type SessionUnshareData = {
   body?: never

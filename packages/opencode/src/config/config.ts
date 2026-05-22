@@ -802,6 +802,9 @@ export namespace Config {
       session_quick_switch_7: z.string().optional().default("<leader>7").describe("Switch to session in quick slot 7"),
       session_quick_switch_8: z.string().optional().default("<leader>8").describe("Switch to session in quick slot 8"),
       session_quick_switch_9: z.string().optional().default("<leader>9").describe("Switch to session in quick slot 9"),
+      // fork: background-detach (#FORK) — begin
+      session_background: z.string().optional().default("<leader>d").describe("Push running session to background"),
+      // fork: background-detach (#FORK) — end
     })
     .strict()
     .meta({
@@ -1607,7 +1610,9 @@ export namespace Config {
           cache_debug_log: z
             .boolean()
             .optional()
-            .describe("Write per-turn cache-behavior debug log to ~/.local/share/opencode/cache-debug/ (default: false)"),
+            .describe(
+              "Write per-turn cache-behavior debug log to ~/.local/share/opencode/cache-debug/ (default: false)",
+            ),
           // [fork-perf] strip-thinking
           strip_thinking_text: z
             .boolean()

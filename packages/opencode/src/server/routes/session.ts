@@ -440,6 +440,37 @@ export const SessionRoutes = lazy(() =>
         return c.json(true)
       },
     )
+    // fork: background-detach (#FORK) — begin
+    .post(
+      "/:sessionID/background",
+      describeRoute({
+        summary: "Push session to background",
+        description: "Detach the current running session to background, freeing the prompt input.",
+        operationId: "session.background",
+        responses: {
+          200: {
+            description: "Background detach result",
+            content: {
+              "application/json": {
+                schema: resolver(z.object({ success: z.boolean(), children: z.number() })),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      async (c) => {
+        const children = await SessionPrompt.background(c.req.valid("param").sessionID)
+        return c.json({ success: children > 0, children })
+      },
+    )
+    // fork: background-detach (#FORK) — end
     .post(
       "/:sessionID/share",
       describeRoute({

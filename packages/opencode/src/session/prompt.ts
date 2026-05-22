@@ -46,7 +46,7 @@ import { AppFileSystem } from "@/filesystem"
 import { Truncate } from "@/tool/truncate"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
-import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
 import { insertReminders } from "./prompt-reminders"
 import { handleSubtask } from "./subtask-handler"
 import { InstanceState } from "@/effect/instance-state"
@@ -63,6 +63,11 @@ import { SessionRunState } from "./run-state"
 import { CacheDebugLog } from "./cache-debug-log"
 import { Instance } from "@/project/instance"
 import type { TaskPromptOps } from "@/tool/task"
+
+import { Flag } from "../flag/flag"
+import { BackgroundJob } from "@/background/job"
+import { TuiEvent } from "@/cli/cmd/tui/event"
+import { DetachedNotes } from "./detached-notes"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -88,6 +93,9 @@ export namespace SessionPrompt {
     readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
     readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
     readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
+    // fork: background-detach (#FORK) — begin
+    readonly background: (sessionID: SessionID) => Effect.Effect<number>
+    // fork: background-detach (#FORK) — end
   }
 
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/SessionPrompt") {}
@@ -118,10 +126,191 @@ export namespace SessionPrompt {
       const revert = yield* SessionRevert.Service
       const config = yield* Config.Service
 
+      // fork: background-detach (#FORK) — begin (cancel override)
       const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
+        if (DetachedNotes.isProtected(sessionID)) return
         log.info("cancel", { sessionID })
         yield* state.cancel(sessionID)
+        // Cascade: also cancel any detached children of this parent
+        const childIDs = DetachedNotes.getDetachedChildren(sessionID)
+        if (childIDs.length) {
+          for (const childID of childIDs) {
+            DetachedNotes.unprotect(childID as SessionID)
+            yield* state.cancel(childID as SessionID)
+          }
+          DetachedNotes.removeParent(sessionID)
+        }
       })
+      // fork: background-detach (#FORK) — end (cancel override)
+
+      // fork: background-detach (#FORK) — begin
+      const background = Effect.fn("SessionPrompt.background")(function* (sessionID: SessionID) {
+        if (!Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS) return 0
+        const runner = yield* state.peek(sessionID)
+        if (!runner) return 0
+        const st = runner.state
+        if (st._tag !== "Running" && st._tag !== "ShellThenRun") return 0
+
+        // Find running children
+        const kids = yield* sessions.children(sessionID)
+        const running: Array<{ childID: SessionID; description: string; runner: typeof runner }> = []
+        for (const child of kids) {
+          const r = yield* state.peek(child.id)
+          if (!r) continue
+          if (r.state._tag !== "Running" && r.state._tag !== "ShellThenRun") continue
+          running.push({ childID: child.id, description: child.title ?? child.id, runner: r })
+        }
+
+        if (running.length === 0) return 0
+
+        // Get parent model/agent for auto-resume
+        const msgs = MessageV2.page({ sessionID, limit: 5 })
+        const lastAssist = msgs.items.findLast((m) => m.info.role === "assistant")
+        const model =
+          lastAssist && lastAssist.info.role === "assistant"
+            ? { providerID: lastAssist.info.providerID, modelID: lastAssist.info.modelID }
+            : { providerID: "unknown" as any, modelID: "unknown" as any }
+        const agent = lastAssist && lastAssist.info.role === "assistant" ? lastAssist.info.agent : "build"
+
+        // Protect children from cancel cascade
+        for (const child of running) {
+          DetachedNotes.protect(child.childID)
+        }
+
+        // Register parent state for tracking
+        DetachedNotes.registerParent(
+          sessionID,
+          running.map((c) => ({ childID: c.childID, description: c.description })),
+          model,
+          agent,
+        )
+
+        // Register BackgroundJob watcher per child
+        const autoResume = Instance.bind(
+          async (parentID: SessionID, childID: SessionID, result: DetachedNotes.ChildResult) => {
+            DetachedNotes.unprotect(childID)
+            await Bus.publish(TuiEvent.BackgroundTaskUpdate, {
+              sessionID: parentID,
+              taskID: childID,
+              title: result.description,
+              state: result.state,
+            })
+            const outcome = DetachedNotes.childCompleted(parentID, childID, result)
+            if (!outcome) return
+            if (!outcome.allDone) return
+
+            // All children done — auto-resume parent with full results
+            const lines: string[] = ["[Background subagents completed]", ""]
+            for (const r of outcome.results) {
+              const tag = r.state === "completed" ? "completed" : r.state === "cancelled" ? "cancelled" : "error"
+              const content = r.result ?? r.error ?? "(no output)"
+              lines.push(`Task "${r.description}" (${tag}):`)
+              lines.push(content)
+              lines.push("")
+            }
+            lines.push(
+              "The above are results from subagents that were pushed to background. Process them and continue.",
+            )
+            const text = lines.join("\n")
+
+            // Auto-fire synthetic prompt to parent (hidden from TUI)
+            try {
+              await SessionPrompt.prompt({
+                sessionID: parentID,
+                model: { providerID: model.providerID, modelID: model.modelID },
+                agent,
+                parts: [{ type: "text", text, synthetic: true }],
+              })
+            } catch {
+              // Fallback: queue note for next manual prompt
+              DetachedNotes.queue(parentID, "completed", text)
+            }
+
+            await Bus.publish(TuiEvent.ToastShow, {
+              title: "Background subagents complete",
+              message: `${outcome.results.length} subagent(s) finished.`,
+              variant: "success",
+              duration: 5000,
+            })
+          },
+        )
+
+        for (const child of running) {
+          const childSt = child.runner.state
+          if (childSt._tag !== "Running" && childSt._tag !== "ShellThenRun") continue
+          const childDone = childSt._tag === "Running" ? childSt.run.done : childSt.run.done
+
+          const run = Deferred.await(childDone).pipe(
+            Effect.map((msg) => {
+              const parts = msg.parts
+              return parts.findLast((p) => p.type === "text")?.text ?? ""
+            }),
+            Effect.tap((summary) =>
+              Effect.promise(() =>
+                autoResume(sessionID, child.childID, {
+                  childID: child.childID,
+                  description: child.description,
+                  result: summary,
+                  state: "completed",
+                }),
+              ),
+            ),
+            Effect.catchCause((cause: Cause.Cause<any>) => {
+              const squashed = Cause.squash(cause)
+              const cancelled = squashed && (squashed as any)._tag === "RunnerCancelled"
+              return Effect.promise(() =>
+                autoResume(sessionID, child.childID, {
+                  childID: child.childID,
+                  description: child.description,
+                  error: cancelled ? "cancelled" : String(squashed),
+                  state: cancelled ? "cancelled" : "error",
+                }),
+              ).pipe(Effect.as(""))
+            }),
+          )
+
+          yield* Effect.promise(() =>
+            bgRuntime.runPromise((svc) =>
+              svc.start({
+                id: child.childID,
+                type: "session.background",
+                title: child.description,
+                metadata: { sessionID, childID: child.childID },
+                run,
+              }),
+            ),
+          )
+        }
+
+        // Publish "running" events for badge counter
+        for (const child of running) {
+          yield* Effect.promise(() =>
+            Bus.publish(TuiEvent.BackgroundTaskUpdate, {
+              sessionID,
+              taskID: child.childID,
+              title: child.description,
+              state: "running",
+            }),
+          )
+        }
+
+        // Now cancel the parent's run (children are protected)
+        DetachedNotes.markDetaching(sessionID)
+        yield* state.cancel(sessionID)
+        DetachedNotes.clearDetaching(sessionID)
+
+        yield* Effect.promise(() =>
+          Bus.publish(TuiEvent.ToastShow, {
+            title: "Detached to background",
+            message: `${running.length} subagent(s) running in background.`,
+            variant: "info",
+            duration: 5000,
+          }),
+        )
+
+        return running.length
+      })
+      // fork: background-detach (#FORK) — end
 
       const resolvePromptParts = Effect.fn("SessionPrompt.resolvePromptParts")(function* (template: string) {
         const ctx = yield* InstanceState.context
@@ -190,7 +379,9 @@ export namespace SessionPrompt {
             (yield* provider.getModel(input.providerID, input.modelID)))
         const msgs = onlySubtasks
           ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
-          : yield* MessageV2.toModelMessagesEffect(context, mdl, { stripThinkingText: cfg.experimental?.strip_thinking_text === true }) // [fork-perf] strip-thinking
+          : yield* MessageV2.toModelMessagesEffect(context, mdl, {
+              stripThinkingText: cfg.experimental?.strip_thinking_text === true,
+            }) // [fork-perf] strip-thinking
         const text = yield* Effect.promise(async (signal) => {
           const result = await LLM.stream({
             agent: ag,
@@ -1338,8 +1529,7 @@ export namespace SessionPrompt {
           // [fork-perf] Phase 1: per-runLoop history cache; rebuilds ModelMessages
           // incrementally as new messages arrive, invalidated explicitly on compaction.
           const _cfgPerf = yield* config.get()
-          const historyCache =
-            _cfgPerf.experimental?.history_cache !== false ? HistoryCache.create() : undefined
+          const historyCache = _cfgPerf.experimental?.history_cache !== false ? HistoryCache.create() : undefined
 
           // [cache-debug] open one debug-log handle for this runLoop invocation
           const _cacheDebugLog = CacheDebugLog.open(sessionID, _cfgPerf)
@@ -1740,8 +1930,12 @@ export namespace SessionPrompt {
                 // [fork-perf] Phase 1: use historyCache when enabled — incremental ModelMessage rebuild.
                 // The cache invalidates on compaction (see seams above) so msg-array drift is bounded.
                 historyCache
-                  ? historyCache.get({ sessionID, model, stripThinkingText: cfg.experimental?.strip_thinking_text === true }).pipe(Effect.map((r) => r.modelMessages)) // [fork-perf] strip-thinking
-                  : MessageV2.toModelMessagesEffect(msgs, model, { stripThinkingText: cfg.experimental?.strip_thinking_text === true }), // [fork-perf] strip-thinking
+                  ? historyCache
+                      .get({ sessionID, model, stripThinkingText: cfg.experimental?.strip_thinking_text === true })
+                      .pipe(Effect.map((r) => r.modelMessages)) // [fork-perf] strip-thinking
+                  : MessageV2.toModelMessagesEffect(msgs, model, {
+                      stripThinkingText: cfg.experimental?.strip_thinking_text === true,
+                    }), // [fork-perf] strip-thinking
               ])
               const system: string[] = []
               // Prompt split caching: stable prefix (one joined entry) then dynamic suffix
@@ -2049,6 +2243,7 @@ export namespace SessionPrompt {
 
       return Service.of({
         cancel,
+        background,
         prompt,
         complete,
         loop,
@@ -2085,6 +2280,10 @@ export namespace SessionPrompt {
     ),
   )
   const { runPromise } = makeRuntime(Service, defaultLayer)
+
+  // fork: background-detach (#FORK) — begin
+  const bgRuntime = makeRuntime(BackgroundJob.Service, BackgroundJob.defaultLayer)
+  // fork: background-detach (#FORK) — end
 
   export const PromptInput = z.object({
     sessionID: SessionID.zod,
@@ -2181,6 +2380,12 @@ export namespace SessionPrompt {
   export async function cancel(sessionID: SessionID) {
     return runPromise((svc) => svc.cancel(SessionID.zod.parse(sessionID)))
   }
+
+  // fork: background-detach (#FORK) — begin
+  export async function background(sessionID: SessionID) {
+    return runPromise((svc) => svc.background(SessionID.zod.parse(sessionID)))
+  }
+  // fork: background-detach (#FORK) — end
 
   export const LoopInput = z.object({
     sessionID: SessionID.zod,

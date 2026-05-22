@@ -52,7 +52,7 @@ export const TuiEvent = {
       sessionID: SessionID.zod,
       taskID: z.string(),
       title: z.string(),
-      state: z.enum(["running", "completed", "error"]),
+      state: z.enum(["running", "completed", "error", "cancelled"]),
     }),
   ),
 }

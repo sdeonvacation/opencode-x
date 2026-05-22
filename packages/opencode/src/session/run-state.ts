@@ -27,6 +27,9 @@ export namespace SessionRunState {
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
     ) => Effect.Effect<MessageV2.WithParts>
+    // fork: background-detach (#FORK) — begin
+    readonly peek: (sessionID: SessionID) => Effect.Effect<Runner<MessageV2.WithParts> | undefined>
+    // fork: background-detach (#FORK) — end
   }
 
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/SessionRunState") {}
@@ -107,7 +110,14 @@ export namespace SessionRunState {
         return yield* (yield* runner(sessionID, onInterrupt)).startShell(work)
       })
 
-      return Service.of({ assertNotBusy, cancel, ensureRunning, startShell })
+      // fork: background-detach (#FORK) — begin
+      const peek = Effect.fn("SessionRunState.peek")(function* (sessionID: SessionID) {
+        const data = yield* InstanceState.get(state)
+        return data.runners.get(sessionID)
+      })
+      // fork: background-detach (#FORK) — end
+
+      return Service.of({ assertNotBusy, cancel, ensureRunning, startShell, peek })
     }),
   )
 

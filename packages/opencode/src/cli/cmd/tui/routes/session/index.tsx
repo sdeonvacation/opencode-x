@@ -1480,7 +1480,14 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
                 <span style={{ fg: theme.textMuted }}> · {Locale.duration(duration())}</span>
               </Show>
               <Show when={props.message.error?.name === "MessageAbortedError"}>
-                <span style={{ fg: theme.textMuted }}> · interrupted</span>
+                <span style={{ fg: theme.textMuted }}>
+                  {" · "}
+                  {props.parts.some(
+                    (p) => p.type === "tool" && p.state.status === "error" && p.state.error === "(background)",
+                  )
+                    ? "detached"
+                    : "interrupted"}
+                </span>
               </Show>
             </text>
           </box>
