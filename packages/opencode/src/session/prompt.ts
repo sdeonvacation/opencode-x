@@ -1983,47 +1983,16 @@ export namespace SessionPrompt {
               const steps =
                 safe && cfg.experimental?.multi_step !== false ? (cfg.experimental?.multi_step_count ?? 5) : undefined
 
-              // [cache-debug] log TurnEvent before the LLM call
+              // [cache-debug] capture pre-call hashes; the actual token-count log
+              // is emitted AFTER handle.process completes so we read the real
+              // usage from handle.message.tokens (not the prior turn's stale snapshot).
+              let _cdbTurnHashes: { sys: string; tools: string; msgs: string } | undefined
               if (_cacheDebugLog) {
-                const _prevTokens = lastFinished?.tokens
-                const curTokens: CacheDebugLog.TokenCounts = {
-                  input: _prevTokens?.input ?? 0,
-                  cacheRead: _prevTokens?.cache?.read ?? 0,
-                  cacheWrite: _prevTokens?.cache?.write ?? 0,
-                  output: _prevTokens?.output ?? 0,
+                _cdbTurnHashes = {
+                  sys: CacheDebugLog.systemHash(system),
+                  tools: CacheDebugLog.toolsHash(Object.keys(tools)),
+                  msgs: CacheDebugLog.djb2(MessageV2.msgsFingerprint(msgs)),
                 }
-                const tokenDelta: CacheDebugLog.TokenDelta = _cdbPrevTokens
-                  ? {
-                      input: curTokens.input - _cdbPrevTokens.input,
-                      cacheRead: curTokens.cacheRead - _cdbPrevTokens.cacheRead,
-                      cacheWrite: curTokens.cacheWrite - _cdbPrevTokens.cacheWrite,
-                      output: curTokens.output - _cdbPrevTokens.output,
-                    }
-                  : { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
-                _cdbPrevTokens = curTokens
-
-                const sysHash = CacheDebugLog.systemHash(system)
-                const tHash = CacheDebugLog.toolsHash(Object.keys(tools))
-                const mHash = CacheDebugLog.djb2(MessageV2.msgsFingerprint(msgs))
-
-                const turnEvent: CacheDebugLog.TurnEvent = {
-                  type: "turn",
-                  sessionID,
-                  turn: step,
-                  tokens: curTokens,
-                  tokenDelta,
-                  ...(sysHash !== _cdbPrevSystemHash ? { systemHash: sysHash } : {}),
-                  ...(tHash !== _cdbPrevToolsHash ? { toolsHash: tHash } : {}),
-                  ...(mHash !== _cdbPrevMsgsHash ? { msgsHash: mHash } : {}),
-                  flags: CacheDebugLog.extractFlags(cfg),
-                  provider: model.providerID,
-                  model: model.id,
-                  ts: Date.now(),
-                }
-                _cdbPrevSystemHash = sysHash
-                _cdbPrevToolsHash = tHash
-                _cdbPrevMsgsHash = mHash
-                _cacheDebugLog.log(turnEvent)
               }
 
               const result = yield* handle.process({
@@ -2046,6 +2015,47 @@ export namespace SessionPrompt {
               // detect parts.length change on the SAME message. Invalidate after each turn
               // (correctness > memoization). The cache still wins INSIDE a turn (tools batch).
               historyCache?.invalidate()
+
+              // [cache-debug] log TurnEvent AFTER the LLM call so we capture real usage
+              // from handle.message.tokens, not the prior turn's stale snapshot.
+              if (_cacheDebugLog && _cdbTurnHashes) {
+                const t = handle.message.tokens
+                const curTokens: CacheDebugLog.TokenCounts = {
+                  input: t?.input ?? 0,
+                  cacheRead: t?.cache?.read ?? 0,
+                  cacheWrite: t?.cache?.write ?? 0,
+                  output: t?.output ?? 0,
+                }
+                const tokenDelta: CacheDebugLog.TokenDelta = _cdbPrevTokens
+                  ? {
+                      input: curTokens.input - _cdbPrevTokens.input,
+                      cacheRead: curTokens.cacheRead - _cdbPrevTokens.cacheRead,
+                      cacheWrite: curTokens.cacheWrite - _cdbPrevTokens.cacheWrite,
+                      output: curTokens.output - _cdbPrevTokens.output,
+                    }
+                  : { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
+                _cdbPrevTokens = curTokens
+
+                const { sys: sysHash, tools: tHash, msgs: mHash } = _cdbTurnHashes
+                const turnEvent: CacheDebugLog.TurnEvent = {
+                  type: "turn",
+                  sessionID,
+                  turn: step,
+                  tokens: curTokens,
+                  tokenDelta,
+                  ...(sysHash !== _cdbPrevSystemHash ? { systemHash: sysHash } : {}),
+                  ...(tHash !== _cdbPrevToolsHash ? { toolsHash: tHash } : {}),
+                  ...(mHash !== _cdbPrevMsgsHash ? { msgsHash: mHash } : {}),
+                  flags: CacheDebugLog.extractFlags(cfg),
+                  provider: model.providerID,
+                  model: model.id,
+                  ts: Date.now(),
+                }
+                _cdbPrevSystemHash = sysHash
+                _cdbPrevToolsHash = tHash
+                _cdbPrevMsgsHash = mHash
+                _cacheDebugLog.log(turnEvent)
+              }
 
               if (structured !== undefined) {
                 handle.message.structured = structured
