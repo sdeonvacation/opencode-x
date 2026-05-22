@@ -12,6 +12,7 @@ import { CopilotAuthPlugin } from "./github-copilot/copilot"
 import { gitlabAuthPlugin as GitlabAuthPlugin } from "opencode-gitlab-auth"
 import { PoeAuthPlugin } from "opencode-poe-auth"
 import { CloudflareAIGatewayAuthPlugin, CloudflareWorkersAuthPlugin } from "./cloudflare"
+import { XaiAuthPlugin } from "./xai"
 import { Effect, Layer, ServiceMap, Stream } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
@@ -57,6 +58,7 @@ export namespace Plugin {
     PoeAuthPlugin,
     CloudflareWorkersAuthPlugin,
     CloudflareAIGatewayAuthPlugin,
+    XaiAuthPlugin,
   ]
 
   function isServerPlugin(value: unknown): value is PluginInstance {
