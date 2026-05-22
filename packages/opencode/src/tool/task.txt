@@ -1,5 +1,7 @@
 Launch a new agent to handle complex, multistep tasks autonomously.
 
+CRITICAL — Prompt hygiene (read first): the `prompt` argument is a finalized directive for the subagent, NOT your scratchpad. The subagent receives this string verbatim. Do NOT include any first-person deliberation, reconsideration, or meta-commentary inside the `prompt` string. Forbidden phrases inside `prompt`: "WAIT —", "Wait —", "Let me reconsider", "Let me think", "Actually wait", "Hmm,", "Looking at the pattern...", "BEST APPROACH:", "On second thought", "Actually,". Resolve all uncertainty BEFORE emitting the tool call. If you need to deliberate, do it in your assistant text or thinking channel — never inside tool argument string fields. Tool argument strings are payloads, not transcripts of your reasoning.
+
 When using the Task tool, you must specify a subagent_type parameter to select which agent type to use.
 
 When NOT to use the Task tool:
@@ -15,6 +17,4 @@ Usage notes:
 3. Each agent invocation starts with a fresh context unless you provide task_id to resume the same subagent session (which continues with its previous messages and tool outputs). When starting fresh, your prompt should contain a highly detailed task description for the agent to perform autonomously and you should specify exactly what information the agent should return back to you in its final and only message to you.
 4. The agent's outputs should generally be trusted
 5. Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent. Tell it how to verify its work if possible (e.g., relevant test commands).
-6. If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.
-7. Prompt hygiene: the `prompt` argument is a directive for the subagent, NOT a thinking scratchpad. Do NOT include first-person deliberation phrases like "WAIT —", "Let me reconsider", "BEST APPROACH:", "Actually wait", "Hmm", "Looking at the pattern...", or other internal-monologue markers. Resolve uncertainty BEFORE the tool call; the prompt must read as a finalized brief, not a stream of consciousness. Think in your reasoning channel, then write a clean prompt.
-
+6. The `prompt` field must read as a clean, finalized brief — like a Jira ticket or a code-review note. No stream of consciousness, no internal monologue, no markers indicating you changed your mind partway through writing.
