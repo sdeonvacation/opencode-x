@@ -234,6 +234,7 @@ export const TaskTool = Tool.defineEffect(
                       ...(canTodo ? {} : { todowrite: false }),
                       ...(canTask ? {} : { task: false }),
                       ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
+                      goal_complete: false,
                     },
                     parts: promptParts,
                   })
@@ -376,6 +377,7 @@ export const TaskTool = Tool.defineEffect(
                 ...(canTodo ? {} : { todowrite: false }),
                 ...(canTask ? {} : { task: false }),
                 ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
+                goal_complete: false,
               },
               parts: promptParts,
             })
