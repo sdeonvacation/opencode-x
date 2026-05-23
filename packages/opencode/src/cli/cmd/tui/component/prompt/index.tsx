@@ -372,7 +372,7 @@ export function Prompt(props: PromptProps) {
         keybind: "session_interrupt",
         category: "Session",
         hidden: true,
-        enabled: status().type !== "idle",
+        enabled: status().type !== "idle" || (detached() && bgTasks() > 0),
         onSelect: (dialog) => {
           if (autocomplete.visible) return
           if (!input.focused) return
@@ -382,6 +382,15 @@ export function Prompt(props: PromptProps) {
             return
           }
           if (!props.sessionID) return
+
+          // If parent is idle but has detached bg children, cancel immediately
+          if (status().type === "idle" && detached() && bgTasks() > 0) {
+            sdk.client.session.abort({
+              sessionID: props.sessionID,
+            })
+            dialog.clear()
+            return
+          }
 
           setStore("interrupt", store.interrupt + 1)
 
