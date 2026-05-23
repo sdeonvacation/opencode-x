@@ -1,0 +1,1 @@
+ALTER TABLE `session` ADD `cost_by_model` text;

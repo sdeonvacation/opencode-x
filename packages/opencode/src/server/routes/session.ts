@@ -25,6 +25,7 @@ import { lazy } from "../../util/lazy"
 import { Bus } from "../../bus"
 import { NamedError } from "@opencode-ai/util/error"
 import { Goal } from "../../goal/goal"
+import { Usage } from "../../session/usage"
 
 const log = Log.create({ service: "server" })
 
@@ -1203,6 +1204,36 @@ export const SessionRoutes = lazy(() =>
         const body = c.req.valid("json")
         const goal = Goal.create({ sessionID, objective: body.objective })
         return c.json(goal)
+      },
+    )
+    .get(
+      "/:sessionID/usage",
+      describeRoute({
+        summary: "Get session usage",
+        description: "Get per-model token usage and cost breakdown for a session.",
+        operationId: "session.usage",
+        responses: {
+          200: {
+            description: "Session usage breakdown",
+            content: {
+              "application/json": {
+                schema: resolver(Usage.Info),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      async (c) => {
+        const id = c.req.valid("param").sessionID
+        const usage = await Usage.forSession(id)
+        return c.json(usage)
       },
     ),
 )

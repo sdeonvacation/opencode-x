@@ -15,6 +15,7 @@ import type {
   AuthSetResponses,
   CommandListResponses,
   Config as Config3,
+  ConfigFlatResponses,
   ConfigGetResponses,
   ConfigProvidersResponses,
   ConfigUpdateErrors,
@@ -173,6 +174,8 @@ import type {
   SessionUnshareResponses,
   SessionUpdateErrors,
   SessionUpdateResponses,
+  SessionUsageErrors,
+  SessionUsageResponses,
   SubtaskPartInput,
   TextPartInput,
   ToolIdsErrors,
@@ -996,6 +999,36 @@ export class Config2 extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<ConfigProvidersResponses, unknown, ThrowOnError>({
       url: "/config/providers",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get flat configuration
+   *
+   * Get merged configuration as flattened key-value pairs with sensitive values redacted.
+   */
+  public flat<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ConfigFlatResponses, unknown, ThrowOnError>({
+      url: "/config/flat",
       ...options,
       ...params,
     })
@@ -2802,6 +2835,38 @@ export class Session2 extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get session usage
+   *
+   * Get per-model token usage and cost breakdown for a session.
+   */
+  public usage<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionUsageResponses, SessionUsageErrors, ThrowOnError>({
+      url: "/session/{sessionID}/usage",
+      ...options,
+      ...params,
     })
   }
 

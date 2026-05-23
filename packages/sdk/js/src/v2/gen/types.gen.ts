@@ -2303,6 +2303,13 @@ export type Provider = {
   }
 }
 
+export type ConfigFlat = {
+  entries: Array<{
+    key: string
+    value: string
+  }>
+}
+
 export type ToolIds = Array<string>
 
 export type ToolListItem = {
@@ -2449,6 +2456,58 @@ export type SubtaskPartInput = {
     modelID: string
   }
   command?: string
+}
+
+export type SessionUsage = {
+  total: {
+    cost: number
+    tokens: {
+      input: number
+      output: number
+      reasoning: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
+    duration: number
+    wall: number
+  }
+  primary: {
+    cost: number
+  }
+  byModel: Array<{
+    providerID: string
+    modelID: string
+    cost: number
+    tokens: {
+      input: number
+      output: number
+      reasoning: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
+    duration: number
+  }>
+  subagents: {
+    cost: number
+    tokens: {
+      input: number
+      output: number
+      reasoning: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
+    count: number
+    sessions: Array<{
+      title: string
+      cost: number
+    }>
+  }
 }
 
 export type ProviderAuthMethod = {
@@ -3233,6 +3292,25 @@ export type ConfigProvidersResponses = {
 }
 
 export type ConfigProvidersResponse = ConfigProvidersResponses[keyof ConfigProvidersResponses]
+
+export type ConfigFlatData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/config/flat"
+}
+
+export type ConfigFlatResponses = {
+  /**
+   * Flat config entries
+   */
+  200: ConfigFlat
+}
+
+export type ConfigFlatResponse = ConfigFlatResponses[keyof ConfigFlatResponses]
 
 export type ExperimentalConsoleGetData = {
   body?: never
@@ -4086,6 +4164,7 @@ export type SessionBackgroundResponses = {
    */
   200: {
     success: boolean
+    children: number
   }
 }
 
@@ -4808,6 +4887,40 @@ export type SessionGoalResponses = {
 }
 
 export type SessionGoalResponse = SessionGoalResponses[keyof SessionGoalResponses]
+
+export type SessionUsageData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/usage"
+}
+
+export type SessionUsageErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionUsageError = SessionUsageErrors[keyof SessionUsageErrors]
+
+export type SessionUsageResponses = {
+  /**
+   * Session usage breakdown
+   */
+  200: SessionUsage
+}
+
+export type SessionUsageResponse = SessionUsageResponses[keyof SessionUsageResponses]
 
 export type SessionMemoryListData = {
   body?: never

@@ -196,6 +196,41 @@ export default [
     }
 
     applyUsage(db, sessionID, oldUsage, -1)
-    applyUsage(db, sessionID, usage(rest), 1)
+    const u = usage(rest)
+    applyUsage(db, sessionID, u, 1)
+
+    // Accumulate per-model costs (additive only, survives message deletion)
+    if (u.cost > 0) {
+      const msg = db.select({ data: MessageTable.data }).from(MessageTable).where(eq(MessageTable.id, messageID)).get()
+      const msgData = msg?.data as Record<string, unknown> | undefined
+      if (msgData?.role === "assistant" && msgData.providerID && msgData.modelID) {
+        const key = `${msgData.providerID}:${msgData.modelID}`
+        const row = db
+          .select({ cost_by_model: SessionTable.cost_by_model })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, sessionID as SessionID))
+          .get()
+        const current = (row?.cost_by_model ?? {}) as Record<string, any>
+        const entry = current[key] ?? {
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+        }
+        entry.cost += u.cost
+        entry.tokens_input += u.tokens_input
+        entry.tokens_output += u.tokens_output
+        entry.tokens_reasoning += u.tokens_reasoning
+        entry.tokens_cache_read += u.tokens_cache_read
+        entry.tokens_cache_write += u.tokens_cache_write
+        current[key] = entry
+        db.update(SessionTable)
+          .set({ cost_by_model: current })
+          .where(eq(SessionTable.id, sessionID as SessionID))
+          .run()
+      }
+    }
   }),
 ]

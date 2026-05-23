@@ -41,6 +41,19 @@ export const SessionTable = sqliteTable(
     tokens_reasoning: integer().notNull().default(0),
     tokens_cache_read: integer().notNull().default(0),
     tokens_cache_write: integer().notNull().default(0),
+    cost_by_model: text({ mode: "json" }).$type<
+      Record<
+        string,
+        {
+          cost: number
+          tokens_input: number
+          tokens_output: number
+          tokens_reasoning: number
+          tokens_cache_read: number
+          tokens_cache_write: number
+        }
+      >
+    >(),
   },
   (table) => [
     index("session_project_idx").on(table.project_id),

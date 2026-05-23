@@ -9,6 +9,30 @@ import { errors } from "../error"
 import { Log } from "../../util/log"
 import { lazy } from "../../util/lazy"
 
+const SENSITIVE = /key|token|secret|password|credential/i
+
+function flattenConfig(obj: unknown, prefix = ""): Array<{ key: string; value: string }> {
+  const entries: Array<{ key: string; value: string }> = []
+  if (obj === null || obj === undefined) return entries
+  if (Array.isArray(obj)) {
+    for (let i = 0; i < obj.length; i++) {
+      entries.push(...flattenConfig(obj[i], `${prefix}[${i}]`))
+    }
+    return entries
+  }
+  if (typeof obj === "object") {
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      const path = prefix ? `${prefix}.${k}` : k
+      if (v === null || v === undefined) continue
+      entries.push(...flattenConfig(v, path))
+    }
+    return entries
+  }
+  const val = SENSITIVE.test(prefix) ? "[REDACTED]" : String(obj)
+  entries.push({ key: prefix, value: val })
+  return entries
+}
+
 const log = Log.create({ service: "server" })
 
 export const ConfigRoutes = lazy(() =>
@@ -94,6 +118,40 @@ export const ConfigRoutes = lazy(() =>
           providers: Object.values(providers),
           default: mapValues(providers, (item) => Provider.sort(Object.values(item.models))[0].id),
         })
+      },
+    )
+    .get(
+      "/flat",
+      describeRoute({
+        summary: "Get flat configuration",
+        description: "Get merged configuration as flattened key-value pairs with sensitive values redacted.",
+        operationId: "config.flat",
+        responses: {
+          200: {
+            description: "Flat config entries",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z
+                    .object({
+                      entries: z.array(
+                        z.object({
+                          key: z.string(),
+                          value: z.string(),
+                        }),
+                      ),
+                    })
+                    .meta({ ref: "ConfigFlat" }),
+                ),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        const config = await Config.get()
+        const entries = flattenConfig(config).sort((a, b) => a.key.localeCompare(b.key))
+        return c.json({ entries })
       },
     ),
 )
