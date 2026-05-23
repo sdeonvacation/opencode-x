@@ -388,6 +388,7 @@ export function Prompt(props: PromptProps) {
             sdk.client.session.abort({
               sessionID: props.sessionID,
             })
+            toast.show({ message: "Background subagent(s) were aborted!", variant: "warning", duration: 4000 })
             dialog.clear()
             return
           }
