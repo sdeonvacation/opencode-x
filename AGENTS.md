@@ -3,7 +3,7 @@
 - Default branch: `dev`.
 - Local `main` may not exist; use `dev` or `origin/dev` for diffs.
 - Prefer automation: execute without confirmation unless blocked by missing info or safety/irreversibility.
-- **[CRITICAL]** Source code changes must be upstream-rebase safe: surgical edits only, minimum required changes, no broad refactors.
+- **[CRITICAL]** All plans, designs, source code changes done must be upstream-rebase safe.
 - **[CRITICAL]** Any changes made should NOT break provider caching, app stability or performance
 
 ## Commands
@@ -192,4 +192,4 @@ const table = sqliteTable("session", {
 
 ## DB
 
-DB data is present in ~/.local/share/opencode/opencode-devlocal.db
+DB data is present in ~/.local/share/opencode/*.db

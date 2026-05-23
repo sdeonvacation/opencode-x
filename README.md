@@ -1,93 +1,174 @@
 # OpenCode X
 
-Fork of [opencode](https://github.com/anomalyco/opencode) with token efficiency, memory efficiency, and orchestration improvements.
+Built on top of [opencode](https://github.com/anomalyco/opencode) — adds Claude Code-grade features on top of an open, provider-agnostic foundation. Natively supports claude code hooks and plugins.
 
-**For full setup and configuration, see [OPENCODE-X_GUIDE.md](./OPENCODE-X_GUIDE.md).**
+**For full configuration, checkout [OPENCODE-X_GUIDE.md](./OPENCODE-X_GUIDE.md).**
+
+## Demo
+
+![OpenCode X Demo](./assets/opencode-x-demo.gif)
 
 ---
 
-## Features Added in This Fork
+## What OpenCode X Adds (vs. Upstream + Claude Code)
 
-### Sliding Window Compaction
+| Feature                                     | **OpenCode X**                                                                                                                                          | **Upstream OpenCode**                         | **Claude Code**                                     |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------------- |
+| **Claude Code hooks + plugins**             | Native — reads `~/.claude/settings.json` hooks, `~/.claude/plugins/installed_plugins.json`, `~/.claude/hooks/commands.json`; same events, same env vars | Plugin system only (no hook lifecycle events) | Native                                              |
+| **Push agent to background**                | `Leader+D` chord detaches running session to background; TUI unblocks for new prompts, toast on completion                                              | Background subagents (spawn only)             | Native                                              |
+| **Spinner verbs**                           | Claude Code-style creative random pool ("Sherlocking…", "Conjuring…") with mood-based color cycling                                                     | Generic spinner                               | Native                                              |
+| **Cache stability (prompt split)**          | System prompt split into stable prefix + dynamic suffix; sub-part `cacheControl` on Anthropic/Bedrock/Alibaba; stable ordering for OpenAI auto-cache    | No optimization                               | Unknown                                             |
+| **Tool output compression**                 | LLM-powered compression (3 templates: EXTRACT, SUMMARIZE, FILTER) before outputs hit cloud model; anti-hallucination + fallback                         | None                                          | Unknown                                             |
+| **MCP tool filtering**                      | Native per-provider/model tool filtering; ApplyPatch swap for GPT-4.1; WebSearch gating; route-based filtering (cloud vs local)                         | None                                          | Tool allowlists per agent                           |
+| **Persistent memory**                       | Cross-session file-based memory (`~/.local/share/opencode/memory/`); `memory_persist` tool; types: user/project/feedback; injected into system prompt   | None                                          | Native                                              |
+| **Session memory**                          | SQLite-backed per-session entries; survive `/clear` and `/clear-compact`; `/memory_add`, `/memory_edit`, `/memory_delete`                               | None                                          | Session memory (markdown file, subagent extraction) |
+| **Goal tracking**                           | `/goal` command sets autonomous objective; `goal_complete` tool; auto-continuation loop (200-turn cap + token budget); status in prompt                 | None                                          | Native                                              |
+| **Context safety net**                      | 3-tier: tool result budget (50K cap) → MicroCompact (75% threshold) → Context Collapse (97% emergency)                                                  | Basic overflow handling                       | Auto-compact + micro-compact                        |
+| **Experimental: Sliding window compaction** | Rolling head summary + verbatim tail; cached per boundary; inflight dedup; configurable threshold/ratio                                                 | Hard truncation                               | Forked subagent compaction                          |
+| **Doom loop detection**                     | Ring-buffer hash detector (configurable threshold); aborts repeated identical tool calls                                                                | None                                          | Unknown                                             |
+| **Snapshot gate**                           | Skips git snapshot track/patch when no FS-mutating tool fired; saves IO per non-edit turn                                                               | None                                          | Unknown                                             |
+| **Part coalescer**                          | Batches rapid streaming part updates (300ms window); flushes terminal states immediately; reduces DB writes                                             | None                                          | Unknown                                             |
+| **Parallel tool execution**                 | Safe concurrent read/glob/grep within single LLM round-trip                                                                                             | None                                          | Native                                              |
+| **Hybrid model routing**                    | Per-task-category model routing + ultrawork override; configurable per provider/model                                                                   | None                                          | Fast mode (single toggle)                           |
+| **Configurable subagent timeout**           | `experimental.subagent_timeout` in config                                                                                                               | Hardcoded                                     | Hardcoded                                           |
+| **Orchestration guardrails**                | Configurable spawn depth limits, descendant caps, per-model concurrency limiter, doom loop + hard cap                                                   | Basic                                         | Coordinator mode (feature-gated)                    |
+| **`/clear`**                                | Clear session messages (keeps session alive)                                                                                                            | None                                          | `/clear` equivalent                                 |
+| **`/clear-compact`**                        | Clear + trigger compaction of history                                                                                                                   | None                                          | Native - /compact                                   |
+| **`/btw`**                                  | Inject context without starting new turn (no LLM call)                                                                                                  | None                                          | Native                                              |
+| **`/goto`**                                 | Switch project directory                                                                                                                                | None                                          | None                                                |
+| **`/status` (improved)**                    | Shows session ID, model, provider, token counts, cost; copyable session ID for debugging                                                                | Basic status                                  | Native                                              |
+| **Per-tool token usage**                    | Streaming token count displayed per tool call during execution                                                                                          | None                                          | None                                                |
+| **`/config`**                               | Shows all merged config key-values in a toast (mirrors Claude Code `/status` config section)                                                            | None                                          | Part of `/status`                                   |
+| **`/usage`**                                | Per-model cost/tokens/duration breakdown + subagent costs (mirrors Claude Code `/status` usage section)                                                 | None                                          | Part of `/status`                                   |
+| **Read tool safe default**                  | 300-line limit with head+tail summary; prevents context floods                                                                                          | Unbounded                                     | Bounded (configurable)                              |
+| **Session cost tracking**                   | Per-session totals, tiered pricing, streaming token count during execution, cache-aware (no double-count)                                               | Basic                                         | Full cost tracker                                   |
+| **LSP efficiency**                          | Orphan prevention, stale diagnostics cleanup, idle shutdown, nearest-package resolution                                                                 | Accumulates servers                           | LSP with diagnostic registry                        |
+| **Provider lock-in**                        | None — 75+ providers via Vercel AI SDK                                                                                                                  | None (same)                                   | Anthropic-only                                      |
+| **Pricing**                                 | Free/OSS, bring your own keys                                                                                                                           | Free/OSS, bring your own keys                 | $200/mo subscription or API usage                   |
 
-Replaces hard-truncation with a rolling-window strategy for long sessions. Instead of truncating to a fixed size, history is split into a summarized **head** and a verbatim **tail**.
+---
 
-- Summary cached by session + head boundary — only re-summarizes when the head changes
-- Inflight deduplication — one compaction per session at a time; no redundant LLM calls
-- Token savings tracked per session
-- Configurable threshold (default 50k tokens) and tail ratio (default 50%)
+## Key Differentiators
 
-```json
-{
-  "compaction": {
-    "sliding_window": {
-      "threshold": 50000,
-      "tail_ratio": 0.5
-    }
-  }
-}
-```
+### vs. Upstream OpenCode
 
-### LLM Tool Output Compression
+OpenCode X is upstream + 280 commits of fork-only features. Everything above marked "None" in the upstream column is exclusive to this fork. The fork maintains rebase compatibility — features are isolated in new files behind feature flags.
 
-A local model pre-processes large tool outputs before they reach the cloud model — cuts token consumption without changing agent behavior.
+### vs. Claude Code
 
-- Triggered by output line count threshold (default: 10 lines)
-- Three compression templates, selected per tool type:
-  - **EXTRACT** — key lines, bullets, file/line refs (`grep`, `glob`, `bash`)
-  - **SUMMARIZE** — 3–6 bullets capturing key facts (`read`, large output)
-  - **FILTER** — matching items only, noise dropped (logs, diffs)
-- Anti-hallucination system prompt enforced on every compression call
-- Silently falls back to raw output on error — never corrupts results
-- Per-event stats: `input_lines`, `output_lines`, `ratio`, `template`, `model`, `fallback`
+OpenCode X ports the _best ideas_ from Claude Code (hooks, spinner verbs, session memory, background agents, context management, usage tracking) into an open, provider-agnostic system. Key advantages:
+
+- **No vendor lock-in** — use Claude, GPT, Gemini, Mistral, local models, or any OpenAI-compatible endpoint
+- **Claude Code hooks work natively** — existing `~/.claude/settings.json` hook configs are auto-detected and run without modification
+- **LLM compression** — Claude Code sends raw tool output to the model; OpenCode X pre-compresses, saving 30-60% tokens on large outputs
+- **Goal system** — autonomous multi-turn execution toward an objective (Claude Code lacks this)
+- **Fully open source** — MIT license, no telemetry, no account requirement
+
+---
+
+## Feature Details
+
+### Claude Code Hook + Plugin Compatibility
+
+Hooks and plugins loaded from multiple Claude Code paths:
+
+1. Project `.claude/settings.json` → hooks section
+2. Global `~/.claude/settings.json` → hooks section
+3. `~/.claude/hooks/commands.json` → custom slash commands
+4. `~/.claude/plugins/installed_plugins.json` → installed plugin skills auto-discovered and registered
+
+Events: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `Stop`, `SessionStart`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`
+
+Env vars match Claude Code exactly: `CLAUDE_TOOL_NAME`, `CLAUDE_TOOL_INPUT`, `CLAUDE_TOOL_RESULT`, `CLAUDE_SESSION_ID`, `CLAUDE_MODEL`, `CLAUDE_USER_PROMPT`. Event JSON also passed on stdin. Timeout spec in seconds (Claude Code convention).
+
+### Push to Background (Leader+D)
+
+Detaches a running session to background without killing it. TUI immediately accepts new input. When the background session completes, a toast notification fires. Similar to Claude Code's background tasks but user-initiated (push any running agent to background on demand).
+
+### Tool Output Compression
 
 ```json
 {
   "hybrid": {
     "enabled": true,
     "local_model": { "providerID": "anthropic", "modelID": "claude-haiku-4-5" },
-    "compression_timeout_ms": 8000,
-    "log_routing": true
+    "compression_timeout_ms": 8000
   }
 }
 ```
 
-### Hybrid Local+Cloud Routing
+Three templates selected per tool type:
 
-Route task categories to specific models — cheap/fast for simple tasks, capable cloud model for complex ones.
+- **EXTRACT** — key lines, file/line refs (`grep`, `glob`, `bash`)
+- **SUMMARIZE** — 3–6 bullets (`read`, large output)
+- **FILTER** — matching items only, noise dropped (logs, diffs)
+
+Falls back to raw output on any error. Validates compression preserves key facts.
+
+### Goal System
+
+```
+/goal Implement feature X with tests passing
+```
+
+- Agent works autonomously toward objective
+- Auto-injects continuation messages between turns
+- `goal_complete` tool called by agent with evidence when done
+- Guards: 200-turn hard limit, optional token budget, pause on budget exceeded
+- Status injected into system prompt dynamic section (cache-safe)
+
+### Persistent Memory
+
+Cross-session memory in `~/.local/share/opencode/memory/` as markdown files with YAML frontmatter:
+
+```markdown
+---
+name: prefers-effect-ts
+type: user
+created: 2026-05-20
+---
+
+User always wants Effect-ts patterns, no raw Promises.
+```
+
+Model uses `memory_persist` tool to save facts automatically. Injected into system prompt on session start.
+
+### Cache Stability (Prompt Split)
+
+System prompt restructured: stable prefix (identity, tools, skills, AGENTS.md) cached via provider-specific breakpoints; dynamic suffix (env, memory, goals) changes freely without invalidating the cached prefix.
+
+| Provider                  | Mechanism                                                       |
+| ------------------------- | --------------------------------------------------------------- |
+| Anthropic/Bedrock/Alibaba | Sub-part `cacheControl` on stable prefix within existing Slot 1 |
+| OpenAI                    | Longer stable prefix = more tokens match auto-cache (≥1024)     |
+| OpenRouter                | Inherits upstream provider behavior                             |
+
+### Context Safety Net (3-Tier)
+
+1. **Tool Result Budget** — global char budget; oldest tool outputs truncated first
+2. **MicroCompact** (75% context used) — summarize old messages, keep 10 most recent verbatim
+3. **Context Collapse** (97% context used) — emergency: backup full history to file, replace with structured summary + last user message
+
+### Sliding Window Compaction
 
 ```json
 {
-  "experimental": {
-    "task_categories": {
-      "review": { "providerID": "anthropic", "modelID": "claude-sonnet-4-6" },
-      "cheap": { "providerID": "opencode-go", "modelID": "minimax-m2.5" }
-    },
-    "ultrawork_model": { "providerID": "anthropic", "modelID": "claude-sonnet-4-6" }
+  "compaction": {
+    "sliding_window": { "threshold": 50000, "tail_ratio": 0.5 }
   }
 }
 ```
 
-### Safe Parallel Tool Execution
+Rolling head+tail split. Summary cached by boundary position. Only re-summarizes when head grows.
 
-Pre-approved tool sets (`read`, `glob`, `grep`) execute concurrently within a single LLM response round-trip.
+### Performance Optimizations
 
-```json
-{
-  "experimental": {
-    "parallel_tool_calls": true,
-    "parallel_read": true
-  }
-}
-```
+- **Snapshot Gate** — skips git track/patch when no FS tool fired (saves IO)
+- **Part Coalescer** — batches streaming updates (300ms), reduces SQLite writes
+- **Doom Loop Detector** — ring-buffer hash; aborts after N identical consecutive tool calls
+- **Per-model Concurrency** — prevents thundering-herd on rate-limited endpoints
 
-### Orchestration Guardrails
-
-- **Doom loop detection + hard cap** — aborts on repeated identical task calls; hard cap as separate backstop
-- **Spawn limits** — caps subagent nesting depth and total descendants per root session
-- **Per-model concurrency** — prevents thundering-herd against a single model endpoint
-- **Task category routing** — `task_category` param routes subagent tasks to a configured model
-- **Ultrawork routing** — `use_ultrawork: true` or `ulw`/`ultrawork` keyword routes to a high-reasoning model
+### Orchestration
 
 ```json
 {
@@ -95,89 +176,77 @@ Pre-approved tool sets (`read`, `glob`, `grep`) execute concurrently within a si
     "loop_detector_threshold": 5,
     "max_subagent_depth": 3,
     "max_subagent_descendants": 50,
-    "model_concurrency": { "anthropic:claude-sonnet-4-6": 2 }
+    "model_concurrency": { "anthropic:claude-sonnet-4-6": 2 },
+    "subagent_timeout": 300000,
+    "parallel_tool_calls": true,
+    "task_categories": {
+      "cheap": { "providerID": "opencode-go", "modelID": "minimax-m2.5" }
+    },
+    "ultrawork_model": { "providerID": "anthropic", "modelID": "claude-sonnet-4-6" }
   }
 }
 ```
 
-### Session Memory
+### Slash Commands
 
-Persistent per-session memory that survives `/clear` and `/clear-compact`. Injected into the primary agent's system prompt only.
-
-- `/memory_add` — add a memory entry (dialog prompt)
-- `/memory_edit` — pick and edit an existing entry
-- `/memory_delete` — pick and remove an entry
-- Stored in SQLite (`MemoryTable`); tied to session, not affected by message clears
-
-### LSP Memory Efficiency
-
-- Orphan LSP server prevention — servers no longer accumulate across sessions
-- Stale diagnostics cache cleared on `didChange`
-- Idle shutdown — servers released when not in use
-- Nearest-package tsserver resolution — correct server per workspace package
+| Command          | Description                                                |
+| ---------------- | ---------------------------------------------------------- |
+| `/btw`           | Inject context without starting a new turn (no LLM call)   |
+| `/clear`         | Clear session messages                                     |
+| `/clear-compact` | Clear messages and compact history                         |
+| `/config`        | Show all merged config key-values in toast                 |
+| `/usage`         | Per-model cost/tokens/duration + subagent costs            |
+| `/goto`          | Jump to a file or symbol                                   |
+| `/goal`          | Set autonomous objective                                   |
+| `/memory_add`    | Add session memory entry                                   |
+| `/memory_edit`   | Edit existing memory entry                                 |
+| `/memory_delete` | Remove memory entry                                        |
+| `/status`        | Session info with copyable session ID, model, cost, tokens |
 
 ### Spinner Verbs
 
-Contextual present-continuous labels in the TUI spinner (e.g., "Searching…", "Reading…") instead of generic activity text. Derived from tool runtime title metadata where available.
+A creative random pool for global spinner rotation ("Sherlocking…", "Overthinking…", "Vibecoding…") with mood-based color cycling.
 
-### New Slash Commands
+### Easter Egg
 
-| Command          | Description                                                 |
-| ---------------- | ----------------------------------------------------------- |
-| `/btw`           | Inject context into the session without starting a new turn |
-| `/clear`         | Clear session messages                                      |
-| `/clear-compact` | Clear messages and compact history                          |
-| `/goto`          | Jump to a file or symbol                                    |
-
-### Session Cost & Token Tracking
-
-- Pre-computed cost and token totals attached to each session object
-- Tiered pricing schema — cost adjusts for context window tier
-- Streaming token count shown in tool calls during execution
-- Fix: context metrics no longer double-count cache tokens in TUI
-
-### Read Tool: Safe Default
-
-`read` defaults to 300 lines with a head+tail summary instead of returning unbounded output. Prevents accidental full-file dumps flooding context.
-
-### Session ID in `/status`
-
-`/status` dialog shows the current session ID, copyable for debugging or referencing subagent sessions.
+Clicking the opencode logo plays 3 variations of the _faaaaah_ sound.
 
 ---
 
-## What's Not in This Fork (Cherry-Picks from Upstream)
+## Install
 
-The following were pulled from upstream opencode and are not locally-originated features:
+Download the binary for your platform from [Releases](https://github.com/sdeonvacation/opencode-x/releases/latest):
 
-- Thinking mode (collapsed/expandable reasoning display)
-- Session pinning + quick-switch
-- Background subagents (`task(..., background=true)`)
-- Ctrl/Cmd+number project switching
-- Patch file rendering improvements
-- Default diff parser for fenced code blocks
+| Asset                          | Platform                  |
+| ------------------------------ | ------------------------- |
+| `opencode-x-darwin-arm64`      | macOS Apple Silicon       |
+| `opencode-x-darwin-x64`        | macOS Intel               |
+| `opencode-x-linux-arm64`       | Linux arm64 (glibc)       |
+| `opencode-x-linux-x64`         | Linux x64 (glibc)         |
+| `opencode-x-linux-arm64-musl`  | Linux arm64 (Alpine/musl) |
+| `opencode-x-linux-x64-musl`    | Linux x64 (Alpine/musl)   |
+| `opencode-x-windows-arm64.exe` | Windows arm64             |
+| `opencode-x-windows-x64.exe`   | Windows x64               |
 
----
+```bash
+# macOS / Linux
+chmod +x opencode-x-<platform>
+sudo mv opencode-x-<platform> /usr/local/bin/opencode-x
 
-## OpenCode X vs. Upstream
+# Run
+opencode-x
+```
 
-| Feature                       | This Fork                                           | Upstream             |
-| ----------------------------- | --------------------------------------------------- | -------------------- |
-| **Sliding window compaction** | Rolling head+tail with summary cache                | Hard truncation only |
-| **Tool output compression**   | Local LLM pre-processes large outputs               | None                 |
-| **Hybrid/category routing**   | Per-category model routing + ultrawork              | None                 |
-| **Parallel tool calls**       | Safe parallel execution                             | None                 |
-| **Doom loop guard**           | Detection + hard cap + spawn depth/count limits     | Fewer guardrails     |
-| **Session memory**            | Persistent per-session memory, survives clears      | None                 |
-| **LSP memory efficiency**     | Orphan prevention + idle shutdown                   | Accumulates servers  |
-| **Spinner verbs**             | Contextual tool activity labels                     | Generic spinner      |
-| **TUI slash commands**        | `/btw`, `/clear`, `/clear-compact`, `/goto`         | None of these        |
-| **Token tracking**            | Per-session totals, tiered pricing, streaming count | Basic                |
-| **Read tool default**         | 300-line limit with head+tail                       | Unbounded            |
+### Build from Source
 
----
+```bash
+git clone https://github.com/sdeonvacation/opencode-x
+cd opencode-x && bun install
+./packages/opencode/script/build.ts --single
+# Binary at: packages/opencode/dist/opencode-$(uname -s | tr A-Z a-z)-$(uname -m)/bin/opencode
+```
 
-## Quick Start
+### Development
 
 ```bash
 bun install
@@ -187,14 +256,17 @@ bun --cwd packages/opencode run build
 bun --cwd packages/opencode test --timeout 30000
 ```
 
+### Requirements
+
+- Any LLM API key (Anthropic, OpenAI, Google, etc.)
+- Bun 1.3.11+ (for building from source only)
+
 ---
 
 ## Resources
 
 - **Upstream**: https://github.com/anomalyco/opencode
 - **Docs**: https://opencode.ai/docs
-- **Console**: https://opencode.ai/zen
-- **Discord**: https://opencode.ai/discord
 - **Repository**: https://github.com/sdeonvacation/opencode-x
 
 ---

@@ -17,7 +17,13 @@ Guide based on OpenCode codebase analysis.
 11. [MCP Servers](#mcp-servers)
 12. [Running local build of opencode](#running-local-opencode)
 13. [Session Memory](#session-memory)
-14. [Plugins](#plugins)
+14. [Persistent Memory](#persistent-memory)
+15. [Goal System](#goal-system)
+16. [Claude Code Hooks](#claude-code-hooks)
+17. [Push to Background](#push-to-background)
+18. [Context Safety Net](#context-safety-net)
+19. [Cache Stability](#cache-stability)
+20. [Plugins](#plugins)
 
 ---
 
@@ -1142,6 +1148,8 @@ OPENCODE_DISABLE_AUTOUPDATE=1 opencode run "Build"
 
 MCP (Model Context Protocol) servers expose tools that opencode agents can call during a session. Two transport types are supported: **local** (subprocess via stdio) and **remote** (HTTP/SSE).
 
+> **Note**: Unlike hooks (which auto-load from `~/.claude/settings.json`), MCP servers must be explicitly configured in `opencode.json`. Claude Code MCP configs in `~/.claude/settings.json` are NOT auto-imported — you must add them to your opencode config.
+
 ### Config file location
 
 MCP servers are registered under the `"mcp"` key in the opencode config file:
@@ -1375,9 +1383,316 @@ Persistent per-session memory that survives `/clear` and `/clear-compact`. Memor
 
 ---
 
+## Persistent Memory
+
+Cross-session memory that persists across all sessions and survives restarts. Stored as markdown files in `~/.local/share/opencode/memory/`.
+
+### How It Works
+
+The agent can use the `memory_persist` tool to save facts that should survive session restarts:
+
+```
+memory_persist(name="prefers-effect-ts", type="user", content="User always wants Effect-ts patterns")
+```
+
+Memories are injected into the system prompt as a `<persistent-memory>` block on every session start.
+
+### Memory Types
+
+| Type       | Purpose                               | Example                                |
+| ---------- | ------------------------------------- | -------------------------------------- |
+| `user`     | User preferences and workflow choices | "Always use bun, never npm"            |
+| `project`  | Codebase facts and conventions        | "Project uses Effect-ts 4.0-beta"      |
+| `feedback` | Corrections from past mistakes        | "Don't assume X — always verify first" |
+
+### File Format
+
+```markdown
+---
+name: prefers-effect-ts
+type: user
+created: 2026-05-20
+---
+
+User always wants Effect-ts patterns, no raw Promises.
+```
+
+### Limits
+
+- Max 200 memory files
+- Max 500 lines injected into system prompt
+- Newest-first priority when limit reached
+
+### vs. Session Memory
+
+| Aspect     | Session Memory              | Persistent Memory             |
+| ---------- | --------------------------- | ----------------------------- |
+| Scope      | Single session              | All sessions                  |
+| Storage    | SQLite                      | Markdown files                |
+| Survives   | `/clear`, `/clear-compact`  | Restarts, new sessions        |
+| Managed by | User (`/memory_*` commands) | Agent (`memory_persist` tool) |
+| Editable   | Via TUI dialogs             | Directly on filesystem        |
+
+---
+
+## Goal System
+
+Autonomous multi-turn execution toward a defined objective. The agent continues working without user input until the goal is complete or guards are hit.
+
+**Feature flag**: `experimental.goal_system` (boolean, default: false)
+
+### Usage
+
+```
+/goal Implement the authentication middleware with tests passing
+```
+
+### How It Works
+
+1. `/goal` sets an objective for the session
+2. Agent works toward it, receiving auto-continuation messages between turns
+3. Agent calls `goal_complete` tool with evidence when done
+4. Only 1 active goal per session; new `/goal` replaces previous
+
+### Guards
+
+| Guard        | Default | Description                         |
+| ------------ | ------- | ----------------------------------- |
+| MAX_TURNS    | 200     | Hard limit on turns per goal        |
+| Token budget | None    | Optional cap (set in goal creation) |
+| Pause        | Auto    | Pauses on budget_limited status     |
+
+### Goal States
+
+`active` → `complete` (via `goal_complete` tool)
+`active` → `budget_limited` (token/turn cap hit)
+`active` → `paused` (manual)
+
+### System Prompt Integration
+
+Goal status is injected into the dynamic section of the system prompt (does not affect cached prefix):
+
+```
+Active Goal: "Implement auth middleware"
+Turns: 15/200 | Status: active
+When complete, call goal_complete with evidence.
+```
+
+---
+
+## Claude Code Hooks
+
+OpenCode X natively supports Claude Code hooks and plugins. **Your existing `~/.claude/settings.json` hooks work automatically** — no migration needed. An optional `~/.config/opencode/hooks.json` file can be used to add opencode-specific hooks or override Claude defaults.
+
+### How Hooks Are Loaded
+
+All sources are **merged** (not overridden). Rules from all sources that exist are combined and deduplicated:
+
+| Priority | Source                                      | Description                                          |
+| -------- | ------------------------------------------- | ---------------------------------------------------- |
+| 1        | `~/.config/opencode/hooks.json`             | OpenCode-specific hooks (optional override/addition) |
+| 2        | `<project>/.claude/settings.json` → `hooks` | Project-level Claude Code hooks                      |
+| 3        | `~/.claude/settings.json` → `hooks`         | User-level Claude Code hooks (auto-loaded)           |
+
+**Key point**: If you already have hooks in `~/.claude/settings.json`, they work immediately. You only need `~/.config/opencode/hooks.json` if you want to add hooks that should NOT apply to Claude Code, or to extend Claude hooks with opencode-specific events.
+
+### Additional Claude Code Sources
+
+Beyond hooks, OpenCode X also loads:
+
+| Source                                     | What it provides                                                   |
+| ------------------------------------------ | ------------------------------------------------------------------ |
+| `~/.claude/hooks/commands.json`            | Custom slash commands (registered as `/command` in TUI)            |
+| `~/.claude/plugins/installed_plugins.json` | Installed plugin skills (auto-discovered from `skills/*/SKILL.md`) |
+
+### Supported Events
+
+| Event                | Blocking | Description                     |
+| -------------------- | -------- | ------------------------------- |
+| `PreToolUse`         | Yes      | Before tool execution; can deny |
+| `PostToolUse`        | No       | After successful tool execution |
+| `PostToolUseFailure` | No       | After failed tool execution     |
+| `SessionStart`       | No       | When session starts             |
+| `UserPromptSubmit`   | Yes      | Before user prompt is processed |
+| `Stop`               | No       | On session end/agent stop       |
+| `SubagentStart`      | No       | When subagent spawns            |
+| `SubagentStop`       | No       | When subagent completes         |
+| `Notification`       | No       | On agent notification/output    |
+
+### Environment Variables
+
+Same as Claude Code — existing hook scripts work unmodified:
+
+| Variable             | Description                              |
+| -------------------- | ---------------------------------------- |
+| `CLAUDE_TOOL_NAME`   | Tool being invoked                       |
+| `CLAUDE_TOOL_INPUT`  | JSON string of tool input                |
+| `CLAUDE_TOOL_RESULT` | JSON string of tool result (Post\* only) |
+| `CLAUDE_SESSION_ID`  | Current session ID                       |
+| `CLAUDE_MODEL`       | Current model ID                         |
+| `CLAUDE_USER_PROMPT` | User prompt text (UserPromptSubmit only) |
+
+Event JSON is also passed on **stdin** for richer processing.
+
+### Hook Config Format
+
+Works the same whether in `~/.config/opencode/hooks.json` or inside `~/.claude/settings.json`:
+
+```json
+{
+  "PreToolUse": [
+    {
+      "matcher": "Bash",
+      "command": "/path/to/my-hook.sh",
+      "timeout": 10
+    }
+  ],
+  "SessionStart": [
+    {
+      "command": "echo 'session started'",
+      "timeout": 5
+    }
+  ]
+}
+```
+
+In `~/.claude/settings.json`, wrap under `"hooks"` key:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{ "matcher": "Bash", "command": "my-hook.sh", "timeout": 10 }]
+  }
+}
+```
+
+- `matcher` — glob pattern on tool name (`"Bash"`, `"*"`, `"File*"`, `"!Glob"`). Optional for lifecycle events.
+- `command` — shell command to execute
+- `timeout` — in **seconds** (Claude Code convention). Default: 10s.
+- Blocking hooks: non-zero exit = deny (stderr used as reason)
+- Non-blocking hooks: fire-and-forget, failures logged
+
+### Disabling Claude Code Compatibility
+
+```bash
+OPENCODE_DISABLE_CLAUDE_CODE=1 opencode  # disable all Claude Code hook/plugin loading
+```
+
+- `matcher` — glob pattern on tool name (micromatch: `"Bash"`, `"*"`, `"File*"`, `"!Glob"`). Optional for lifecycle events.
+- `command` — shell command to execute
+- `timeout` — in **seconds** (Claude Code convention), converted to ms internally. Default: 10s.
+- Blocking hooks: non-zero exit = deny (stderr used as reason)
+- Non-blocking hooks: fire-and-forget, failures logged
+
+### Disabling
+
+```bash
+OPENCODE_DISABLE_CLAUDE_CODE=1 opencode  # disable all Claude Code compatibility
+```
+
+---
+
+## Push to Background
+
+Detach a running session to the background without killing it. The TUI immediately unblocks for new input.
+
+### Keybind
+
+`Leader+D` (default leader chord + D)
+
+### Behavior
+
+1. Running session is detached — continues executing in background
+2. TUI prompt immediately accepts new input
+3. When background session completes, a toast notification fires
+4. Session remains accessible in session list
+
+### Requirements
+
+- Feature flag: `experimental.background_subagents` must be enabled
+- Session must be actively running (not idle)
+
+---
+
+## Context Safety Net
+
+Three-tier system that prevents context window overflow, each triggered at different utilization thresholds.
+
+### Tier 1: Tool Result Budget
+
+**Trigger**: Always active when configured
+**Config**: `experimental.tool_result_budget` (number, character count)
+
+Applies a global character budget to tool result outputs across history. When exceeded, oldest tool results are replaced with `"[tool result truncated to save context]"`.
+
+### Tier 2: MicroCompact (75% context utilization)
+
+**Trigger**: `input_tokens / context_window >= 0.75`
+**Config**: `experimental.microcompact`
+
+Summarizes older messages while keeping the 10 most recent verbatim. Uses the local model (if configured) or falls back to the session model.
+
+### Tier 3: Context Collapse (97% context utilization)
+
+**Trigger**: `input_tokens / context_window >= 0.97`
+**Config**: `experimental.context_collapse`
+
+Emergency fallback:
+
+1. Full history backed up to `~/.local/share/opencode/log/collapse/`
+2. All messages replaced with a structured summary + last user message
+3. If summarization fails, keeps only last 4 messages
+
+### Configuration
+
+```json
+{
+  "experimental": {
+    "tool_result_budget": 50000,
+    "microcompact": true,
+    "context_collapse": true
+  }
+}
+```
+
+---
+
+## Cache Stability
+
+System prompt is split into a **stable prefix** (cached) and **dynamic suffix** (changes per turn) to maximize provider cache hit rates.
+
+**Feature flag**: `experimental.prompt_split_caching`
+
+### What Goes Where
+
+| Section        | Content                                                              |
+| -------------- | -------------------------------------------------------------------- |
+| Stable prefix  | Core identity, capabilities, tool guidelines, skills, AGENTS.md      |
+| Dynamic suffix | Env info (cwd, date), session memory, active goal, persistent memory |
+
+### Provider-Specific Behavior
+
+| Provider          | Mechanism                                                       |
+| ----------------- | --------------------------------------------------------------- |
+| Anthropic/Bedrock | Sub-part `cacheControl` on stable prefix within existing Slot 1 |
+| Alibaba           | Same `cacheControl` format as Anthropic                         |
+| OpenAI/Compatible | Longer stable prefix = more tokens match auto-cache (≥1024)     |
+| OpenRouter        | Inherits from upstream provider                                 |
+| Local (Ollama)    | No effect (no caching mechanism)                                |
+
+### Impact
+
+- Does NOT consume additional cache breakpoints — reuses existing Slot 1
+- Dynamic content (memory, goals, env) changes without invalidating the cached prefix
+- No-op when disabled — prompt builds identically to default behavior
+
+---
+
 ## Plugins
 
 Plugins extend opencode via TypeScript files. Two types: **server** (main process) and **TUI** (worker process). A single file cannot export both — use separate files.
+
+> **Note on Claude Code plugins**: Installed Claude Code plugins (from `~/.claude/plugins/installed_plugins.json`) are auto-discovered — their skills are registered as slash commands automatically. OpenCode plugins (below) are a separate system for deeper integration (event hooks, system prompt injection, TUI extensions).
 
 ### Registration
 

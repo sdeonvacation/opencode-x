@@ -34,3 +34,6 @@ packages/opencode/src/provider/models-snapshot.js
 /packages/opencode/src/graphify-out
 /graphify-out
 .graphify_uncached.txt
+# Added by code-review-graph
+.code-review-graph/
+/.claude

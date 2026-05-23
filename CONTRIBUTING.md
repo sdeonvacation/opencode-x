@@ -1,4 +1,93 @@
-# Contributing to OpenCode
+# Contributing to OpenCode X
+
+Fork of [opencode](https://github.com/anomalyco/opencode) with additional features. Contributions welcome.
+
+---
+
+## Fork-Specific Guidelines
+
+### What's Different Here
+
+OpenCode X adds features on top of upstream opencode. When contributing:
+
+1. **New features go in new files** — don't modify upstream files unless necessary
+2. **Feature flags** — gate new behavior behind `experimental.*` config keys
+3. **Rebase-safe** — all changes must survive `git rebase upstream/dev` without conflicts
+4. **Don't break caching** — never reorder system prompt sections or mutate stable prompt content
+
+### Architecture (Fork Additions)
+
+```
+packages/opencode/src/
+  goal/           # Goal system (autonomous multi-turn)
+  hook/           # Claude Code hook compatibility
+  memory/         # Session memory (SQLite) + persistent memory (filesystem)
+  session/
+    llm-compress.ts       # Tool output compression
+    route-classifier.ts   # Compression template selection
+    sliding-window.ts     # Sliding window compaction
+    microcompact.ts       # Gradual context compression (75%)
+    context-collapse.ts   # Emergency context collapse (97%)
+    tool-budget.ts        # Tool result character budget
+    prompt-split.ts       # Stable/dynamic prompt split for cache hits
+    snapshot-gate.ts      # Skip snapshots when no FS tool fired
+    doom-loop.ts          # Repeated tool call detection
+    part-coalescer.ts     # Batch streaming DB writes
+  tool/
+    goal-complete.ts      # goal_complete tool
+    memory-persist.ts     # memory_persist tool
+    tool-filter.ts        # MCP tool filtering
+  cli/cmd/tui/util/
+    spinner-verbs.ts      # Contextual spinner labels
+```
+
+### Good First Issues
+
+**Easy (1-2 hours):**
+
+- [ ] Add more creative spinner verb phrases to `spinner-verbs.ts`
+- [ ] Add `/help` command showing available slash commands
+- [ ] Improve `/status` to show goal progress when goal system active
+- [ ] Add `memory_list` slash command to browse persistent memories
+
+**Medium (half day):**
+
+- [ ] Add compression stats to `/status` (tokens saved this session)
+- [ ] Implement `/goal_pause` and `/goal_resume` commands
+- [ ] Hook execution debug logging to file
+- [ ] Document all spinner moods with color previews
+
+**Harder (1+ day):**
+
+- [ ] MCP tool filtering config — per-server tool allow/deny lists
+- [ ] Persistent memory search — fuzzy search across memory files
+- [ ] Context collapse recovery — `/restore` command to reload backed-up history
+- [ ] Hook dry-run mode — test without executing
+
+### Quick Test/Build
+
+```bash
+bun --cwd packages/opencode test --timeout 30000    # all tests
+bun --cwd packages/opencode test test/tool/task.test.ts  # single
+bun --cwd packages/opencode typecheck               # types
+bun --cwd packages/opencode run build               # build
+```
+
+### PR Checklist (Fork-Specific)
+
+- [ ] Change is rebase-safe (new files or surgical edits)
+- [ ] Feature gated behind `experimental.*` flag if behavior-changing
+- [ ] Tests pass: `bun --cwd packages/opencode test --timeout 30000`
+- [ ] Types pass: `bun --cwd packages/opencode typecheck`
+- [ ] No unnecessary reformatting in diff
+
+---
+
+## Upstream Contributing Guidelines
+
+The following guidelines are inherited from upstream opencode:
+
+---
 
 We want to make it easy for you to contribute to OpenCode. Here are the most common type of changes that get merged:
 
