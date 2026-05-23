@@ -1,6 +1,10 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect, spyOn, afterEach } from "bun:test"
 import { Effect } from "effect"
 import { Hook } from "../../src/hook/hook"
+import { Instance } from "../../src/project/instance"
+import * as fs from "fs/promises"
+import path from "path"
+import os from "os"
 
 // Hook.dispatch returns Effect with inferred R; cast for test usage
 const run = <A>(eff: Effect.Effect<A, any, any>) => Effect.runPromise(eff as Effect.Effect<A, any, never>)
@@ -267,6 +271,143 @@ describe("Hook", () => {
     test("wildcard matches empty tool", async () => {
       const result = await run(Hook.dispatch("PreToolUse", {}, rules))
       expect(result).toEqual({ allowed: true, output: [] })
+    })
+  })
+
+  describe("load merges project and global claude hooks", () => {
+    let home: string
+    let project: string
+    let spy: ReturnType<typeof spyOn>
+
+    afterEach(async () => {
+      spy?.mockRestore()
+      if (home) await fs.rm(home, { recursive: true, force: true })
+      if (project) await fs.rm(project, { recursive: true, force: true })
+    })
+
+    async function setup(opts: { projectHooks?: object; globalHooks?: object; opencodeHooks?: object }) {
+      home = path.join(os.tmpdir(), "opencode-hook-test-home-" + Math.random().toString(36).slice(2))
+      project = path.join(os.tmpdir(), "opencode-hook-test-proj-" + Math.random().toString(36).slice(2))
+      await fs.mkdir(home, { recursive: true })
+      await fs.mkdir(project, { recursive: true })
+
+      spy = spyOn(os, "homedir").mockReturnValue(home)
+
+      if (opts.opencodeHooks) {
+        const dir = path.join(home, ".config", "opencode")
+        await fs.mkdir(dir, { recursive: true })
+        await Bun.write(path.join(dir, "hooks.json"), JSON.stringify(opts.opencodeHooks))
+      }
+
+      if (opts.projectHooks) {
+        const dir = path.join(project, ".claude")
+        await fs.mkdir(dir, { recursive: true })
+        await Bun.write(path.join(dir, "settings.json"), JSON.stringify({ hooks: opts.projectHooks }))
+      }
+
+      if (opts.globalHooks) {
+        const dir = path.join(home, ".claude")
+        await fs.mkdir(dir, { recursive: true })
+        await Bun.write(path.join(dir, "settings.json"), JSON.stringify({ hooks: opts.globalHooks }))
+      }
+    }
+
+    test("merges project .claude/hooks.json and global ~/.claude/settings.json", async () => {
+      await setup({
+        projectHooks: {
+          PostToolUse: [{ matcher: "Edit", hooks: [{ type: "command", command: "echo project" }] }],
+        },
+        globalHooks: {
+          SessionStart: [{ matcher: "", hooks: [{ type: "command", command: "echo global" }] }],
+        },
+      })
+
+      await Instance.provide({
+        directory: project,
+        fn: async () => {
+          const rules = await Hook.load()
+          expect(rules.PostToolUse).toEqual([
+            { matcher: "Edit", hooks: [{ type: "command", command: "echo project" }] },
+          ])
+          expect(rules.SessionStart).toEqual([{ matcher: "", hooks: [{ type: "command", command: "echo global" }] }])
+        },
+      })
+    })
+
+    test("deduplicates identical hooks from multiple sources", async () => {
+      const hook = { matcher: "Bash", hooks: [{ type: "command" as const, command: "echo same" }] }
+      await setup({
+        projectHooks: { PreToolUse: [hook] },
+        globalHooks: { PreToolUse: [hook] },
+      })
+
+      await Instance.provide({
+        directory: project,
+        fn: async () => {
+          const rules = await Hook.load()
+          expect(rules.PreToolUse).toHaveLength(1)
+          expect(rules.PreToolUse[0]).toEqual(hook)
+        },
+      })
+    })
+
+    test("keeps distinct hooks from multiple sources", async () => {
+      await setup({
+        projectHooks: {
+          PostToolUse: [{ matcher: "Edit", hooks: [{ type: "command", command: "echo a" }] }],
+        },
+        globalHooks: {
+          PostToolUse: [{ matcher: "Write", hooks: [{ type: "command", command: "echo b" }] }],
+        },
+      })
+
+      await Instance.provide({
+        directory: project,
+        fn: async () => {
+          const rules = await Hook.load()
+          expect(rules.PostToolUse).toHaveLength(2)
+          expect(rules.PostToolUse[0].matcher).toBe("Edit")
+          expect(rules.PostToolUse[1].matcher).toBe("Write")
+        },
+      })
+    })
+
+    test("all three sources merge together", async () => {
+      await setup({
+        opencodeHooks: {
+          PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "echo opencode" }] }],
+        },
+        projectHooks: {
+          PostToolUse: [{ matcher: "Edit", hooks: [{ type: "command", command: "echo project" }] }],
+        },
+        globalHooks: {
+          SessionStart: [{ matcher: "", hooks: [{ type: "command", command: "echo global" }] }],
+        },
+      })
+
+      await Instance.provide({
+        directory: project,
+        fn: async () => {
+          const rules = await Hook.load()
+          expect(rules.PreToolUse).toHaveLength(1)
+          expect(rules.PostToolUse).toHaveLength(1)
+          expect(rules.SessionStart).toHaveLength(1)
+        },
+      })
+    })
+
+    test("returns empty rules when no hook files exist", async () => {
+      await setup({})
+
+      await Instance.provide({
+        directory: project,
+        fn: async () => {
+          const rules = await Hook.load()
+          for (const event of Hook.EVENTS) {
+            expect(rules[event]).toEqual([])
+          }
+        },
+      })
     })
   })
 })

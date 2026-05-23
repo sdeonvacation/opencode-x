@@ -98,47 +98,82 @@ export namespace Hook {
     return result
   }
 
+  function dedupeRules(rules: Rule[]): Rule[] {
+    const seen = new Set<string>()
+    const result: Rule[] = []
+    for (const rule of rules) {
+      const key = JSON.stringify({ matcher: rule.matcher ?? "", hooks: rule.hooks })
+      if (seen.has(key)) continue
+      seen.add(key)
+      result.push(rule)
+    }
+    return result
+  }
+
+  function mergeAll(base: Rules, sources: Record<string, unknown>[]): Rules {
+    const result = { ...base }
+    for (const key of EVENTS) {
+      const combined: Rule[] = []
+      for (const source of sources) {
+        if (Array.isArray(source[key])) {
+          combined.push(...(source[key] as Rule[]))
+        }
+      }
+      if (combined.length > 0) {
+        result[key] = dedupeRules(combined)
+      }
+    }
+    return result
+  }
+
   export type CommandDef = {
     name: string
     description?: string
   }
 
   async function readFile(): Promise<unknown> {
-    // Priority 1: User-level ~/.config/opencode/hooks.json
+    const sources: Record<string, unknown>[] = []
+
+    // Source 1: User-level ~/.config/opencode/hooks.json
     const user = path.join(os.homedir(), ".config", "opencode", "hooks.json")
     try {
       const text = await Bun.file(user).text()
-      return JSON.parse(text)
+      const parsed = JSON.parse(text)
+      if (parsed && typeof parsed === "object") sources.push(parsed)
     } catch {
       // file doesn't exist or invalid JSON — continue
     }
 
-    // Priority 2: Project .opencode/hooks.json
-    const project = path.join(Instance.directory, ".opencode", "hooks.json")
+    // Source 2: Project-level .claude/settings.json (Claude Code convention)
+    const project = path.join(Instance.directory, ".claude", "settings.json")
     try {
       const text = await Bun.file(project).text()
-      return JSON.parse(text)
+      const parsed = JSON.parse(text)
+      if (parsed.hooks && typeof parsed.hooks === "object") sources.push(parsed.hooks)
     } catch {
       // file doesn't exist or invalid JSON — continue
     }
 
-    // Priority 3: Claude Code ~/.claude/settings.json
+    // Source 3: Claude Code ~/.claude/settings.json
     const claude = path.join(os.homedir(), ".claude", "settings.json")
     try {
       const text = await Bun.file(claude).text()
       const parsed = JSON.parse(text)
-      if (parsed.hooks) return parsed.hooks
+      if (parsed.hooks && typeof parsed.hooks === "object") sources.push(parsed.hooks)
     } catch {
       // file doesn't exist or invalid JSON — continue
     }
 
-    return null
+    if (sources.length === 0) return null
+    return sources
   }
 
   export async function load(): Promise<Rules> {
     const base = empty()
     const parsed = await readFile()
-    if (parsed && typeof parsed === "object") return merge(base, parsed as Record<string, unknown>)
+    if (!parsed) return base
+    if (Array.isArray(parsed)) return mergeAll(base, parsed)
+    if (typeof parsed === "object") return mergeAll(base, [parsed as Record<string, unknown>])
     return base
   }
 
