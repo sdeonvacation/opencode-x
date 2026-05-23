@@ -233,6 +233,9 @@ Download the binary for your platform from [Releases](https://github.com/sdeonva
 chmod +x opencode-x-<platform>
 sudo mv opencode-x-<platform> /usr/local/bin/opencode-x
 
+# Windows (PowerShell as Admin)
+move opencode-x-windows-x64.exe C:\Windows\opencode-x.exe
+
 # Run
 opencode-x
 ```
