@@ -127,11 +127,15 @@ export function setupAppEventListeners(deps: AppEventListenersDeps): (() => void
       if (error && typeof error === "object" && "name" in error && error.name === "MessageAbortedError") return
       const message = errorMessage(error)
 
-      deps.toast.show({
-        variant: "error",
-        message,
-        duration: 5000,
-      })
+      if (message.includes("\n")) {
+        DialogAlert.show(deps.dialog, "Hook", message, true)
+      } else {
+        deps.toast.show({
+          variant: "error",
+          message,
+          duration: 5000,
+        })
+      }
     }),
 
     deps.sdk.event.on("installation.update-available", async (evt) => {

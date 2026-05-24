@@ -1255,17 +1255,34 @@ export namespace SessionPrompt {
             )
             if (Exit.isFailure(exit)) {
               const err = Cause.squash(exit.cause)
-              const reason =
-                err && typeof err === "object" && "message" in err ? String(err.message) : "hook denied prompt"
+              const reason = Hook.HookDenied.isInstance(err)
+                ? err.data.message
+                : err && typeof err === "object" && "message" in err
+                  ? String(err.message)
+                  : "hook denied prompt"
               log.warn("hook-denied-prompt", { sessionID: input.sessionID, reason })
               const error = new NamedError.Unknown({
-                message: `UserPromptSubmit hook denied prompt: ${reason}`,
+                message: reason,
               })
               yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
               return message
             }
             if (Exit.isSuccess(exit) && exit.value.output.length > 0) {
               HookContext.setTurn(input.sessionID, exit.value.output.join("\n\n"))
+            }
+          }
+
+          // Skill-command injection: if prompt matches a plugin skill, inject content into model context
+          const prompt = input.parts
+            .filter((p): p is { type: "text"; text: string } => p.type === "text")
+            .map((p) => p.text)
+            .join("\n")
+          const cmdMatch = /^\/([^\s]+)/.exec(prompt)
+          if (cmdMatch) {
+            const skill = yield* Effect.promise(() => Hook.resolveSkill(cmdMatch[1]))
+            if (skill) {
+              const existing = HookContext.getSession(input.sessionID)
+              HookContext.setSession(input.sessionID, existing ? existing + "\n\n" + skill : skill)
             }
           }
 

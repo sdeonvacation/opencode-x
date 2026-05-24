@@ -227,6 +227,38 @@ export namespace Hook {
     return results
   }
 
+  /** Resolve plugin skill content for a hook command name. Returns SKILL.md body (without frontmatter) or null. */
+  export async function resolveSkill(name: string): Promise<string | null> {
+    const manifest = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json")
+    try {
+      const text = await Bun.file(manifest).text()
+      const parsed = JSON.parse(text)
+      const plugins = parsed?.plugins
+      if (!plugins || typeof plugins !== "object") return null
+      for (const [, entries] of Object.entries(plugins)) {
+        const entry = (entries as any[])?.[0]
+        const dir = entry?.installPath
+        if (!dir) continue
+        const skills = path.join(dir, "skills")
+        try {
+          const items = await Array.fromAsync(new Bun.Glob("*/SKILL.md").scan({ cwd: skills, onlyFiles: true }))
+          for (const item of items) {
+            try {
+              const content = await Bun.file(path.join(skills, item)).text()
+              const fm = parseSkillFrontmatter(content)
+              if (!fm.name) continue
+              const cmd = fm.trigger || fm.name
+              if (cmd === name) {
+                return content.replace(/^---\n[\s\S]*?\n---\n*/, "").trim()
+              }
+            } catch {}
+          }
+        } catch {}
+      }
+    } catch {}
+    return null
+  }
+
   function parseSkillFrontmatter(content: string): { name?: string; description?: string; trigger?: string } {
     const match = content.match(/^---\n([\s\S]*?)\n---/)
     if (!match) return {}
@@ -240,7 +272,7 @@ export namespace Hook {
       const inline = block.match(/^description:\s*(.+)/m)?.[1]?.trim()
       if (inline) description = inline
     }
-    const trigger = description.match(/Trigger:\s*\/([^\s]+)/)?.[1]
+    const trigger = description.match(/Trigger:\s*\/([^\s,]+)/)?.[1]
     return { name, description: description.replace(/\s*Trigger:.*/, "").trim(), trigger }
   }
 
@@ -319,6 +351,19 @@ export namespace Hook {
             stderr: result.stderr,
           })
         } else if (result.stdout) {
+          if (event === "PreToolUse" || event === "UserPromptSubmit") {
+            try {
+              const parsed = JSON.parse(result.stdout)
+              if (parsed.decision === "block") {
+                return yield* Effect.fail(
+                  new HookDenied({
+                    message: parsed.reason || "blocked by hook",
+                    tool: payload.tool,
+                  }),
+                )
+              }
+            } catch {}
+          }
           output.push(result.stdout)
         }
       }

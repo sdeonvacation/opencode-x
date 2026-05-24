@@ -546,7 +546,10 @@ export namespace Config {
       temperature: z.number().optional(),
       top_p: z.number().optional(),
       prompt: z.string().optional(),
-      tools: z.record(z.string(), z.boolean()).optional().describe("@deprecated Use 'permission' field instead"),
+      tools: z
+        .union([z.record(z.string(), z.boolean()), z.array(z.string())])
+        .optional()
+        .describe("@deprecated Use 'permission' field instead"),
       disable: z.boolean().optional(),
       description: z.string().optional().describe("Description of when to use the agent"),
       mode: z.enum(["subagent", "primary", "all"]).optional(),
@@ -602,12 +605,23 @@ export namespace Config {
 
       // Convert legacy tools config to permissions
       const permission: Permission = {}
-      for (const [tool, enabled] of Object.entries(agent.tools ?? {})) {
-        const action = enabled ? "allow" : "deny"
-        if (tool === "write" || tool === "edit" || tool === "patch") {
-          permission.edit = action
-        } else {
-          permission[tool] = action
+      if (Array.isArray(agent.tools)) {
+        for (const tool of agent.tools) {
+          const key = tool.toLowerCase()
+          if (key === "write" || key === "edit" || key === "patch") {
+            permission.edit = "allow"
+          } else {
+            permission[key] = "allow"
+          }
+        }
+      } else {
+        for (const [tool, enabled] of Object.entries(agent.tools ?? {})) {
+          const action = enabled ? "allow" : "deny"
+          if (tool === "write" || tool === "edit" || tool === "patch") {
+            permission.edit = action
+          } else {
+            permission[tool] = action
+          }
         }
       }
       Object.assign(permission, agent.permission)
@@ -1985,6 +1999,26 @@ export namespace Config {
             const list = yield* Effect.promise(() => loadPlugin(dir))
             track(dir, list)
           }
+
+          // Load agents from installed Claude Code plugins
+          yield* Effect.promise(async () => {
+            const manifest = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json")
+            try {
+              const text = await Bun.file(manifest).text()
+              const parsed = JSON.parse(text)
+              const plugins = parsed?.plugins
+              if (!plugins || typeof plugins !== "object") return
+              for (const [, entries] of Object.entries(plugins)) {
+                const entry = (entries as any[])?.[0]
+                const dir = entry?.installPath
+                if (!dir) continue
+                try {
+                  const found = await loadAgent(dir)
+                  result.agent = mergeDeep(result.agent!, found)
+                } catch {}
+              }
+            } catch {}
+          })
 
           if (process.env.OPENCODE_CONFIG_CONTENT) {
             const source = "OPENCODE_CONFIG_CONTENT"
