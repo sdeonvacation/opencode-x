@@ -1,17 +1,19 @@
 import { TextAttributes } from "@opentui/core"
 import { useTheme } from "../context/theme"
 import { useDialog, type DialogContext } from "./dialog"
-import { useKeyboard } from "@opentui/solid"
+import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
 
 export type DialogAlertProps = {
   title: string
   message: string
+  markdown?: boolean
   onConfirm?: () => void
 }
 
 export function DialogAlert(props: DialogAlertProps) {
   const dialog = useDialog()
-  const { theme } = useTheme()
+  const { theme, syntax } = useTheme()
+  const dimensions = useTerminalDimensions()
 
   useKeyboard((evt) => {
     if (evt.name === "return") {
@@ -30,7 +32,19 @@ export function DialogAlert(props: DialogAlertProps) {
         </text>
       </box>
       <box paddingBottom={1}>
-        <text fg={theme.textMuted}>{props.message}</text>
+        {props.markdown ? (
+          <scrollbox height={Math.min(dimensions().height - 8, 9999)}>
+            <markdown
+              content={props.message}
+              syntaxStyle={syntax()}
+              tableOptions={{ style: "grid" }}
+              fg={theme.markdownText}
+              bg={theme.background}
+            />
+          </scrollbox>
+        ) : (
+          <text fg={theme.textMuted}>{props.message}</text>
+        )}
       </box>
       <box flexDirection="row" justifyContent="flex-end" paddingBottom={1}>
         <box
@@ -49,10 +63,10 @@ export function DialogAlert(props: DialogAlertProps) {
   )
 }
 
-DialogAlert.show = (dialog: DialogContext, title: string, message: string) => {
+DialogAlert.show = (dialog: DialogContext, title: string, message: string, markdown?: boolean) => {
   return new Promise<void>((resolve) => {
     dialog.replace(
-      () => <DialogAlert title={title} message={message} onConfirm={() => resolve()} />,
+      () => <DialogAlert title={title} message={message} markdown={markdown} onConfirm={() => resolve()} />,
       () => resolve(),
     )
   })
