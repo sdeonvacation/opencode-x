@@ -1200,6 +1200,25 @@ export namespace Config {
           url: z.string().optional().describe("Enterprise URL"),
         })
         .optional(),
+      tool_output: z
+        .object({
+          max_lines: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe("Maximum lines of tool output before it is truncated and saved to disk (default: 2000)"),
+          max_bytes: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe("Maximum bytes of tool output before it is truncated and saved to disk (default: 51200)"),
+        })
+        .optional()
+        .describe(
+          "Thresholds for truncating tool output. When output exceeds either limit, the full text is written to the truncation directory and a preview is returned.",
+        ),
       compaction: z
         .object({
           auto: z.boolean().optional().describe("Enable automatic compaction when context is full (default: true)"),

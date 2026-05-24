@@ -383,8 +383,7 @@ async function run(
   },
   ctx: Tool.Context,
 ) {
-  const bytes = Truncate.MAX_BYTES
-  const lines = Truncate.MAX_LINES
+  const { maxBytes: bytes, maxLines: lines } = await Truncate.limits()
   const keep = bytes * 2
   type Chunk = { text: string; size: number }
   let last = ""
@@ -568,68 +567,70 @@ const parser = lazy(async () => {
 export const BashTool = Tool.define(
   "bash",
   async () => {
-  const shell = Shell.acceptable()
-  const name = Shell.name(shell)
-  const chain =
-    name === "powershell"
-      ? "If the commands depend on each other and must run sequentially, avoid '&&' in this shell because Windows PowerShell 5.1 does not support it. Use PowerShell conditionals such as `cmd1; if ($?) { cmd2 }` when later commands must depend on earlier success."
-      : "If the commands depend on each other and must run sequentially, use a single Bash call with '&&' to chain them together (e.g., `git add . && git commit -m \"message\" && git push`). For instance, if one operation must complete before another starts (like mkdir before cp, Write before Bash for git operations, or git add before git commit), run these operations sequentially instead."
-  log.info("bash tool using shell", { shell })
+    const shell = Shell.acceptable()
+    const name = Shell.name(shell)
+    const chain =
+      name === "powershell"
+        ? "If the commands depend on each other and must run sequentially, avoid '&&' in this shell because Windows PowerShell 5.1 does not support it. Use PowerShell conditionals such as `cmd1; if ($?) { cmd2 }` when later commands must depend on earlier success."
+        : "If the commands depend on each other and must run sequentially, use a single Bash call with '&&' to chain them together (e.g., `git add . && git commit -m \"message\" && git push`). For instance, if one operation must complete before another starts (like mkdir before cp, Write before Bash for git operations, or git add before git commit), run these operations sequentially instead."
+    log.info("bash tool using shell", { shell })
 
-  return {
-    description: DESCRIPTION.replaceAll("${directory}", Instance.directory)
-      .replaceAll("${os}", process.platform)
-      .replaceAll("${shell}", name)
-      .replaceAll("${chaining}", chain)
-      .replaceAll("${maxLines}", String(Truncate.MAX_LINES))
-      .replaceAll("${maxBytes}", String(Truncate.MAX_BYTES)),
-    parameters: Parameters,
-    async execute(params, ctx) {
-      const cwd = params.workdir ? await resolvePath(params.workdir, Instance.directory, shell) : Instance.directory
-      if (params.timeout !== undefined && params.timeout < 0) {
-        throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
-      }
-      const timeout = params.timeout ?? DEFAULT_TIMEOUT
-      const ps = PS.has(name)
-      const root = await parse(params.command, ps)
-      if (params.command.trim() && commands(root).length === 0) {
-        throw new Error(
-          "Unable to analyze this shell command safely for permission checks. Rewrite as a single-line command.",
+    const { maxLines, maxBytes } = await Truncate.limits()
+
+    return {
+      description: DESCRIPTION.replaceAll("${directory}", Instance.directory)
+        .replaceAll("${os}", process.platform)
+        .replaceAll("${shell}", name)
+        .replaceAll("${chaining}", chain)
+        .replaceAll("${maxLines}", String(maxLines))
+        .replaceAll("${maxBytes}", String(maxBytes)),
+      parameters: Parameters,
+      async execute(params, ctx) {
+        const cwd = params.workdir ? await resolvePath(params.workdir, Instance.directory, shell) : Instance.directory
+        if (params.timeout !== undefined && params.timeout < 0) {
+          throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
+        }
+        const timeout = params.timeout ?? DEFAULT_TIMEOUT
+        const ps = PS.has(name)
+        const root = await parse(params.command, ps)
+        if (params.command.trim() && commands(root).length === 0) {
+          throw new Error(
+            "Unable to analyze this shell command safely for permission checks. Rewrite as a single-line command.",
+          )
+        }
+        const scan = await collect(root, cwd, ps, shell)
+        if (params.command.trim() && noncwd(root, ps) && scan.patterns.size === 0) {
+          throw new Error(
+            "Unable to derive permission patterns from this shell command. Rewrite as a single-line command.",
+          )
+        }
+        if (!Instance.containsPath(cwd)) scan.dirs.add(cwd)
+        await ask(ctx, scan)
+
+        const result = await run(
+          {
+            shell,
+            name,
+            command: params.command,
+            cwd,
+            env: await shellEnv(ctx, cwd),
+            timeout,
+            description: params.description,
+          },
+          ctx,
         )
-      }
-      const scan = await collect(root, cwd, ps, shell)
-      if (params.command.trim() && noncwd(root, ps) && scan.patterns.size === 0) {
-        throw new Error(
-          "Unable to derive permission patterns from this shell command. Rewrite as a single-line command.",
-        )
-      }
-      if (!Instance.containsPath(cwd)) scan.dirs.add(cwd)
-      await ask(ctx, scan)
 
-      const result = await run(
-        {
-          shell,
-          name,
-          command: params.command,
-          cwd,
-          env: await shellEnv(ctx, cwd),
-          timeout,
-          description: params.description,
-        },
-        ctx,
-      )
+        if (isCommit(params.command, result.metadata.exit)) {
+          SessionSummary.clearDiff(ctx.sessionID)
+          SessionSummary.summarize({
+            sessionID: ctx.sessionID,
+            messageID: ctx.messageID,
+          })
+        }
 
-      if (isCommit(params.command, result.metadata.exit)) {
-        SessionSummary.clearDiff(ctx.sessionID)
-        SessionSummary.summarize({
-          sessionID: ctx.sessionID,
-          messageID: ctx.messageID,
-        })
-      }
-
-      return result
-    },
-  }
-},
-(input: any) => BashSafety.isReadOnly((input as { command: string }).command), // [fork-perf] read-only whitelist gates parallel execution
+        return result
+      },
+    }
+  },
+  (input: any) => BashSafety.isReadOnly((input as { command: string }).command), // [fork-perf] read-only whitelist gates parallel execution
 )

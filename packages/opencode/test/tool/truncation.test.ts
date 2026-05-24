@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test"
 import { NodeFileSystem } from "@effect/platform-node"
 import { Effect, FileSystem, Layer } from "effect"
 import { Truncate, Truncate as TruncateSvc } from "../../src/tool/truncate"
+import { Config } from "../../src/config/config"
 import { Identifier } from "../../src/id/id"
 import { Process } from "../../src/util/process"
 import { Filesystem } from "../../src/util/filesystem"
@@ -11,6 +12,14 @@ import { writeFileStringScoped } from "../lib/filesystem"
 
 const FIXTURES_DIR = path.join(import.meta.dir, "fixtures")
 const ROOT = path.resolve(import.meta.dir, "..", "..")
+
+const configuredLayer = (cfg: Config.Info) =>
+  Layer.mergeAll(
+    TruncateSvc.defaultLayer,
+    NodeFileSystem.layer,
+    Layer.mock(Config.Service)({ get: () => Effect.succeed(cfg) } as any),
+  )
+const configuredIt = (cfg: Config.Info) => testEffect(configuredLayer(cfg))
 
 describe("Truncate", () => {
   describe("output", () => {
@@ -72,6 +81,55 @@ describe("Truncate", () => {
     test("uses default MAX_LINES and MAX_BYTES", () => {
       expect(Truncate.MAX_LINES).toBe(2000)
       expect(Truncate.MAX_BYTES).toBe(50 * 1024)
+    })
+
+    test("limits() falls back to defaults when Config is not provided", async () => {
+      const resolved = await Truncate.limits()
+      expect(resolved.maxLines).toBe(Truncate.MAX_LINES)
+      expect(resolved.maxBytes).toBe(Truncate.MAX_BYTES)
+    })
+
+    describe("with tool_output config", () => {
+      const limitsIt = configuredIt({ tool_output: { max_lines: 123, max_bytes: 456 } } as Config.Info)
+      limitsIt.live("limits() reflects config overrides", () =>
+        Effect.gen(function* () {
+          const resolved = yield* (yield* TruncateSvc.Service).limits()
+          expect(resolved.maxLines).toBe(123)
+          expect(resolved.maxBytes).toBe(456)
+        }),
+      )
+
+      const lineIt = configuredIt({ tool_output: { max_lines: 10, max_bytes: 1024 * 1024 } } as Config.Info)
+      lineIt.live("output() truncates to configured max_lines", () =>
+        Effect.gen(function* () {
+          const content = Array.from({ length: 100 }, (_, i) => `line${i}`).join("\n")
+          const result = yield* (yield* TruncateSvc.Service).output(content)
+          expect(result.truncated).toBe(true)
+          expect(result.content).toContain("...90 lines truncated...")
+        }),
+      )
+
+      const byteIt = configuredIt({ tool_output: { max_lines: 1_000_000, max_bytes: 100 } } as Config.Info)
+      byteIt.live("output() truncates to configured max_bytes", () =>
+        Effect.gen(function* () {
+          const content = "a".repeat(1000)
+          const result = yield* (yield* TruncateSvc.Service).output(content)
+          expect(result.truncated).toBe(true)
+          expect(result.content).toContain("bytes truncated...")
+        }),
+      )
+
+      const overrideIt = configuredIt({ tool_output: { max_lines: 10, max_bytes: 100 } } as Config.Info)
+      overrideIt.live("per-call options still override config", () =>
+        Effect.gen(function* () {
+          const content = Array.from({ length: 50 }, (_, i) => `line${i}`).join("\n")
+          const result = yield* (yield* TruncateSvc.Service).output(content, {
+            maxLines: 1000,
+            maxBytes: 1024 * 1024,
+          })
+          expect(result.truncated).toBe(false)
+        }),
+      )
     })
 
     test("large single-line file truncates with byte message", async () => {
