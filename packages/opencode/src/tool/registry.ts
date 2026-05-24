@@ -191,8 +191,8 @@ export namespace ToolRegistry {
           ApplyPatchTool,
           ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [lsptool] : []),
           ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [plan] : []),
-          ...(cfg.experimental?.goal_system ? [GoalCompleteTool] : []),
-          ...(cfg.experimental?.persistent_memory ? [MemoryPersistTool] : []),
+          ...(cfg.experimental?.goal_system !== false ? [GoalCompleteTool] : []),
+          ...(cfg.experimental?.persistent_memory !== false ? [MemoryPersistTool] : []),
           ...s.custom,
         ]
       })

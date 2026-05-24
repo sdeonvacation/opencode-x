@@ -32,7 +32,7 @@ export interface TaskPromptOps {
 }
 
 const id = "task"
-const SUBAGENT_TIMEOUT = 900_000
+const SUBAGENT_TIMEOUT = 1_800_000
 
 const baseParameters = z.object({
   description: z.string().describe("A short (3-5 words) description of the task"),
@@ -201,7 +201,7 @@ export const TaskTool = Tool.defineEffect(
             let worktree: OrchestrationWorktree.WorktreePath | undefined
             let worktreeCtx: InstanceContext | undefined
             try {
-              if (params.isolation === "worktree" && cfg.experimental?.worktree_isolation) {
+              if (params.isolation === "worktree" && cfg.experimental?.worktree_isolation !== false) {
                 worktree = await OrchestrationWorktree.create({ sessionID: nextSession.id, cwd: Instance.directory })
                 worktreeCtx = { ...Instance.current, directory: worktree }
               }
@@ -343,7 +343,7 @@ export const TaskTool = Tool.defineEffect(
         let worktree: OrchestrationWorktree.WorktreePath | undefined
         let worktreeCtx: InstanceContext | undefined
         try {
-          if (params.isolation === "worktree" && cfg.experimental?.worktree_isolation) {
+          if (params.isolation === "worktree" && cfg.experimental?.worktree_isolation !== false) {
             worktree = await OrchestrationWorktree.create({ sessionID: nextSession.id, cwd: Instance.directory })
             worktreeCtx = { ...Instance.current, directory: worktree }
           }

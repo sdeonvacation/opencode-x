@@ -124,14 +124,18 @@ export namespace SlidingWindow {
       }
     }
 
-    const estimated = yield* estimate(input.msgs, input.model, { stripThinkingText: input.cfg.experimental?.strip_thinking_text === true }) // [fork-perf] strip-thinking
+    const estimated = yield* estimate(input.msgs, input.model, {
+      stripThinkingText: input.cfg.experimental?.strip_thinking_text !== false,
+    }) // [fork-perf] strip-thinking
     const total = input.hint !== undefined ? Math.max(input.hint, estimated) : estimated
     if (total < threshold) {
       log.info("skip_below_threshold", { sessionID: input.sessionID, total, estimated, hint: input.hint, threshold })
       return stash(input.msgs)
     }
 
-    const tail = yield* last(input.msgs, input.model, { stripThinkingText: input.cfg.experimental?.strip_thinking_text === true }) // [fork-perf] strip-thinking
+    const tail = yield* last(input.msgs, input.model, {
+      stripThinkingText: input.cfg.experimental?.strip_thinking_text !== false,
+    }) // [fork-perf] strip-thinking
     const budget = Math.min(Math.max(Math.floor(estimated * (opts?.tail_ratio ?? 0.5)), tail), estimated - MIN)
     const split = yield* divide(input.msgs, input.model, budget, estimated)
     if (!split) {
@@ -139,7 +143,9 @@ export namespace SlidingWindow {
       return stash(input.msgs)
     }
 
-    const size = yield* estimate(split.head, input.model, { stripThinkingText: input.cfg.experimental?.strip_thinking_text === true }) // [fork-perf] strip-thinking
+    const size = yield* estimate(split.head, input.model, {
+      stripThinkingText: input.cfg.experimental?.strip_thinking_text !== false,
+    }) // [fork-perf] strip-thinking
     if (size < MIN) {
       log.info("skip_small_head", { sessionID: input.sessionID, head: size, min: MIN, total, budget, tail })
       return stash(input.msgs)
@@ -153,7 +159,9 @@ export namespace SlidingWindow {
       log.info("cache_hit", { sessionID: input.sessionID, headEndID, total, budget, head: size })
       touch(input.sessionID, hit)
       const result = [synthetic(hit.summary, input), ...split.tail]
-      const actual = yield* estimate(result, input.model, { stripThinkingText: input.cfg.experimental?.strip_thinking_text === true }) // [fork-perf] strip-thinking
+      const actual = yield* estimate(result, input.model, {
+        stripThinkingText: input.cfg.experimental?.strip_thinking_text !== false,
+      }) // [fork-perf] strip-thinking
       const ratio = estimated > 0 ? actual / estimated : 1
       const sent = Math.round(total * ratio)
       metrics.set(input.sessionID, {
@@ -194,7 +202,9 @@ export namespace SlidingWindow {
     const splitTailCheap = split.tail.reduce((acc, m) => acc + cheapEstimate(m), 0)
     lastCompactTailEstimate.set(input.sessionID, splitTailCheap)
     const result = [synthetic(summary, input), ...split.tail]
-    const actual = yield* estimate(result, input.model, { stripThinkingText: input.cfg.experimental?.strip_thinking_text === true }) // [fork-perf] strip-thinking
+    const actual = yield* estimate(result, input.model, {
+      stripThinkingText: input.cfg.experimental?.strip_thinking_text !== false,
+    }) // [fork-perf] strip-thinking
     const ratio = estimated > 0 ? actual / estimated : 1
     const sent = Math.round(total * ratio)
     metrics.set(input.sessionID, {
@@ -294,7 +304,10 @@ export namespace SlidingWindow {
     model: Provider.Model,
     opts?: { stripThinkingText?: boolean },
   ) {
-    const out = yield* MessageV2.toModelMessagesEffect(msgs, model, { stripMedia: true, stripThinkingText: opts?.stripThinkingText }) // [fork-perf] strip-thinking
+    const out = yield* MessageV2.toModelMessagesEffect(msgs, model, {
+      stripMedia: true,
+      stripThinkingText: opts?.stripThinkingText,
+    }) // [fork-perf] strip-thinking
     return Token.estimate(JSON.stringify(out))
   })
 
@@ -479,7 +492,8 @@ export namespace SlidingWindow {
   }
 
   /** @internal test-only: override the hysteresis baseline for a session */
-  export function _setLastCompactTailEstimate(sessionID: SessionID, value: number) { // [fork-perf] hysteresis
+  export function _setLastCompactTailEstimate(sessionID: SessionID, value: number) {
+    // [fork-perf] hysteresis
     lastCompactTailEstimate.set(sessionID, value)
   }
 }

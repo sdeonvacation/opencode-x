@@ -463,7 +463,7 @@ export namespace Session {
         // Hook dispatch: SessionStart (capture stdout for system prompt)
         yield* Effect.promise(async () => {
           const cfg = await Config.get()
-          if (!cfg.experimental?.hooks) return
+          if (cfg.experimental?.hooks === false) return
           const rules = await Hook.load()
           const res = await Effect.runPromise(
             Hook.dispatch("SessionStart", { sessionID: result.id }, rules).pipe(Effect.option),
@@ -509,7 +509,7 @@ export namespace Session {
           // Hook dispatch: Stop (fire-and-forget)
           yield* Effect.promise(async () => {
             const cfg = await Config.get()
-            if (!cfg.experimental?.hooks) return
+            if (cfg.experimental?.hooks === false) return
             const rules = await Hook.load()
             await Effect.runPromise(Hook.dispatch("Stop", { sessionID }, rules).pipe(Effect.asVoid, Effect.ignore))
           }).pipe(Effect.catchCause(() => Effect.void))

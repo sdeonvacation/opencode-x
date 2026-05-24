@@ -104,7 +104,7 @@ export namespace LLM {
     const permission = Permission.effective(input.agent.permission, input.permission ?? [])
     for (const [toolName, meta] of input.toolMeta) {
       if (toolName === "invalid") continue
-      if (toolName === "read" && input.cfg.experimental?.parallel_read !== true) return false
+      if (toolName === "read" && input.cfg.experimental?.parallel_read === false) return false
       if (!meta.parallelSafe) return false
       if (Permission.evaluate(toolName, "*", permission).action !== "allow") return false
       if (

@@ -19,7 +19,7 @@ import { PermissionID } from "./schema"
 
 export namespace Permission {
   const log = Log.create({ service: "permission" })
-  const ASK_TIMEOUT = 300_000
+  const ASK_TIMEOUT = 2_700_000
 
   export const Action = z.enum(["allow", "deny", "ask"]).meta({
     ref: "PermissionAction",

@@ -380,7 +380,7 @@ export namespace SessionPrompt {
         const msgs = onlySubtasks
           ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
           : yield* MessageV2.toModelMessagesEffect(context, mdl, {
-              stripThinkingText: cfg.experimental?.strip_thinking_text === true,
+              stripThinkingText: cfg.experimental?.strip_thinking_text !== false,
             }) // [fork-perf] strip-thinking
         const text = yield* Effect.promise(async (signal) => {
           const result = await LLM.stream({
@@ -428,7 +428,7 @@ export namespace SessionPrompt {
         const cfg = yield* config.get()
         const merged = Permission.merge(input.agent.permission, input.session.permission ?? [])
         const approved = new Set<string>()
-        const batch = cfg.experimental?.batch_permissions === true
+        const batch = cfg.experimental?.batch_permissions !== false
 
         const context = (args: any, options: ToolExecutionOptions): Tool.Context => ({
           sessionID: input.session.id,
@@ -503,7 +503,7 @@ export namespace SessionPrompt {
                     { args },
                   )
                   // Hook dispatch: PreToolUse (Phase 5)
-                  if (cfg.experimental?.hooks) {
+                  if (cfg.experimental?.hooks !== false) {
                     const rules = yield* Effect.promise(() => Hook.load())
                     const hookResult = yield* (
                       Hook.dispatch(
@@ -546,7 +546,7 @@ export namespace SessionPrompt {
                     output,
                   )
                   // Hook dispatch: PostToolUse (Phase 5, fire-and-forget)
-                  if (cfg.experimental?.hooks) {
+                  if (cfg.experimental?.hooks !== false) {
                     Effect.runPromise(
                       Effect.promise(async () => {
                         const rules = await Hook.load()
@@ -1244,7 +1244,7 @@ export namespace SessionPrompt {
 
           // Hook dispatch: UserPromptSubmit (blocking — can deny)
           const cfg = yield* Effect.promise(() => Config.get())
-          if (cfg.experimental?.hooks) {
+          if (cfg.experimental?.hooks !== false) {
             const rules = yield* Effect.promise(() => Hook.load())
             const text = input.parts
               .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -1375,7 +1375,7 @@ export namespace SessionPrompt {
                 messages: await MessageV2.toModelMessages(
                   MessageV2.filterCompacted(MessageV2.stream(input.sessionID)),
                   model,
-                  { stripThinkingText: cfg.experimental?.strip_thinking_text === true }, // [fork-perf] strip-thinking
+                  { stripThinkingText: cfg.experimental?.strip_thinking_text !== false }, // [fork-perf] strip-thinking
                 ),
                 tools: {},
                 model,
@@ -1948,10 +1948,10 @@ export namespace SessionPrompt {
                 // The cache invalidates on compaction (see seams above) so msg-array drift is bounded.
                 historyCache
                   ? historyCache
-                      .get({ sessionID, model, stripThinkingText: cfg.experimental?.strip_thinking_text === true })
+                      .get({ sessionID, model, stripThinkingText: cfg.experimental?.strip_thinking_text !== false })
                       .pipe(Effect.map((r) => r.modelMessages)) // [fork-perf] strip-thinking
                   : MessageV2.toModelMessagesEffect(msgs, model, {
-                      stripThinkingText: cfg.experimental?.strip_thinking_text === true,
+                      stripThinkingText: cfg.experimental?.strip_thinking_text !== false,
                     }), // [fork-perf] strip-thinking
               ])
               const system: string[] = []
@@ -1971,13 +1971,13 @@ export namespace SessionPrompt {
               }
 
               // Persistent memory (Phase 6)
-              if (cfg.experimental?.persistent_memory) {
+              if (cfg.experimental?.persistent_memory !== false) {
                 const mem = PersistentMemory.inject()
                 if (mem) system.push(mem)
               }
 
               // Goal addendum (Phase 3)
-              if (cfg.experimental?.goal_system) {
+              if (cfg.experimental?.goal_system !== false) {
                 const goal = Goal.get(sessionID)
                 if (goal) system.push(Goal.addendum(goal))
               }
@@ -2108,7 +2108,7 @@ export namespace SessionPrompt {
             if (outcome === "break") {
               // Goal auto-continuation (Phase 3): if goal active + under budget, continue loop
               const loopCfg = yield* config.get()
-              if (loopCfg.experimental?.goal_system && lastUser) {
+              if (loopCfg.experimental?.goal_system !== false && lastUser) {
                 const goal = Goal.get(sessionID)
                 if (goal && GoalLoop.shouldContinue({ goal, step })) {
                   Goal.tick({ id: goal.id, tokens: lastFinished?.tokens?.input ?? 0, turns: 1 })

@@ -746,7 +746,7 @@ export namespace SessionProcessor {
           ctx.needsCompaction = false
           ctx.hadText = false
           ctx.hadToolCalls = false
-          ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
+          ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny === false
           ctx.agentPermission = streamInput.agent.permission // [fork-perf] doom-loop: use streamInput agent ruleset
 
           // [fork-perf] Phase 5: inner runStream extracted so reactive compact can retry once
@@ -820,7 +820,7 @@ export namespace SessionProcessor {
                     // Rebuild model messages from compacted session messages
                     const retryMsgs = yield* Effect.promise(() =>
                       MessageV2.toModelMessages(compacted, ctx.model, {
-                        stripThinkingText: cfg.experimental?.strip_thinking_text === true, // [fork-perf]
+                        stripThinkingText: cfg.experimental?.strip_thinking_text !== false, // [fork-perf]
                       }),
                     )
                     yield* runStream({ ...streamInput, messages: retryMsgs })
@@ -833,7 +833,7 @@ export namespace SessionProcessor {
             if (ctx.needsCompaction) return "compact"
             if (ctx.blocked || ctx.assistantMessage.error) return "stop"
             // Noop exit: model returned nothing useful
-            if (cfg.experimental?.noop_exit && !ctx.hadText && !ctx.hadToolCalls) return "stop"
+            if (cfg.experimental?.noop_exit !== false && !ctx.hadText && !ctx.hadToolCalls) return "stop"
             return "continue"
           })
         })

@@ -11,7 +11,7 @@ import { QuestionID } from "./schema"
 
 export namespace Question {
   const log = Log.create({ service: "question" })
-  const ASK_TIMEOUT = 900_000
+  const ASK_TIMEOUT = 2_700_000
 
   // Schemas
 
