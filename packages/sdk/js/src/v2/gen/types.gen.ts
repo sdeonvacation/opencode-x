@@ -1604,7 +1604,7 @@ export type HybridConfig = {
    * Enable hybrid cloud/local model routing
    */
   enabled?: boolean
-  local_model?: HybridModelRefConfig
+  cheap_model?: HybridModelRefConfig
   cloud_model?: HybridModelRefConfig
   /**
    * Enable verbose routing decision logging

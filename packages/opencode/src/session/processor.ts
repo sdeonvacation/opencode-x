@@ -143,7 +143,7 @@ export namespace SessionProcessor {
         // so capturing inside the event handler can be too late.
         const initialSnapshot = yield* snapshot.track()
         const cfg = yield* config.get()
-        const ref = cfg.hybrid?.local_model
+        const ref = cfg.hybrid?.cheap_model
         const local = ref
           ? yield* Effect.tryPromise(() =>
               Provider.getModel(ProviderID.make(ref.providerID), ModelID.make(ref.modelID)),

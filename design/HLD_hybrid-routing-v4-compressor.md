@@ -212,7 +212,7 @@ interface ProcessorContext extends Input {
 // Local model resolution in create() (add to existing Effect.gen at line 95)
 // Uses same pattern as route-classifier.ts resolve():
 const cfg = yield * Config.Service
-const ref = cfg.hybrid?.local_model
+const ref = cfg.hybrid?.cheap_model
 const localModel = ref
   ? yield *
     Effect.tryPromise(() => Provider.getModel(ProviderID.make(ref.providerID), ModelID.make(ref.modelID))).pipe(
@@ -535,7 +535,7 @@ state: {
 ```typescript
 export const Hybrid = z.object({
   enabled: z.boolean().optional().default(false),
-  local_model: HybridModelRef.optional(),
+  cheap_model: HybridModelRef.optional(),
   cloud_model: HybridModelRef.optional(),
   log_routing: z.boolean().optional().default(false),
 
@@ -621,7 +621,7 @@ export const Hybrid = z.object({
 
 **Test: Local Model Unconfigured**
 
-- Config: hybrid.enabled=true, local_model=undefined
+- Config: hybrid.enabled=true, cheap_model=undefined
 - Input: grep output (50 lines)
 - Expected: skip compression, return raw output
 - Verify: no compress call, no error

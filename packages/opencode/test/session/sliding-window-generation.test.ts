@@ -94,7 +94,7 @@ function cfg(opts?: { cache?: boolean }) {
     },
     hybrid: {
       enabled: true,
-      local_model: {
+      cheap_model: {
         providerID: ProviderID.make("test"),
         modelID: ModelID.make("test-model"),
       },

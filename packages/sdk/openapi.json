@@ -12044,7 +12044,7 @@
             "default": false,
             "type": "boolean"
           },
-          "local_model": {
+          "cheap_model": {
             "$ref": "#/components/schemas/HybridModelRefConfig"
           },
           "cloud_model": {

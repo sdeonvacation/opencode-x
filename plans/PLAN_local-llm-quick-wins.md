@@ -2,7 +2,7 @@
 
 ## Overview
 
-Extend hybrid routing to offload 4 non-reasoning LLM tasks to the configured `hybrid.local_model`: session title generation, conversation compaction, summary agent, and webfetch/websearch output compression. Each change is ≤10 lines on existing files, config-gated by `hybrid.enabled`, and falls back to current behavior when no local model is configured.
+Extend hybrid routing to offload 4 non-reasoning LLM tasks to the configured `hybrid.cheap_model`: session title generation, conversation compaction, summary agent, and webfetch/websearch output compression. Each change is ≤10 lines on existing files, config-gated by `hybrid.enabled`, and falls back to current behavior when no local model is configured.
 
 ## Tech Stack
 
@@ -22,7 +22,7 @@ Extend hybrid routing to offload 4 non-reasoning LLM tasks to the configured `hy
 
 ### Phase 1: Title Generation → Local Model
 
-- Step 1: In `src/session/prompt.ts` `ensureTitle()` (~line 168), add local model resolution before `getSmallModel` fallback — check `cfg.hybrid?.enabled` + `cfg.hybrid?.local_model`, resolve via `Provider.getModel()`, fall through to existing chain on failure
+- Step 1: In `src/session/prompt.ts` `ensureTitle()` (~line 168), add local model resolution before `getSmallModel` fallback — check `cfg.hybrid?.enabled` + `cfg.hybrid?.cheap_model`, resolve via `Provider.getModel()`, fall through to existing chain on failure
 - Step 2: Read config once at top of `ensureTitle` via `Config.get()` (already available in scope via `config` service)
 - Step 3: Add test in `test/session/prompt.test.ts` verifying local model is selected when hybrid config present
 
@@ -30,8 +30,8 @@ Extend hybrid routing to offload 4 non-reasoning LLM tasks to the configured `hy
 
 ### Phase 2: Compaction → Local Model
 
-- Step 1: In `src/session/compaction.ts` (~line 182), extend model resolution to check `cfg.hybrid?.enabled` + `cfg.hybrid?.local_model` before falling back to user message model
-- Step 2: Resolution chain becomes: agent.model → hybrid.local_model → user message model
+- Step 1: In `src/session/compaction.ts` (~line 182), extend model resolution to check `cfg.hybrid?.enabled` + `cfg.hybrid?.cheap_model` before falling back to user message model
+- Step 2: Resolution chain becomes: agent.model → hybrid.cheap_model → user message model
 - Step 3: Add test verifying compaction selects local model when hybrid enabled
 
 **Touch points**: `src/session/compaction.ts` (~6 lines added to model resolution block)
@@ -39,7 +39,7 @@ Extend hybrid routing to offload 4 non-reasoning LLM tasks to the configured `hy
 ### Phase 3: Summary Agent → Local Model
 
 - Step 1: In `src/session/prompt.ts` `complete()` (~line 974), extend model resolution to check hybrid local model when `input.small !== false`
-- Step 2: Resolution chain becomes: input.model → hybrid.local_model (if small) → getSmallModel → base model
+- Step 2: Resolution chain becomes: input.model → hybrid.cheap_model (if small) → getSmallModel → base model
 - Step 3: Add test verifying complete() with small=true selects local model when hybrid enabled
 
 **Touch points**: `src/session/prompt.ts` (~5 lines added to model resolution in `complete()`)

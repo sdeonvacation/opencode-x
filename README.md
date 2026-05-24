@@ -91,7 +91,7 @@ Detaches a running session to background without killing it. TUI immediately acc
 {
   "hybrid": {
     "enabled": true,
-    "local_model": { "providerID": "anthropic", "modelID": "claude-haiku-4-5" },
+    "cheap_model": { "providerID": "anthropic", "modelID": "claude-haiku-4-5" },
     "compression_timeout_ms": 8000
   }
 }

@@ -53,7 +53,7 @@ prompt loop (each step)
 
 ## Model Assumptions
 
-The "local_model" in config is a **Haiku-tier cloud model** (not a local 7B):
+The "cheap_model" in config is a **Haiku-tier cloud model** (not a local 7B):
 
 - ~200k context window — any realistic head fits in one call
 - Fast inference: ~1-3s for 50k input

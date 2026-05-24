@@ -10,7 +10,7 @@ describe("config.hybrid", () => {
       },
       hybrid: {
         enabled: true,
-        local_model: {
+        cheap_model: {
           providerID: "openai-compatible",
           modelID: "llama3.2:8b",
         },
@@ -23,7 +23,7 @@ describe("config.hybrid", () => {
     })
 
     expect(cfg.hybrid?.enabled).toBe(true)
-    expect(cfg.hybrid?.local_model?.providerID).toBe("openai-compatible")
+    expect(cfg.hybrid?.cheap_model?.providerID).toBe("openai-compatible")
     expect(cfg.hybrid?.cloud_model?.modelID).toBe("gpt-5.2")
     expect(cfg.hybrid?.log_routing).toBe(true)
   })
@@ -49,7 +49,7 @@ describe("config.hybrid", () => {
         openai: {},
       },
       hybrid: {
-        local_model: {
+        cheap_model: {
           providerID: "missing",
           modelID: "llama3.2:8b",
         },
@@ -58,7 +58,7 @@ describe("config.hybrid", () => {
 
     expect(result.success).toBe(false)
     if (result.success) return
-    expect(result.error.issues.some((issue) => issue.path.join(".") === "hybrid.local_model.providerID")).toBe(true)
+    expect(result.error.issues.some((issue) => issue.path.join(".") === "hybrid.cheap_model.providerID")).toBe(true)
   })
 
   test("rejects extra hybrid fields", () => {

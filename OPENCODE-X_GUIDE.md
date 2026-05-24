@@ -1010,13 +1010,13 @@ Token savings per session are tracked and visible in the TUI status dialog (`/st
 
 ### Hybrid Routing
 
-Hybrid routing splits work between a local (cheap/fast) model and a cloud model. If `enabled` is `false` or `local_model` is missing, local routing is silently disabled.
+Hybrid routing splits work between a local (cheap/fast) model and a cloud model. If `enabled` is `false` or `cheap_model` is missing, local routing is silently disabled.
 
 ```json
 {
   "hybrid": {
     "enabled": true,
-    "local_model": {
+    "cheap_model": {
       "providerID": "anthropic",
       "modelID": "claude-haiku-4-5"
     },
@@ -1033,7 +1033,7 @@ Hybrid routing splits work between a local (cheap/fast) model and a cloud model.
 - Enable hybrid cloud/local model routing
 - Default: `false`
 
-**local_model:**
+**cheap_model:**
 
 - Local model reference used for lightweight tasks routed away from the cloud model
 - Required for hybrid routing to activate; omitting disables local routing silently

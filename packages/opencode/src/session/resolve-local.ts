@@ -12,8 +12,8 @@ export function resolveLocal(
   cfg: Config.Info,
   caller: string,
 ): Effect.Effect<Provider.Model | undefined> {
-  if (!cfg.hybrid?.enabled || !cfg.hybrid?.local_model) return Effect.succeed(undefined)
-  const ref = cfg.hybrid.local_model
+  if (!cfg.hybrid?.enabled || !cfg.hybrid?.cheap_model) return Effect.succeed(undefined)
+  const ref = cfg.hybrid.cheap_model
   return provider.getModel(ProviderID.make(ref.providerID), ModelID.make(ref.modelID)).pipe(
     Effect.map((m): Provider.Model | undefined => m),
     Effect.tap((m) =>
@@ -38,8 +38,8 @@ export function resolveLocal(
 
 /** Async variant for use inside Effect.promise / async contexts. */
 export async function resolveLocalAsync(cfg: Config.Info, caller: string): Promise<Provider.Model | undefined> {
-  if (!cfg.hybrid?.enabled || !cfg.hybrid?.local_model) return undefined
-  const ref = cfg.hybrid.local_model
+  if (!cfg.hybrid?.enabled || !cfg.hybrid?.cheap_model) return undefined
+  const ref = cfg.hybrid.cheap_model
   try {
     const model = await Provider.getModel(ProviderID.make(ref.providerID), ModelID.make(ref.modelID))
     if (cfg.hybrid?.log_routing)

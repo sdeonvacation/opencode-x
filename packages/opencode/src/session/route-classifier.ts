@@ -165,7 +165,7 @@ export async function resolveHybridRoute(input: {
     return await cloud()
   }
 
-  const ref = input.cfg.hybrid?.local_model
+  const ref = input.cfg.hybrid?.cheap_model
   if (!ref) {
     return await cloud()
   }

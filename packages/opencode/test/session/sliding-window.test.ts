@@ -89,7 +89,7 @@ function cfg(compaction?: Config.Info["compaction"]) {
     },
     hybrid: {
       enabled: true,
-      local_model: {
+      cheap_model: {
         providerID: ProviderID.make("test"),
         modelID: ModelID.make("test-model"),
       },
@@ -505,9 +505,7 @@ describe("sliding-window", () => {
     async function renderPromptFor(msgs: MessageV2.WithParts[], sessionID: SessionID): Promise<string> {
       // Force compaction by using minimum allowed threshold so summarize() is always called.
       // We inspect the prompt passed to generateText via state.lastPrompt.
-      await compact(
-        input(sessionID, msgs, "primary", { threshold: 10000 }),
-      )
+      await compact(input(sessionID, msgs, "primary", { threshold: 10000 }))
       return state.lastPrompt ?? ""
     }
 
@@ -655,7 +653,7 @@ describe("sliding-window", () => {
         provider: { test: { id: ProviderID.make("test"), name: "Test", env: [] } },
         hybrid: {
           enabled: true,
-          local_model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+          cheap_model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
         },
         compaction: {
           sliding_window: {

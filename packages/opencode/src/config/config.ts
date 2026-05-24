@@ -968,7 +968,7 @@ export namespace Config {
   export const Hybrid = z
     .object({
       enabled: z.boolean().optional().default(false).describe("Enable hybrid cloud/local model routing"),
-      local_model: HybridModelRef.optional().describe("Local model reference"),
+      cheap_model: HybridModelRef.optional().describe("Local model reference"),
       cloud_model: HybridModelRef.optional().describe("Cloud model override"),
       log_routing: z.boolean().optional().default(false).describe("Enable verbose routing decision logging"),
       compression_threshold: z
@@ -1644,12 +1644,12 @@ export namespace Config {
     })
     .strict()
     .superRefine((value, ctx) => {
-      const local = value.hybrid?.local_model
+      const local = value.hybrid?.cheap_model
       if (local && !value.provider?.[local.providerID]) {
         ctx.addIssue({
           code: "custom",
           message: `Unknown provider: ${local.providerID}`,
-          path: ["hybrid", "local_model", "providerID"],
+          path: ["hybrid", "cheap_model", "providerID"],
         })
       }
       const cloud = value.hybrid?.cloud_model

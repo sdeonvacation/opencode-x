@@ -657,7 +657,7 @@ describe("session.compaction.process", () => {
                 ...Config.Info.parse({}),
                 hybrid: {
                   enabled: true,
-                  local_model: { providerID: "local", modelID: "offline" },
+                  cheap_model: { providerID: "local", modelID: "offline" },
                   log_routing: false,
                   compression_threshold: 10,
                   compression_timeout_ms: 5000,

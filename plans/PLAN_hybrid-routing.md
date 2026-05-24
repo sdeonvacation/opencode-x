@@ -64,7 +64,7 @@ Repeat
 {
   "hybrid": {
     "enabled": true,
-    "local_model": {
+    "cheap_model": {
       "providerID": "openai-compatible",
       "modelID": "llama3.2:8b",
     },

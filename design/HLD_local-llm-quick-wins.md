@@ -8,7 +8,7 @@
 | Framework | Effect-ts 4.0-beta | Structured async, service injection, yield\* |
 | Runtime   | Bun 1.3.11         | Native TS execution, bun:test                |
 | AI SDK    | Vercel AI SDK 6.x  | LLM.stream for title/compaction/complete     |
-| Config    | Zod schemas        | `hybrid.enabled` + `hybrid.local_model` gate |
+| Config    | Zod schemas        | `hybrid.enabled` + `hybrid.cheap_model` gate |
 
 ## Components
 
@@ -26,7 +26,7 @@
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                     Config.hybrid                        │
-│  { enabled: bool, local_model?: { providerID, modelID } │
+│  { enabled: bool, cheap_model?: { providerID, modelID } │
 └──────────────┬───────────────────────────────────────────┘
                │
                ▼
@@ -48,7 +48,7 @@
 └──────────────────────────────────────┘
 ```
 
-**Description:** All 4 phases are surgical edits to existing model resolution chains. Phases 1-3 share a common pattern: check `hybrid.enabled` + `hybrid.local_model`, resolve via `Provider.getModel()`, fall through on failure. This is extracted into a single `resolveLocal` helper to avoid duplication. Phase 4 is independent — pure function additions to `shouldCompress` and `templateFor` with no config dependency.
+**Description:** All 4 phases are surgical edits to existing model resolution chains. Phases 1-3 share a common pattern: check `hybrid.enabled` + `hybrid.cheap_model`, resolve via `Provider.getModel()`, fall through on failure. This is extracted into a single `resolveLocal` helper to avoid duplication. Phase 4 is independent — pure function additions to `shouldCompress` and `templateFor` with no config dependency.
 
 ## Interfaces
 
@@ -56,7 +56,7 @@
 
 | Method         | Input              | Output                        | Behavior                                                                                                                                             | Errors                                                          |
 | -------------- | ------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `resolveLocal` | `cfg: Config.Info` | `Provider.Model \| undefined` | If `cfg.hybrid?.enabled && cfg.hybrid?.local_model`, call `Provider.getModel(providerID, modelID)`. Return model on success, `undefined` on failure. | Catches provider errors → returns `undefined` (silent fallback) |
+| `resolveLocal` | `cfg: Config.Info` | `Provider.Model \| undefined` | If `cfg.hybrid?.enabled && cfg.hybrid?.cheap_model`, call `Provider.getModel(providerID, modelID)`. Return model on success, `undefined` on failure. | Catches provider errors → returns `undefined` (silent fallback) |
 
 **Location:** `src/session/prompt.ts` — module-level async function (used by `ensureTitle` and `complete`). Also duplicated or imported in `compaction.ts`.
 
@@ -64,8 +64,8 @@
 
 ```typescript
 function resolveLocal(provider: Provider.Service["Type"], cfg: Config.Info): Effect.Effect<Provider.Model | undefined> {
-  if (!cfg.hybrid?.enabled || !cfg.hybrid?.local_model) return Effect.succeed(undefined)
-  const ref = cfg.hybrid.local_model
+  if (!cfg.hybrid?.enabled || !cfg.hybrid?.cheap_model) return Effect.succeed(undefined)
+  const ref = cfg.hybrid.cheap_model
   return provider
     .getModel(ProviderID.make(ref.providerID), ModelID.make(ref.modelID))
     .pipe(Effect.option, Effect.map(Option.getOrUndefined))
@@ -76,8 +76,8 @@ function resolveLocal(provider: Provider.Service["Type"], cfg: Config.Info): Eff
 
 ```typescript
 async function resolveLocalAsync(cfg: Config.Info): Promise<Provider.Model | undefined> {
-  if (!cfg.hybrid?.enabled || !cfg.hybrid?.local_model) return undefined
-  const ref = cfg.hybrid.local_model
+  if (!cfg.hybrid?.enabled || !cfg.hybrid?.cheap_model) return undefined
+  const ref = cfg.hybrid.cheap_model
   try {
     return await Provider.getModel(ProviderID.make(ref.providerID), ModelID.make(ref.modelID))
   } catch {
@@ -108,7 +108,7 @@ async function resolveLocalAsync(cfg: Config.Info): Promise<Provider.Model | und
 | ---- | ------------ | ----------------------------------------------------------------------- | -------------- |
 | 1    | ensureTitle  | Get title agent via `agents.get("title")`                               | 2              |
 | 2    | ensureTitle  | Check `ag.model` (agent-level override)                                 | 3 if none      |
-| 3    | resolveLocal | **NEW:** Read config, check `hybrid.enabled` + `local_model`            | 4 if undefined |
+| 3    | resolveLocal | **NEW:** Read config, check `hybrid.enabled` + `cheap_model`            | 4 if undefined |
 | 4    | ensureTitle  | Existing: `getSmallModel(providerID)` → `getModel(providerID, modelID)` | 5              |
 | 5    | LLM.stream   | Generate title with resolved model                                      | done           |
 
@@ -149,7 +149,7 @@ const config = yield * Config.Service
 | ---- | ------------ | ----------------------------------------------------------------------------- | -------------- |
 | 1    | compaction   | Get compaction agent via `agents.get("compaction")`                           | 2              |
 | 2    | compaction   | Check `agent.model` (agent-level override)                                    | 3 if none      |
-| 3    | resolveLocal | **NEW:** Read config, check `hybrid.enabled` + `local_model`                  | 4 if undefined |
+| 3    | resolveLocal | **NEW:** Read config, check `hybrid.enabled` + `cheap_model`                  | 4 if undefined |
 | 4    | compaction   | Existing: `getModel(userMessage.model.providerID, userMessage.model.modelID)` | 5              |
 | 5    | LLM.stream   | Generate compaction summary with resolved model                               | done           |
 
@@ -182,7 +182,7 @@ const model = agent.model
 | 1    | complete          | Determine base model from `input.model` or `lastModel()`                | 2              |
 | 2    | complete          | If `input.model` set → use it directly                                  | done           |
 | 3    | complete          | If `input.small === false` → use base model directly                    | done           |
-| 4    | resolveLocalAsync | **NEW:** Read config, check `hybrid.enabled` + `local_model`            | 5 if undefined |
+| 4    | resolveLocalAsync | **NEW:** Read config, check `hybrid.enabled` + `cheap_model`            | 5 if undefined |
 | 5    | complete          | Existing: `getSmallModel(providerID)` → `getModel(providerID, modelID)` | done           |
 
 **Before (prompt.ts:974-979):**
@@ -280,7 +280,7 @@ The only data dependency is the existing `Config.Info.hybrid` field:
 
 | Entity        | Fields                                                                    | Relationships                                | Constraints                                                                      |
 | ------------- | ------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
-| Config.Hybrid | `enabled: boolean, local_model?: { providerID: string, modelID: string }` | Referenced by resolveLocal/resolveLocalAsync | `providerID` must exist in `config.provider` (validated by existing superRefine) |
+| Config.Hybrid | `enabled: boolean, cheap_model?: { providerID: string, modelID: string }` | Referenced by resolveLocal/resolveLocalAsync | `providerID` must exist in `config.provider` (validated by existing superRefine) |
 
 ## Decisions
 
@@ -314,9 +314,9 @@ The only data dependency is the existing `Config.Info.hybrid` field:
 | Test Case                                     | Input                                                                                      | Expected                 | Notes                                            |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------ | ------------------------------------------------ |
 | hybrid disabled → undefined                   | `cfg.hybrid.enabled = false`                                                               | returns `undefined`      | Falls through to existing chain                  |
-| hybrid enabled, no local_model → undefined    | `cfg.hybrid.enabled = true, local_model = undefined`                                       | returns `undefined`      | Falls through                                    |
-| hybrid enabled + valid local_model → Model    | `cfg.hybrid = { enabled: true, local_model: { providerID: "ollama", modelID: "llama3" } }` | returns `Provider.Model` | Provider.getModel succeeds                       |
-| hybrid enabled + invalid provider → undefined | `cfg.hybrid = { enabled: true, local_model: { providerID: "nonexistent", modelID: "x" } }` | returns `undefined`      | Provider.getModel fails, caught by Effect.option |
+| hybrid enabled, no cheap_model → undefined    | `cfg.hybrid.enabled = true, cheap_model = undefined`                                       | returns `undefined`      | Falls through                                    |
+| hybrid enabled + valid cheap_model → Model    | `cfg.hybrid = { enabled: true, cheap_model: { providerID: "ollama", modelID: "llama3" } }` | returns `Provider.Model` | Provider.getModel succeeds                       |
+| hybrid enabled + invalid provider → undefined | `cfg.hybrid = { enabled: true, cheap_model: { providerID: "nonexistent", modelID: "x" } }` | returns `undefined`      | Provider.getModel fails, caught by Effect.option |
 
 #### Phase 2: Compaction — model resolution (compaction.ts)
 
