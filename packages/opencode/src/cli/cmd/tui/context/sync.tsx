@@ -207,6 +207,12 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           break
         }
 
+        case "mcp.tools.changed":
+          sdk.client.mcp
+            .status({ workspace: project.workspace.current() })
+            .then((x) => setStore("mcp", reconcile(x.data!)))
+          break
+
         case "todo.updated":
           setStore("todo", event.properties.sessionID, event.properties.todos)
           break
