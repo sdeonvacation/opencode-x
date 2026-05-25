@@ -1,5 +1,5 @@
 import z from "zod"
-import { and, Database, eq } from "../storage/db"
+import { and, Database, eq, sql } from "../storage/db"
 import { ProjectTable } from "./project.sql"
 import { SessionTable } from "../session/session.sql"
 import { Log } from "../util/log"
@@ -316,7 +316,7 @@ export namespace Project {
           yield* db((d) =>
             d
               .update(SessionTable)
-              .set({ project_id: data.id })
+              .set({ project_id: data.id, time_updated: sql`${SessionTable.time_updated}` })
               .where(and(eq(SessionTable.project_id, ProjectID.global), eq(SessionTable.directory, data.worktree)))
               .run(),
           )
