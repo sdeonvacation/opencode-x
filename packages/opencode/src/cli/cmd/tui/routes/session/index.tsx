@@ -1602,17 +1602,17 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
   // unmount/remount children every token because segments() returns a fresh
   // array of fresh objects on each text delta, killing the markdown component's
   // internal streaming buffer.
-  const hasThinking = createMemo(() => props.part.text.includes("<thinking>"))
+  const hasThinking = createMemo(() => /(^|\n)\s*<thinking>/.test(props.part.text))
   const segments = createMemo(() => {
     if (!hasThinking()) return []
     const raw = props.part.text
     const out: Array<{ kind: "text" | "thinking"; text: string }> = []
-    const re = /<thinking>([\s\S]*?)(?:<\/thinking>|$)/g
+    const re = /(^|\n)\s*<thinking>([\s\S]*?)(?:<\/thinking>|$)/g
     let cursor = 0
     let match: RegExpExecArray | null
     while ((match = re.exec(raw)) !== null) {
       if (match.index > cursor) out.push({ kind: "text", text: raw.slice(cursor, match.index) })
-      out.push({ kind: "thinking", text: match[1] })
+      out.push({ kind: "thinking", text: match[2] })
       cursor = match.index + match[0].length
     }
     if (cursor < raw.length) out.push({ kind: "text", text: raw.slice(cursor) })
