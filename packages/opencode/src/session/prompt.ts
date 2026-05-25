@@ -1620,8 +1620,15 @@ export namespace SessionPrompt {
             // Keep the loop running so tool results can be sent back to the model.
             // Skip provider-executed tool parts — those were fully handled within the
             // provider's stream (e.g. DWS Agent Platform) and don't need a re-loop.
+            // Skip orphaned interrupted tools — these were marked interrupted during
+            // cleanup/abort and should not keep the run-loop alive.
             const hasToolCalls =
-              lastAssistantMsg?.parts.some((part) => part.type === "tool" && !part.metadata?.providerExecuted) ?? false
+              lastAssistantMsg?.parts.some(
+                (part) =>
+                  part.type === "tool" &&
+                  !part.metadata?.providerExecuted &&
+                  !(part.state.status === "error" && part.state.metadata?.interrupted === true),
+              ) ?? false
 
             // [fork-perf] doom-loop guard: an errored assistant (e.g. schema-validation
             // failure pre-stream) leaves `finish` undefined, so the normal exit
@@ -1638,7 +1645,11 @@ export namespace SessionPrompt {
               !hasToolCalls &&
               lastUser.id < lastAssistant.id
             ) {
-              log.info("exiting loop", { sessionID })
+              const orphaned = lastAssistantMsg?.parts.filter(
+                (part) => part.type === "tool" && part.state.status === "error" && part.state.metadata?.interrupted,
+              ).length
+              if (orphaned) log.info("exiting loop with orphaned interrupted tools", { sessionID, orphaned })
+              else log.info("exiting loop", { sessionID })
               break
             }
 
