@@ -96,13 +96,14 @@ export function PtyRoutes(upgradeWebSocket: UpgradeWebSocket) {
               },
             },
           },
-          ...errors(400),
+          ...errors(400, 404),
         },
       }),
       validator("param", z.object({ ptyID: PtyID.zod })),
       validator("json", Pty.UpdateInput),
       async (c) => {
         const info = await Pty.update(c.req.valid("param").ptyID, c.req.valid("json"))
+        if (!info) throw new NotFoundError({ message: "Session not found" })
         return c.json(info)
       },
     )
@@ -159,7 +160,7 @@ export function PtyRoutes(upgradeWebSocket: UpgradeWebSocket) {
           return parsed
         })()
         let handler: Awaited<ReturnType<typeof Pty.connect>>
-        if (!(await Pty.get(id))) throw new Error("Session not found")
+        if (!(await Pty.get(id))) throw new NotFoundError({ message: "Session not found" })
 
         type Socket = {
           readyState: number
