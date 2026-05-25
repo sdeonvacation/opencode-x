@@ -14,6 +14,7 @@ type Source = "working" | "session"
 function Viewer(props: { api: TuiPluginApi; keys: TuiKeybindSet; params?: Record<string, unknown> }) {
   const theme = () => props.api.theme.current
   const size = useTerminalDimensions()
+  const returnTo = props.params?._returnTo as { name: string; params?: Record<string, unknown> } | undefined
 
   const [source, setSource] = createSignal<Source>(props.api.kv.get(KV_SOURCE, "working") as Source)
   const [tree, setTree] = createSignal(props.api.kv.get(KV_TREE, true) as boolean)
@@ -70,7 +71,8 @@ function Viewer(props: { api: TuiPluginApi; keys: TuiKeybindSet; params?: Record
     if (props.keys.match("close", evt)) {
       evt.preventDefault()
       evt.stopPropagation()
-      props.api.route.navigate("home", {})
+      if (returnTo) props.api.route.navigate(returnTo.name, returnTo.params)
+      else props.api.route.navigate("home", {})
       return
     }
 
@@ -231,7 +233,12 @@ const tui: TuiPlugin = async (api) => {
       value: "diff-viewer.open",
       category: "System",
       onSelect() {
-        api.route.navigate("diff-viewer", {})
+        const current = api.route.current
+        const returnTo =
+          current.name !== "diff-viewer"
+            ? { name: current.name, params: "params" in current ? current.params : undefined }
+            : undefined
+        api.route.navigate("diff-viewer", { ...(returnTo ? { _returnTo: returnTo } : {}) })
       },
     },
   ])
