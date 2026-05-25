@@ -39,6 +39,7 @@ import { NamedError } from "@opencode-ai/util/error"
 import { SessionProcessor } from "./processor"
 import { Tool } from "@/tool/tool"
 import { Permission } from "@/permission"
+import { Wildcard } from "@/util/wildcard"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { Shell } from "@/shell/shell"
@@ -487,7 +488,12 @@ export namespace SessionPrompt {
           // check belongs in StreamingDispatcher (Phase 3, deferred). Treat as not-safe.
           toolMeta.set(item.id, { parallelSafe: item.parallelSafe === true })
           if (batch && Permission.evaluate(item.id, "*", merged).action === "allow") {
-            approved.add(item.id)
+            const hasSpecificRestriction = merged.some(
+              (rule) => rule.pattern !== "*" && rule.action !== "allow" && Wildcard.match(item.id, rule.permission),
+            )
+            if (!hasSpecificRestriction) {
+              approved.add(item.id)
+            }
           }
           tools[item.id] = tool({
             id: item.id as any,

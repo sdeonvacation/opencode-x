@@ -290,7 +290,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
         const match = embeddedWebUI[path.replace(/^\//, "")] ?? embeddedWebUI["index.html"] ?? null
         if (!match) return c.json({ error: "Not Found" }, 404)
 
-        if (await fs.exists(match)) {
+        if (await fs.access(match).then(() => true, () => false)) {
           const mime = getMimeType(match) ?? "text/plain"
           c.header("Content-Type", mime)
           if (mime.startsWith("text/html")) {
