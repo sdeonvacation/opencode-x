@@ -459,7 +459,11 @@ export namespace Provider {
           autoload: true,
           vars(_options: Record<string, any>) {
             const endpoint =
-              location === "global" ? "aiplatform.googleapis.com" : `${location}-aiplatform.googleapis.com`
+              location === "global"
+                ? "aiplatform.googleapis.com"
+                : location.length <= 2
+                  ? `${location}-aiplatform.rep.googleapis.com`
+                  : `${location}-aiplatform.googleapis.com`
             return {
               ...(project && { GOOGLE_VERTEX_PROJECT: project }),
               GOOGLE_VERTEX_LOCATION: location,
