@@ -1775,4 +1775,13 @@ export namespace Provider {
       providerID: ProviderID.zod,
     }),
   )
+
+  export const NoProvidersError = NamedError.create("ProviderNoProvidersError", z.object({}))
+
+  export const NoModelsError = NamedError.create(
+    "ProviderNoModelsError",
+    z.object({
+      providerID: ProviderID.zod,
+    }),
+  )
 }
