@@ -583,7 +583,8 @@ export const BashTool = Tool.define(
         .replaceAll("${shell}", name)
         .replaceAll("${chaining}", chain)
         .replaceAll("${maxLines}", String(maxLines))
-        .replaceAll("${maxBytes}", String(maxBytes)),
+        .replaceAll("${maxBytes}", String(maxBytes))
+        .replaceAll("${defaultTimeout}", String(DEFAULT_TIMEOUT)),
       parameters: Parameters,
       async execute(params, ctx) {
         const cwd = params.workdir ? await resolvePath(params.workdir, Instance.directory, shell) : Instance.directory
