@@ -6,8 +6,13 @@ export type ThinkingMode = "show" | "hide"
 const MODES: readonly ThinkingMode[] = ["show", "hide"] as const
 
 export function reasoningTitle(text: string): string | null {
-  const match = text.trimStart().match(/^\*\*([^*\n]+)\*\*/)
+  const match = text.trimStart().match(/^\*\*([^*\n]+)\*\*(?:\n\n|$)/)
   return match ? match[1].trim() : null
+}
+
+export function reasoningBody(text: string): string {
+  const match = text.trimStart().match(/^\*\*[^*\n]+\*\*\n\n/)
+  return match ? text.trimStart().slice(match[0].length) : text
 }
 
 export function isThinkingMode(value: unknown): value is ThinkingMode {

@@ -85,7 +85,13 @@ import * as Model from "../../util/model"
 import { formatTranscript } from "../../util/transcript"
 import { UI } from "@/cli/ui.ts"
 import { useTuiConfig } from "../../context/tui-config"
-import { nextThinkingMode, reasoningTitle, useThinkingMode, type ThinkingMode } from "../../context/thinking"
+import {
+  nextThinkingMode,
+  reasoningBody,
+  reasoningTitle,
+  useThinkingMode,
+  type ThinkingMode,
+} from "../../context/thinking"
 import { getScrollAcceleration } from "../../util/scroll"
 import { TuiPluginRuntime } from "../../plugin"
 import { DialogGoUpsell } from "../../component/dialog-go-upsell"
@@ -1526,6 +1532,7 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
   // title both while streaming and after settling so the collapsed line carries
   // real signal, not just a duration.
   const title = createMemo(() => reasoningTitle(content()))
+  const body = createMemo(() => (title() ? reasoningBody(content()) : content()))
 
   const toggle = () => {
     if (!inMinimal()) return
@@ -1552,7 +1559,7 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
               drawUnstyledText={false}
               streaming={true}
               syntaxStyle={subtleSyntax()}
-              content={(inMinimal() ? "▼ " : "") + (isDone() ? "_Thought:_ " : "_Thinking:_ ") + content()}
+              content={(inMinimal() ? "▼ " : "") + (isDone() ? "_Thought:_ " : "_Thinking:_ ") + body()}
               conceal={ctx.conceal()}
               fg={theme.textMuted}
             />
