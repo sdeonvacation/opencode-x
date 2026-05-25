@@ -136,7 +136,7 @@ function Viewer(props: { api: TuiPluginApi; keys: TuiKeybindSet; params?: Record
 
       {/* Body */}
       <box flexDirection="row" flexGrow={1} height="100%">
-        <Show when={tree()}>
+        <Show when={tree() && entries().length > 0}>
           <FileTree
             api={props.api}
             tree={treeData()}
