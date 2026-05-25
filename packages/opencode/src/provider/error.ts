@@ -152,6 +152,24 @@ export namespace ProviderError {
           responseBody,
         }
     }
+
+    // Surface provider error details (type, code, message, param) that would
+    // otherwise be lost. Handles Anthropic (type + message) and OpenAI (code +
+    // message + param) SSE error event shapes.
+    const errType = body?.error?.type
+    const errCode = body?.error?.code
+    const errMsg = body?.error?.message
+    const errParam = body?.error?.param
+    const parts = [errType, errCode, errParam].filter(Boolean)
+    const prefix = parts.length ? parts.join("/") + ": " : ""
+    const msg = typeof errMsg === "string" ? `${prefix}${errMsg}` : prefix || responseBody
+
+    return {
+      type: "api_error",
+      message: msg,
+      isRetryable: false,
+      responseBody,
+    }
   }
 
   export type ParsedAPICallError =
