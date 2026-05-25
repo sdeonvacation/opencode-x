@@ -408,6 +408,15 @@ export namespace Config {
         .describe("OAuth client ID. If not provided, dynamic client registration (RFC 7591) will be attempted."),
       clientSecret: z.string().optional().describe("OAuth client secret (if required by the authorization server)"),
       scope: z.string().optional().describe("OAuth scopes to request during authorization"),
+      callbackPort: z
+        .number()
+        .int()
+        .min(1)
+        .max(65535)
+        .optional()
+        .describe(
+          "Port for the local OAuth callback server (default: 19876). Shorthand for redirectUri when only the port needs changing. Ignored if redirectUri is set.",
+        ),
       redirectUri: z
         .string()
         .optional()
