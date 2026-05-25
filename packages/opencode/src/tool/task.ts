@@ -325,6 +325,13 @@ export const TaskTool = Tool.defineEffect(
             }),
           )
 
+          await Bus.publish(TuiEvent.BackgroundTaskUpdate, {
+            sessionID: ctx.sessionID,
+            taskID: nextSession.id,
+            title: params.description,
+            state: "running",
+          })
+
           if (subagent.spawned) subagent.spawnInfo.release()
 
           return {

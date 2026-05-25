@@ -68,6 +68,14 @@ export type PromptProps = {
     normal?: string[]
     shell?: string[]
   }
+  // fork: background-detach (#FORK) — lifted state from session route
+  bgTasks?: () => number
+  setBgTasks?: (fn: (n: number) => number) => void
+  detachedSet?: () => Set<string>
+  setDetachedSet?: (fn: (s: Set<string>) => Set<string>) => void
+  bgCount?: () => number
+  setBgCount?: (fn: (n: number) => number) => void
+  detached?: () => boolean
 }
 
 export type PromptRef = {
@@ -204,30 +212,43 @@ export function Prompt(props: PromptProps) {
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
   let promptPartTypeId = 0
   const event = useEvent()
-  const [bgTasks, setBgTasks] = createSignal(0)
-  // fork: background-detach (#FORK) — begin
-  const [detachedSet, setDetachedSet] = createSignal<Set<string>>(new Set())
-  const [bgCount, setBgCount] = createSignal(0)
-  const detached = () => detachedSet().has(props.sessionID ?? "")
+  // fork: background-detach (#FORK) — use lifted state from props, fallback to local
+  const [_bgTasks, _setBgTasks] = createSignal(0)
+  const [_detachedSet, _setDetachedSet] = createSignal<Set<string>>(new Set())
+  const [_bgCount, _setBgCount] = createSignal(0)
+  const bgTasks = props.bgTasks ?? _bgTasks
+  const setBgTasks = props.setBgTasks ?? _setBgTasks
+  const detachedSet = props.detachedSet ?? _detachedSet
+  const setDetachedSet = props.setDetachedSet ?? _setDetachedSet
+  const bgCount = props.bgCount ?? _bgCount
+  const setBgCount = props.setBgCount ?? _setBgCount
+  const detached = props.detached ?? (() => detachedSet().has(props.sessionID ?? ""))
   // fork: background-detach (#FORK) — end
 
-  event.on(TuiEvent.BackgroundTaskUpdate.type, (evt) => {
-    if (evt.properties.sessionID !== props.sessionID) return
-    if (evt.properties.state === "running") setBgTasks((n) => n + 1)
-    else setBgTasks((n) => Math.max(0, n - 1))
-  })
+  // Only listen locally if state is NOT lifted to parent
+  if (!props.bgTasks) {
+    event.on(TuiEvent.BackgroundTaskUpdate.type, (evt) => {
+      if (evt.properties.sessionID !== props.sessionID) return
+      if (evt.properties.state === "running") setBgTasks((n) => n + 1)
+      else setBgTasks((n) => Math.max(0, n - 1))
+    })
 
-  // fork: background-detach (#FORK) — begin
-  event.on(TuiEvent.BackgroundTaskUpdate.type, (evt) => {
-    if (evt.properties.sessionID !== props.sessionID) return
-    if (evt.properties.state !== "running" && bgTasks() <= 1 && props.sessionID && detachedSet().has(props.sessionID)) {
-      setDetachedSet((s) => {
-        const next = new Set(s)
-        next.delete(props.sessionID!)
-        return next
-      })
-    }
-  })
+    event.on(TuiEvent.BackgroundTaskUpdate.type, (evt) => {
+      if (evt.properties.sessionID !== props.sessionID) return
+      if (
+        evt.properties.state !== "running" &&
+        bgTasks() <= 1 &&
+        props.sessionID &&
+        detachedSet().has(props.sessionID)
+      ) {
+        setDetachedSet((s) => {
+          const next = new Set(s)
+          next.delete(props.sessionID!)
+          return next
+        })
+      }
+    })
+  }
   // fork: background-detach (#FORK) — end
 
   event.on(TuiEvent.PromptAppend.type, (evt) => {

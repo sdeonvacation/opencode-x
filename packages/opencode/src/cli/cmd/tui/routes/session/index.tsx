@@ -98,6 +98,7 @@ import { DialogGoUpsell } from "../../component/dialog-go-upsell"
 import { SessionRetry } from "@/session/retry"
 import { getRevertDiffFiles } from "../../util/revert-diff"
 import { within } from "../../util/selection-boundary"
+import { TuiEvent } from "../../event"
 
 addDefaultParsers(parsers.parsers)
 
@@ -154,6 +155,30 @@ export function Session() {
   })
   const visible = createMemo(() => !session()?.parentID && permissions().length === 0 && questions().length === 0)
   const disabled = createMemo(() => permissions().length > 0 || questions().length > 0)
+
+  // fork: background-detach (#FORK) — begin (lifted from Prompt to survive unmount)
+  const [bgTasks, setBgTasks] = createSignal(0)
+  const [detachedSet, setDetachedSet] = createSignal<Set<string>>(new Set())
+  const [bgCount, setBgCount] = createSignal(0)
+  const detached = () => detachedSet().has(route.sessionID ?? "")
+
+  event.on(TuiEvent.BackgroundTaskUpdate.type, (evt: any) => {
+    if (evt.properties.sessionID !== route.sessionID) return
+    if (evt.properties.state === "running") setBgTasks((n) => n + 1)
+    else setBgTasks((n) => Math.max(0, n - 1))
+  })
+
+  event.on(TuiEvent.BackgroundTaskUpdate.type, (evt: any) => {
+    if (evt.properties.sessionID !== route.sessionID) return
+    if (evt.properties.state !== "running" && bgTasks() <= 1 && detachedSet().has(route.sessionID)) {
+      setDetachedSet((s) => {
+        const next = new Set(s)
+        next.delete(route.sessionID)
+        return next
+      })
+    }
+  })
+  // fork: background-detach (#FORK) — end
 
   const pending = createMemo(() => {
     return messages().findLast((x) => x.role === "assistant" && !x.time.completed)?.id
@@ -1265,6 +1290,13 @@ export function Session() {
                   }}
                   sessionID={route.sessionID}
                   right={<TuiPluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
+                  bgTasks={bgTasks}
+                  setBgTasks={setBgTasks}
+                  detachedSet={detachedSet}
+                  setDetachedSet={setDetachedSet}
+                  bgCount={bgCount}
+                  setBgCount={setBgCount}
+                  detached={detached}
                 />
               </Show>
             </box>
