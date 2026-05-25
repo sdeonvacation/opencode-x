@@ -1044,7 +1044,11 @@ export function Prompt(props: PromptProps) {
   })
 
   const spinnerDef = createMemo(() => {
-    const color = local.agent.color(local.agent.current().name)
+    // When processing, use the agent from the last user message (the one that
+    // triggered this run), not the currently-selected agent which may differ.
+    const running = status().type !== "idle" ? lastUserMessage()?.agent : undefined
+    const name = running ?? local.agent.current().name
+    const color = local.agent.color(name)
     return {
       frames: createFrames({
         color,
