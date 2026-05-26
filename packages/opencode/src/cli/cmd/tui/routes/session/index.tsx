@@ -218,6 +218,55 @@ export function Session() {
   const toast = useToast()
   const sdk = useSDK()
 
+  // Windowed pagination: "has more" signal and load trigger
+  const [hasMore, setHasMore] = createSignal(false)
+  const [loading, setLoading] = createSignal(false)
+
+  function syncMore() {
+    const state = sync.pagination.get(route.sessionID)
+    setHasMore(state.more)
+  }
+
+  async function loadMore() {
+    if (loading() || !hasMore()) return
+    const sid = route.sessionID
+    setLoading(true)
+    const prev = scroll?.scrollHeight ?? 0
+    const top = scroll?.scrollTop ?? 0
+    const res = await sync.loadOlder(sid)
+    // Stale guard: user navigated away during fetch
+    if (route.sessionID !== sid) {
+      setLoading(false)
+      return
+    }
+    if (res.loaded > 0 && scroll) {
+      // Anchor scroll: use double-rAF to ensure layout is flushed before reading new height
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!scroll) return
+          const delta = scroll.scrollHeight - prev
+          if (delta > 0) scroll.scrollTo(top + delta)
+        })
+      })
+    }
+    setLoading(false)
+    syncMore()
+  }
+
+  function maybeLoad() {
+    if (!scroll) return
+    if (scroll.scrollTop < 200 && hasMore() && !loading()) {
+      void loadMore()
+    }
+  }
+
+  // Poll scroll position for mouse/trackpad scroll (scrollbox has no onScroll callback)
+  createEffect(() => {
+    if (!hasMore()) return
+    const id = setInterval(maybeLoad, 300)
+    onCleanup(() => clearInterval(id))
+  })
+
   createEffect(() => {
     const sessionID = route.sessionID
     void (async () => {
@@ -245,6 +294,7 @@ export function Session() {
         } catch {}
       }
       await sync.session.sync(sessionID)
+      syncMore()
       if (route.sessionID === sessionID && scroll) scroll.scrollBy(100_000)
     })().catch((error) => {
       if (route.sessionID !== sessionID) return
@@ -779,6 +829,7 @@ export function Session() {
       hidden: true,
       onSelect: (dialog) => {
         scroll.scrollBy(-scroll.height / 2)
+        maybeLoad()
         dialog.clear()
       },
     },
@@ -801,6 +852,7 @@ export function Session() {
       hidden: true,
       onSelect: (dialog) => {
         scroll.scrollBy(-1)
+        maybeLoad()
         dialog.clear()
       },
     },
@@ -823,6 +875,7 @@ export function Session() {
       hidden: true,
       onSelect: (dialog) => {
         scroll.scrollBy(-scroll.height / 4)
+        maybeLoad()
         dialog.clear()
       },
     },
@@ -845,6 +898,7 @@ export function Session() {
       hidden: true,
       onSelect: (dialog) => {
         scroll.scrollTo(0)
+        maybeLoad()
         dialog.clear()
       },
     },
@@ -1173,6 +1227,11 @@ export function Session() {
               flexGrow={1}
               scrollAcceleration={scrollAcceleration()}
             >
+              <Show when={hasMore()}>
+                <box paddingLeft={3} height={1}>
+                  <text fg={theme.textMuted}>{loading() ? "↑ Loading older messages..." : "↑ Scroll up for more"}</text>
+                </box>
+              </Show>
               <box height={1} />
               <For each={messages()}>
                 {(message, index) => (
@@ -1589,7 +1648,7 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
             <code
               filetype="markdown"
               drawUnstyledText={false}
-              streaming={true}
+              streaming={!isDone()}
               syntaxStyle={subtleSyntax()}
               content={(inMinimal() ? "▼ " : "") + (isDone() ? "_Thought:_ " : "_Thinking:_ ") + body()}
               conceal={ctx.conceal()}
@@ -1623,6 +1682,7 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
 function TextPart(props: { last: boolean; part: TextPart; message: AssistantMessage }) {
   const ctx = use()
   const { theme, syntax, subtleSyntax } = useTheme()
+  const active = createMemo(() => !props.message.time.completed)
   // [fork-perf] Some providers (Anthropic without extended-thinking, certain
   // OpenAI-compatible proxies) emit chain-of-thought as inline `<thinking>...</thinking>`
   // tags inside the text body instead of a native reasoning content block.
@@ -1659,7 +1719,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
           <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
             <markdown
               syntaxStyle={syntax()}
-              streaming={true}
+              streaming={active()}
               internalBlockMode="top-level"
               content={props.part.text.trim()}
               tableOptions={{ style: "grid" }}
@@ -1692,7 +1752,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
                   <code
                     filetype="markdown"
                     drawUnstyledText={false}
-                    streaming={true}
+                    streaming={active()}
                     syntaxStyle={subtleSyntax()}
                     content={"_Thought:_ " + seg().text.trim()}
                     conceal={ctx.conceal()}
@@ -1704,7 +1764,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
                 <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
                   <markdown
                     syntaxStyle={syntax()}
-                    streaming={true}
+                    streaming={active()}
                     internalBlockMode="top-level"
                     content={seg().text.trim()}
                     tableOptions={{ style: "grid" }}

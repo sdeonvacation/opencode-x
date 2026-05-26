@@ -32,6 +32,7 @@ import { useArgs } from "./args"
 import { batch, onMount } from "solid-js"
 import { Log } from "@/util/log"
 import { ConsoleState, emptyConsoleState, type ConsoleState as ConsoleStateType } from "@/config/console-state"
+import { Pagination } from "@tui/util/pagination"
 
 type Complete = {
   type: "orchestration.complete"
@@ -275,7 +276,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             }),
           )
           const updated = store.message[event.properties.info.sessionID]
-          if (updated.length > 100) {
+          if (updated.length > 300) {
             const oldest = updated[0]
             batch(() => {
               setStore(
@@ -388,6 +389,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     const args = useArgs()
 
     const fullSyncedSessions = new Set<string>()
+    const pagination = Pagination()
 
     async function bootstrap(input: { fatal?: boolean } = {}) {
       const fatal = input.fatal ?? true
@@ -512,6 +514,8 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         sdk.client.session.diff({ sessionID, workspace }),
         sdk.client.session.children({ sessionID, workspace }),
       ])
+      const cursor = messages.response?.headers?.get("x-next-cursor") ?? null
+      pagination.set(sessionID, { cursor, more: cursor !== null, loading: false })
       const child = await Promise.all((kids.data ?? []).map((item) => load(item.id, workspace, force, seen)))
       return [
         {
@@ -539,6 +543,58 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       },
       get path() {
         return project.instance.path()
+      },
+      pagination,
+      async loadOlder(sessionID: string): Promise<{ loaded: number; more: boolean }> {
+        const state = pagination.get(sessionID)
+        if (!state.more || state.loading) return { loaded: 0, more: state.more }
+        pagination.set(sessionID, { loading: true })
+        try {
+          const workspace = project.workspace.current()
+          const res = await sdk.client.session.messages({
+            sessionID,
+            limit: 50,
+            before: state.cursor!,
+            workspace,
+          })
+          const items = res.data ?? []
+          if (items.length === 0) {
+            pagination.set(sessionID, { loading: false, more: false })
+            return { loaded: 0, more: false }
+          }
+          const cursor = res.response?.headers?.get("x-next-cursor") ?? null
+          pagination.set(sessionID, { cursor, loading: false, more: cursor !== null })
+          batch(() => {
+            setStore(
+              "message",
+              sessionID,
+              produce((draft) => {
+                for (const item of items) {
+                  const pos = Binary.search(draft, item.info.id, (m) => m.id)
+                  if (!pos.found) draft.splice(pos.index, 0, item.info)
+                }
+                // Evict from end (newest off-screen) to keep window anchored to older msgs
+                if (draft.length > 300) {
+                  const excess = draft.length - 300
+                  const tail = draft.splice(draft.length - excess, excess)
+                  for (const m of tail) delete store.part[m.id]
+                }
+              }),
+            )
+            setStore(
+              "part",
+              produce((draft) => {
+                for (const item of items) {
+                  if (!draft[item.info.id]) draft[item.info.id] = item.parts
+                }
+              }),
+            )
+          })
+          return { loaded: items.length, more: cursor !== null }
+        } catch (e) {
+          pagination.set(sessionID, { loading: false })
+          return { loaded: 0, more: state.more }
+        }
       },
       session: {
         get(sessionID: string) {
