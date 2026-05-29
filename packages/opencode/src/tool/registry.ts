@@ -206,7 +206,7 @@ export namespace ToolRegistry {
       })
 
       const describeSkill = Effect.fn("ToolRegistry.describeSkill")(function* (agent: Agent.Info) {
-        const list = yield* skill.available(agent)
+        const list = yield* skill.activated(agent)
         if (list.length === 0) return "No skills are currently available."
         return [
           "Load a specialized skill that provides domain-specific instructions and workflows.",

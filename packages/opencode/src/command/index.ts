@@ -157,7 +157,7 @@ export namespace Command {
             get template() {
               return item.content
             },
-            hints: [],
+            hints: hints(item.content),
           }
         }
 

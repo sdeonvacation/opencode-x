@@ -17,6 +17,7 @@ import { ConfigMarkdown } from "../config/markdown"
 import { Glob } from "../util/glob"
 import { Log } from "../util/log"
 import { Discovery } from "./discovery"
+import { matchAny, parsePaths } from "./paths"
 
 export namespace Skill {
   const log = Log.create({ service: "skill" })
@@ -30,8 +31,36 @@ export namespace Skill {
     description: z.string(),
     location: z.string(),
     content: z.string(),
+    whenToUse: z.string().optional(),
+    disableModelInvocation: z.boolean().optional(),
+    paths: z.array(z.string()).optional(),
   })
   export type Info = z.infer<typeof Info>
+
+  export function parseExtras(raw: Record<string, unknown>): {
+    whenToUse: string | undefined
+    disableModelInvocation: boolean | undefined
+    paths: string[] | undefined
+  } {
+    const whenRaw = raw.whenToUse ?? raw.when_to_use
+    const whenToUse = typeof whenRaw === "string" ? whenRaw : undefined
+
+    const disableRaw = raw.disableModelInvocation ?? raw["disable-model-invocation"]
+    const disableModelInvocation =
+      typeof disableRaw === "boolean"
+        ? disableRaw
+        : disableRaw === "true"
+          ? true
+          : disableRaw === "false"
+            ? false
+            : undefined
+
+    return {
+      whenToUse,
+      disableModelInvocation,
+      paths: parsePaths(raw.paths),
+    }
+  }
 
   export const InvalidError = NamedError.create(
     "SkillInvalidError",
@@ -54,6 +83,7 @@ export namespace Skill {
   type State = {
     skills: Record<string, Info>
     dirs: Set<string>
+    activatedNames: Set<string>
   }
 
   type DiscoveryState = {
@@ -71,6 +101,8 @@ export namespace Skill {
     readonly all: () => Effect.Effect<Info[]>
     readonly dirs: () => Effect.Effect<string[]>
     readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
+    readonly modelInvocable: (agent?: Agent.Info) => Effect.Effect<Info[]>
+    readonly activated: (agent?: Agent.Info) => Effect.Effect<Info[]>
   }
 
   const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.Interface) {
@@ -105,11 +137,15 @@ export namespace Skill {
     }
 
     state.dirs.add(path.dirname(match))
+    const extras = parseExtras(md.data as Record<string, unknown>)
     state.skills[parsed.data.name] = {
       name: parsed.data.name,
       description: parsed.data.description,
       location: match,
       content: md.content,
+      whenToUse: extras.whenToUse,
+      disableModelInvocation: extras.disableModelInvocation,
+      paths: extras.paths,
     }
   })
 
@@ -223,8 +259,23 @@ export namespace Skill {
       )
       const state = yield* InstanceState.make(
         Effect.fn("Skill.state")(function* (ctx) {
-          const s: State = { skills: {}, dirs: new Set() }
+          const s: State = { skills: {}, dirs: new Set(), activatedNames: new Set() }
           yield* loadSkills(s, yield* InstanceState.get(discovered), bus)
+          const skills = Object.values(s.skills)
+          const flags = yield* Effect.forEach(
+            skills,
+            Effect.fnUntraced(function* (skill) {
+              if (!skill.paths) return true
+              return yield* Effect.tryPromise({
+                try: () => matchAny(skill.paths!, ctx.worktree),
+                catch: () => false,
+              }).pipe(Effect.catch(() => Effect.succeed(false)))
+            }),
+            { concurrency: "unbounded" },
+          )
+          skills.forEach((skill, i) => {
+            if (flags[i]) s.activatedNames.add(skill.name)
+          })
           return s
         }),
       )
@@ -250,7 +301,18 @@ export namespace Skill {
         return list.filter((skill) => Permission.evaluate("skill", skill.name, agent.permission).action !== "deny")
       })
 
-      return Service.of({ get, all, dirs, available })
+      const modelInvocable = Effect.fn("Skill.modelInvocable")(function* (agent?: Agent.Info) {
+        const list = yield* available(agent)
+        return list.filter((skill) => skill.disableModelInvocation !== true)
+      })
+
+      const activated = Effect.fn("Skill.activated")(function* (agent?: Agent.Info) {
+        const s = yield* InstanceState.get(state)
+        const list = yield* modelInvocable(agent)
+        return list.filter((skill) => s.activatedNames.has(skill.name))
+      })
+
+      return Service.of({ get, all, dirs, available, modelInvocable, activated })
     }),
   )
 
@@ -268,13 +330,17 @@ export namespace Skill {
         "<available_skills>",
         ...list
           .sort((a, b) => a.name.localeCompare(b.name))
-          .flatMap((skill) => [
-            "  <skill>",
-            `    <name>${skill.name}</name>`,
-            `    <description>${skill.description}</description>`,
-            `    <location>${pathToFileURL(skill.location).href}</location>`,
-            "  </skill>",
-          ]),
+          .flatMap((skill) => {
+            const lines = [
+              "  <skill>",
+              `    <name>${skill.name}</name>`,
+              `    <description>${skill.description}</description>`,
+            ]
+            if (skill.whenToUse) lines.push(`    <when_to_use>${skill.whenToUse}</when_to_use>`)
+            lines.push(`    <location>${pathToFileURL(skill.location).href}</location>`)
+            lines.push("  </skill>")
+            return lines
+          }),
         "</available_skills>",
       ].join("\n")
     }
@@ -283,7 +349,10 @@ export namespace Skill {
       "## Available Skills",
       ...list
         .toSorted((a, b) => a.name.localeCompare(b.name))
-        .map((skill) => `- **${skill.name}**: ${skill.description}`),
+        .map((skill) => {
+          const base = `- **${skill.name}**: ${skill.description}`
+          return skill.whenToUse ? `${base}: ${skill.whenToUse}` : base
+        }),
     ].join("\n")
   }
 
@@ -303,5 +372,13 @@ export namespace Skill {
 
   export async function available(agent?: Agent.Info) {
     return runPromise((skill) => skill.available(agent))
+  }
+
+  export async function modelInvocable(agent?: Agent.Info) {
+    return runPromise((skill) => skill.modelInvocable(agent))
+  }
+
+  export async function activated(agent?: Agent.Info) {
+    return runPromise((skill) => skill.activated(agent))
   }
 }

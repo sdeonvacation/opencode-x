@@ -3,12 +3,14 @@ import { pathToFileURL } from "url"
 import z from "zod"
 import { Tool } from "./tool"
 import { Skill } from "../skill"
+import { applyArgs } from "../skill/template"
 import { Ripgrep } from "../file/ripgrep"
 import { iife } from "@/util/iife"
 import DESCRIPTION from "./skill.txt"
 
 const Parameters = z.object({
   name: z.string().describe("The name of the skill from available_skills"),
+  args: z.string().optional().describe("Optional arguments forwarded as $1..$N or $ARGUMENTS within the skill content"),
 })
 
 export const SkillTool = Tool.define("skill", async () => {
@@ -17,10 +19,12 @@ export const SkillTool = Tool.define("skill", async () => {
     parameters: Parameters,
     async execute(params: z.infer<typeof Parameters>, ctx) {
       const skill = await Skill.get(params.name)
+      const denied = skill?.disableModelInvocation === true
 
-      if (!skill) {
-        const available = await Skill.all().then((x) => x.map((skill) => skill.name).join(", "))
-        throw new Error(`Skill "${params.name}" not found. Available skills: ${available || "none"}`)
+      if (!skill || denied) {
+        const list = await Skill.modelInvocable().then((x) => x.map((s) => s.name).join(", "))
+        const reason = denied ? "is not available for model invocation" : "not found"
+        throw new Error(`Skill "${params.name}" ${reason}. Available skills: ${list || "none"}`)
       }
 
       await ctx.ask({
@@ -53,13 +57,15 @@ export const SkillTool = Tool.define("skill", async () => {
         return arr
       }).then((f) => f.map((file) => `<file>${file}</file>`).join("\n"))
 
+      const content = applyArgs(skill.content, params.args ?? "")
+
       return {
         title: `Loaded skill: ${skill.name}`,
         output: [
           `<skill_content name="${skill.name}">`,
           `# Skill: ${skill.name}`,
           "",
-          skill.content.trim(),
+          content.trim(),
           "",
           `Base directory for this skill: ${base}`,
           "Relative paths in this skill (e.g., scripts/, reference/) are relative to this base directory.",
