@@ -214,6 +214,44 @@ export namespace SessionProcessor {
           return { call, part }
         })
 
+        // Mark in-flight tool parts as error and clear tracking. Used between
+        // retry attempts so orphan "pending" parts don't render as stuck in the TUI.
+        const settleOrphanToolCalls = Effect.fn("SessionProcessor.settleOrphanToolCalls")(function* (reason: string) {
+          // Brief grace period for tools that may still be finishing — mirrors
+          // cleanup()'s end-of-process behaviour so a `running` tool whose result
+          // is about to land doesn't get prematurely errored.
+          yield* Effect.forEach(
+            Object.values(ctx.toolcalls),
+            (call) => Deferred.await(call.done).pipe(Effect.timeout("250 millis"), Effect.ignore),
+            { concurrency: "unbounded" },
+          )
+          for (const toolCallID of Object.keys(ctx.toolcalls)) {
+            const match = yield* readToolCall(toolCallID)
+            if (!match) {
+              yield* settleToolCall(toolCallID)
+              continue
+            }
+            const part = match.part
+            if (part.state.status === "completed" || part.state.status === "error") {
+              yield* settleToolCall(toolCallID)
+              continue
+            }
+            const end = Date.now()
+            const metadata = "metadata" in part.state && isRecord(part.state.metadata) ? part.state.metadata : {}
+            yield* session.updatePart({
+              ...part,
+              state: {
+                ...part.state,
+                status: "error",
+                error: reason,
+                metadata: { ...metadata, interrupted: true },
+                time: { start: "time" in part.state ? part.state.time.start : end, end },
+              },
+            })
+            yield* settleToolCall(toolCallID)
+          }
+        })
+
         const updateToolCall = Effect.fn("SessionProcessor.updateToolCall")(function* (
           toolCallID: string,
           update: (part: MessageV2.ToolPart) => MessageV2.ToolPart,
@@ -543,6 +581,9 @@ export namespace SessionProcessor {
             }
 
             case "error":
+              // Use warn here — these flow through SessionRetry and may be transient.
+              // Terminal failures are logged at ERROR by halt() at the end of the pipeline.
+              log.warn("stream error", { error: value.error })
               throw value.error
 
             case "start-step":
@@ -781,6 +822,17 @@ export namespace SessionProcessor {
               Effect.catchCauseIf(
                 (cause) => !Cause.hasInterruptsOnly(cause),
                 (cause) => Effect.fail(Cause.squash(cause)),
+              ),
+              // Mark orphan tool parts as error before each retry decision so the
+              // TUI doesn't render them as stuck "pending" during backoff windows.
+              // Skip when the error is non-retryable — terminal failures fall through
+              // to halt()/cleanup() which marks orphans with the canonical
+              // "Tool execution aborted" reason.
+              Effect.tapError((err) =>
+                Effect.gen(function* () {
+                  if (!SessionRetry.retryable(parse(err))) return
+                  yield* settleOrphanToolCalls("Stream interrupted, retrying")
+                }).pipe(Effect.catch((e) => Effect.sync(() => log.warn("orphan settle failed", { error: e })))),
               ),
               Effect.retry(
                 SessionRetry.policy({
