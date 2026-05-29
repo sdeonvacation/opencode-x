@@ -840,6 +840,12 @@ export namespace MessageV2 {
               })
           }
           if (part.type === "reasoning") {
+            // [fork-perf] thinking-integrity: skip empty-text reasoning parts that carry only a
+            // signature (e.g. proxies emitting signature_delta without thinking_delta).
+            // Anthropic rejects on replay with `messages.X.content.Y: thinking blocks cannot be
+            // modified` because empty text + signature does not match original response.
+            const hasSig = part.metadata?.anthropic?.signature != null || part.metadata?.bedrock?.signature != null
+            if (!part.text && hasSig) continue
             assistantMessage.parts.push({
               type: "reasoning",
               text: part.text,

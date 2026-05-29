@@ -1080,12 +1080,13 @@ describe("session.message-v2.toModelMessage", () => {
     }
   })
 
-  // [fork-perf] regression: reasoning parts with empty text + valid anthropic
-  // signature must round-trip with the signature intact. AI SDK's
-  // ProviderTransform.applyCaching keeps these (transform.ts:64-73) — losing
-  // the signature mid-prefix invalidates Anthropic's prompt cache and
-  // produces a 400 on next turn.
-  test("preserves anthropic signature on empty-text reasoning part", async () => {
+  // [fork-perf] thinking-integrity: reasoning parts with empty text + signature
+  // are dropped on outbound conversion. Anthropic rejects them on replay with
+  // `messages.X.content.Y: thinking blocks cannot be modified` because empty
+  // text + signature does not match the original response. Some upstream
+  // gateways emit signature_delta without thinking_delta, producing this
+  // shape locally; dropping the part avoids a hard 400 on the next turn.
+  test("drops empty-text reasoning part with anthropic signature", async () => {
     const messageID = "m-asst"
     const input: MessageV2.WithParts[] = [
       {
@@ -1113,8 +1114,7 @@ describe("session.message-v2.toModelMessage", () => {
     const result = await MessageV2.toModelMessages(input, model)
     const assistantMsg = result.find((m) => m.role === "assistant") as any
     const reasoning = (assistantMsg.content as any[]).find((c) => c.type === "reasoning")
-    expect(reasoning).toBeDefined()
-    expect(reasoning.providerOptions?.anthropic?.signature).toBe("sig_test_abc123")
+    expect(reasoning).toBeUndefined()
   })
 })
 
@@ -1412,9 +1412,7 @@ describe("session.message-v2.stripThinkingTags", () => {
     const result = await MessageV2.toModelMessages(input, model, { stripThinkingText: false })
     const assistantMsg = result.find((m) => m.role === "assistant")
     expect(assistantMsg).toBeDefined()
-    const textContent = (assistantMsg!.content as { type: string; text?: string }[]).find(
-      (c) => c.type === "text",
-    )
+    const textContent = (assistantMsg!.content as { type: string; text?: string }[]).find((c) => c.type === "text")
     expect(textContent?.text).toBe("<thinking>foo</thinking>bar")
   })
 
@@ -1438,9 +1436,7 @@ describe("session.message-v2.stripThinkingTags", () => {
     const result = await MessageV2.toModelMessages(input, model, { stripThinkingText: true })
     const assistantMsg = result.find((m) => m.role === "assistant")
     expect(assistantMsg).toBeDefined()
-    const textContent = (assistantMsg!.content as { type: string; text?: string }[]).find(
-      (c) => c.type === "text",
-    )
+    const textContent = (assistantMsg!.content as { type: string; text?: string }[]).find((c) => c.type === "text")
     expect(textContent?.text).toBe("bar")
   })
 
@@ -1467,9 +1463,7 @@ describe("session.message-v2.stripThinkingTags", () => {
 
     const result = await MessageV2.toModelMessages(input, model, { stripThinkingText: true })
     const assistantMsg = result.find((m) => m.role === "assistant")
-    const textContent = (assistantMsg!.content as { type: string; text?: string }[]).find(
-      (c) => c.type === "text",
-    )
+    const textContent = (assistantMsg!.content as { type: string; text?: string }[]).find((c) => c.type === "text")
     expect(textContent?.text).toBe("beforemiddleafter")
   })
 
@@ -1492,9 +1486,7 @@ describe("session.message-v2.stripThinkingTags", () => {
 
     const result = await MessageV2.toModelMessages(input, model, { stripThinkingText: true })
     const assistantMsg = result.find((m) => m.role === "assistant")
-    const textContent = (assistantMsg!.content as { type: string; text?: string }[]).find(
-      (c) => c.type === "text",
-    )
+    const textContent = (assistantMsg!.content as { type: string; text?: string }[]).find((c) => c.type === "text")
     expect(textContent?.text).toBe("start")
   })
 
@@ -1537,8 +1529,8 @@ describe("session.message-v2.stripThinkingTags", () => {
     expect(reasoningContent?.text).toBe("native reasoning")
   })
 
-  // Test 6: signature preserved on reasoning part when flag on
-  test("flag on: reasoning part with signature has providerOptions preserved", async () => {
+  // Test 6: empty-text reasoning with signature is dropped (thinking-integrity guard)
+  test("flag on: drops empty-text reasoning part with signature", async () => {
     const anthropicModel: typeof model = {
       ...model,
       providerID: ProviderID.make("anthropic"),
@@ -1573,13 +1565,10 @@ describe("session.message-v2.stripThinkingTags", () => {
     const result = await MessageV2.toModelMessages(input, anthropicModel, { stripThinkingText: true })
     const assistantMsg = result.find((m) => m.role === "assistant")
     expect(assistantMsg).toBeDefined()
-    // The reasoning part's providerMetadata (signature) must survive
     const reasoningContent = (assistantMsg!.content as { type: string; providerOptions?: unknown }[]).find(
       (c) => c.type === "reasoning",
     )
-    expect(reasoningContent).toBeDefined()
-    // providerOptions should contain the anthropic signature
-    expect((reasoningContent as any)?.providerOptions?.anthropic?.signature).toBe(signature)
+    expect(reasoningContent).toBeUndefined()
   })
 
   // Unit test for stripThinkingTags helper directly
