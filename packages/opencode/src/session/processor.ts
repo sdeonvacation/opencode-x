@@ -80,6 +80,7 @@ export namespace SessionProcessor {
     messageID: MessageV2.ToolPart["messageID"]
     sessionID: MessageV2.ToolPart["sessionID"]
     done: Deferred.Deferred<void>
+    inputEnded: boolean
   }
 
   interface ProcessorContext extends Input {
@@ -249,6 +250,40 @@ export namespace SessionProcessor {
               },
             })
             yield* settleToolCall(toolCallID)
+          }
+        })
+
+        // Mark prior tool parts whose input finished streaming but whose tool-call
+        // event never fired (model truncation / max_tokens cutoff / upstream timeout).
+        // Providers that interleave parallel tool calls (OpenAI parallel_tool_calls)
+        // may emit tool-input-start B before tool-input-end A, so the predicate must
+        // gate on inputEnded — not on raw presence of other entries.
+        const sweepOrphanInputs = Effect.fn("SessionProcessor.sweepOrphanInputs")(function* (currentID: string) {
+          const ids = Object.keys(ctx.toolcalls).filter((id) => id !== currentID)
+          if (ids.length === 0) return
+          for (const id of ids) {
+            const entry = ctx.toolcalls[id]
+            if (!entry?.inputEnded) continue
+            const match = yield* readToolCall(id)
+            if (!match) {
+              yield* settleToolCall(id)
+              continue
+            }
+            if (match.part.state.status !== "pending") continue
+            const end = Date.now()
+            const meta =
+              "metadata" in match.part.state && isRecord(match.part.state.metadata) ? match.part.state.metadata : {}
+            yield* session.updatePart({
+              ...match.part,
+              state: {
+                status: "error",
+                input: match.part.state.input,
+                error: "Tool input truncated mid-stream (likely max_tokens or upstream timeout)",
+                metadata: { ...meta, interrupted: true },
+                time: { start: end, end },
+              },
+            })
+            yield* settleToolCall(id)
           }
         })
 
@@ -465,6 +500,7 @@ export namespace SessionProcessor {
                 throw new Error(`Tool call not allowed while generating summary: ${value.toolName}`)
               }
               ctx.hadToolCalls = true
+              yield* sweepOrphanInputs(value.id)
               const part = yield* session.updatePart({
                 id: ctx.toolcalls[value.id]?.partID ?? PartID.ascending(),
                 messageID: ctx.assistantMessage.id,
@@ -480,6 +516,7 @@ export namespace SessionProcessor {
                 partID: part.id,
                 messageID: part.messageID,
                 sessionID: part.sessionID,
+                inputEnded: false,
               }
               return
 
@@ -493,8 +530,11 @@ export namespace SessionProcessor {
               }))
               return
 
-            case "tool-input-end":
+            case "tool-input-end": {
+              const entry = ctx.toolcalls[value.id]
+              if (entry) entry.inputEnded = true
               return
+            }
 
             case "tool-call": {
               if (ctx.assistantMessage.summary) {
