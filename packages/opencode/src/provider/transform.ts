@@ -261,7 +261,12 @@ export namespace ProviderTransform {
     return msgs
   }
 
-  function applyCaching(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown> = {}): ModelMessage[] { // [fork-perf] options.caching opt-in
+  function applyCaching(
+    msgs: ModelMessage[],
+    model: Provider.Model,
+    options: Record<string, unknown> = {},
+  ): ModelMessage[] {
+    // [fork-perf] options.caching opt-in
     // Providers that also get a tool-level cache marker via toolCaching() must
     // reserve one breakpoint slot (4 max for Anthropic).  We allocate 3 message
     // markers and let the 4th go to tool definitions (3000-8000 tokens, often
@@ -292,7 +297,9 @@ export namespace ProviderTransform {
     // unknown namespace keys, so injecting all of them is safe and keeps providerOptions
     // stable regardless of which provider is active.
     // [fork-perf] 1h cache TTL is opt-out, default-on. Only `0` / `false` / `off` disables.
-    const cachingDisabled = ["0", "false", "off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase())
+    const cachingDisabled = ["0", "false", "off"].includes(
+      String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase(),
+    )
     const cacheTtl = cachingDisabled ? undefined : "1h"
     const ttl = cacheTtl ? { ttl: cacheTtl } : {}
     const providerOptions: Record<string, unknown> = {
@@ -433,7 +440,9 @@ export namespace ProviderTransform {
     const anchor = key ? toolAnchors.get(key)!.anchor : keys[keys.length - 1]
     const target = keys.includes(anchor) ? anchor : keys[keys.length - 1]
     // [fork-perf] 1h cache TTL is opt-out, default-on. Only `0` / `false` / `off` disables.
-    const cachingDisabled = ["0", "false", "off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase())
+    const cachingDisabled = ["0", "false", "off"].includes(
+      String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase(),
+    )
     const cacheTtl = cachingDisabled ? {} : { ttl: "1h" }
     return {
       ...tools,
@@ -449,7 +458,13 @@ export namespace ProviderTransform {
     }
   }
 
-  export function message(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown>, messageCacheKey?: TransformCache.Key) { // [fork-perf] messageCacheKey enables memoization
+  export function message(
+    msgs: ModelMessage[],
+    model: Provider.Model,
+    options: Record<string, unknown>,
+    messageCacheKey?: TransformCache.Key,
+  ) {
+    // [fork-perf] messageCacheKey enables memoization
     if (messageCacheKey) return TransformCache.memo(messageCacheKey, () => _messageImpl(msgs, model, options)) // [fork-perf]
     return _messageImpl(msgs, model, options)
   }
@@ -956,10 +971,10 @@ export namespace ProviderTransform {
   }): Record<string, any> {
     const result: Record<string, any> = {}
 
-    if (
-      input.model.api.npm === "@ai-sdk/google-vertex/anthropic" ||
-      (!input.model.api.id.includes("claude") && input.model.api.npm === "@ai-sdk/anthropic")
-    ) {
+    if (input.model.api.npm === "@ai-sdk/google-vertex/anthropic" || input.model.api.npm === "@ai-sdk/anthropic") {
+      // [fork-perf] Disable for ALL anthropic (incl. claude) on @ai-sdk/anthropic 3.0.71+:
+      // SDK now defaults to injecting `eager_input_streaming: true` on every tool when
+      // toolStreaming is unset. Forces explicit opt-out to keep stable streaming.
       result["toolStreaming"] = false
     }
 
