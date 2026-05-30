@@ -214,6 +214,13 @@ export namespace SessionPrompt {
             )
             const text = lines.join("\n")
 
+            await Bus.publish(TuiEvent.ToastShow, {
+              title: "Background subagents complete",
+              message: `${outcome.results.length} subagent(s) finished.`,
+              variant: "success",
+              duration: 5000,
+            })
+
             // Auto-fire synthetic prompt to parent (hidden from TUI)
             try {
               await SessionPrompt.prompt({
@@ -226,13 +233,6 @@ export namespace SessionPrompt {
               // Fallback: queue note for next manual prompt
               DetachedNotes.queue(parentID, "completed", text)
             }
-
-            await Bus.publish(TuiEvent.ToastShow, {
-              title: "Background subagents complete",
-              message: `${outcome.results.length} subagent(s) finished.`,
-              variant: "success",
-              duration: 5000,
-            })
           },
         )
 
