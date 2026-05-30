@@ -436,7 +436,7 @@ export function Prompt(props: PromptProps) {
         keybind: "session_background",
         category: "Session",
         hidden: true,
-        enabled: status().type !== "idle" && !detachedSet().has(props.sessionID ?? ""),
+        enabled: status().type !== "idle",
         onSelect: async (dialog: any) => {
           if (!props.sessionID) return
           try {
