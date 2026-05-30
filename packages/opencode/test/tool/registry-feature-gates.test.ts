@@ -74,9 +74,26 @@ describe("tool.registry feature-gated tools", () => {
     })
   })
 
-  test("neither tool registered when no experimental config", async () => {
+  test("both tools registered by default when no experimental config (opt-out semantics)", async () => {
     await using tmp = await tmpdir({
       config: {} as any,
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const ids = await ToolRegistry.ids()
+        expect(ids).toContain("goal_complete")
+        expect(ids).toContain("memory_persist")
+      },
+    })
+  })
+
+  test("both tools NOT registered when both flags explicitly disabled", async () => {
+    await using tmp = await tmpdir({
+      config: {
+        experimental: { goal_system: false, persistent_memory: false },
+      } as any,
     })
 
     await Instance.provide({

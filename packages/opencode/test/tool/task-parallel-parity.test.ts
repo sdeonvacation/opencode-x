@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { afterEach, afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { Config } from "../../src/config/config"
@@ -11,6 +11,17 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, SessionID } from "../../src/session/schema"
 import { TaskTool } from "../../src/tool/task"
 import { tmpdir } from "../fixture/fixture"
+
+// Isolate from ambient OPENCODE_PERMISSION (e.g. set in dev shell).
+let prevEnvPermission: string | undefined
+beforeAll(() => {
+  prevEnvPermission = process.env.OPENCODE_PERMISSION
+  delete process.env.OPENCODE_PERMISSION
+})
+afterAll(() => {
+  if (prevEnvPermission === undefined) delete process.env.OPENCODE_PERMISSION
+  else process.env.OPENCODE_PERMISSION = prevEnvPermission
+})
 
 afterEach(async () => {
   await Instance.disposeAll()
@@ -86,7 +97,7 @@ describe("tool.task parallel parity", () => {
           const input = prompt.mock.calls[0]?.[0]
           expect(input?.agent).toBe("parallel")
           expect(input?.sessionID).toBe(subtaskID)
-          expect(input?.tools).toEqual({ task: false, todowrite: false })
+          expect(input?.tools).toEqual({ task: false, todowrite: false, goal_complete: false })
         } finally {
           get.mockRestore()
           create.mockRestore()
@@ -175,7 +186,7 @@ describe("tool.task parallel parity", () => {
           const input = prompt.mock.calls[0]?.[0]
           expect(input?.agent).toBe(parallel?.name)
           expect(input?.sessionID).toBe(subtaskID)
-          expect(input?.tools).toEqual({ task: false, todowrite: false })
+          expect(input?.tools).toEqual({ task: false, todowrite: false, goal_complete: false })
           expect(input?.model).toEqual({
             providerID: ProviderID.openai,
             modelID: ModelID.make("gpt-5.2"),

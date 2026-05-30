@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { afterEach, afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { Config } from "../../src/config/config"
@@ -13,6 +13,18 @@ import { TaskTool } from "../../src/tool/task"
 import { ToolRegistry } from "../../src/tool/registry"
 import { provideTmpdirInstance, tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+
+// Isolate from ambient OPENCODE_PERMISSION (e.g. set in dev shell) so default
+// agent rulesets aren't blanket-overridden.
+let prevEnvPermission: string | undefined
+beforeAll(() => {
+  prevEnvPermission = process.env.OPENCODE_PERMISSION
+  delete process.env.OPENCODE_PERMISSION
+})
+afterAll(() => {
+  if (prevEnvPermission === undefined) delete process.env.OPENCODE_PERMISSION
+  else process.env.OPENCODE_PERMISSION = prevEnvPermission
+})
 
 // Helper: initialize TaskTool (Tool.defineEffect) for non-Effect test contexts
 const initTask = () =>
@@ -408,6 +420,7 @@ describe("tool.task", () => {
             todowrite: false,
             bash: false,
             read: false,
+            goal_complete: false,
           })
         }),
       {

@@ -1,5 +1,21 @@
-import { describe, expect, test } from "bun:test"
-import { createGoalCommand } from "../../src/cli/cmd/tui/command/goal-command"
+import { describe, expect, test, mock } from "bun:test"
+
+// Override DialogPrompt to mimic real impl (calls dialog.replace) — protects
+// against leaked mock.module from other test files (Bun caches module mocks
+// across files; mock.restore does not reset mock.module values).
+mock.module("../../src/cli/cmd/tui/ui/dialog-prompt", () => ({
+  DialogPrompt: {
+    show: (dialog: { replace: (fn: any, onCancel?: any) => void }) =>
+      new Promise<string | null>((resolve) => {
+        dialog.replace(
+          () => null,
+          () => resolve(null),
+        )
+      }),
+  },
+}))
+
+const { createGoalCommand } = await import("../../src/cli/cmd/tui/command/goal-command")
 
 function deps(overrides?: Partial<Parameters<typeof createGoalCommand>[0]>) {
   let cleared = false

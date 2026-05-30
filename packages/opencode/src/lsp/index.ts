@@ -265,36 +265,48 @@ export namespace LSP {
         }),
       )
 
-      // Idle shutdown: when all sessions idle for 30 min, invalidate LSP state
-      const dir = Instance.directory
-      let idleTimer: ReturnType<typeof setTimeout> | undefined
-      const idle = async () => {
-        const all = await SessionStatus.list()
-        const anyBusy = [...all.values()].some((s) => s.type !== "idle")
-        if (anyBusy) {
-          if (idleTimer) {
-            clearTimeout(idleTimer)
-            idleTimer = undefined
-          }
-          return
-        }
-        if (!idleTimer) {
-          idleTimer = setTimeout(
-            () => {
-              idleTimer = undefined
-              Effect.runPromise(ScopedCache.invalidate(state.cache, dir)).catch((error) => {
-                log.error("failed to invalidate idle lsp state", { error, directory: dir })
-              })
-            },
-            30 * 60 * 1000,
-          )
-        }
+      // Idle shutdown: when all sessions idle for 30 min, invalidate LSP state.
+      // Capture directory lazily — in tests the layer may be built outside an
+      // Instance ALS context. When no context is active, skip the subscription
+      // entirely (idle shutdown is a no-op).
+      let dir: string | undefined
+      try {
+        dir = Instance.directory
+      } catch {
+        dir = undefined
       }
-      const unsub = Bus.subscribe(SessionStatus.Event.Status, idle)
-      void idle()
+      let idleTimer: ReturnType<typeof setTimeout> | undefined
+      let unsub: (() => void) | undefined
+      if (dir !== undefined) {
+        const directory = dir
+        const idle = async () => {
+          const all = await SessionStatus.list()
+          const anyBusy = [...all.values()].some((s) => s.type !== "idle")
+          if (anyBusy) {
+            if (idleTimer) {
+              clearTimeout(idleTimer)
+              idleTimer = undefined
+            }
+            return
+          }
+          if (!idleTimer) {
+            idleTimer = setTimeout(
+              () => {
+                idleTimer = undefined
+                Effect.runPromise(ScopedCache.invalidate(state.cache, directory)).catch((error) => {
+                  log.error("failed to invalidate idle lsp state", { error, directory })
+                })
+              },
+              30 * 60 * 1000,
+            )
+          }
+        }
+        unsub = Bus.subscribe(SessionStatus.Event.Status, idle)
+        void idle()
+      }
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
-          unsub()
+          unsub?.()
           if (idleTimer) {
             clearTimeout(idleTimer)
             idleTimer = undefined

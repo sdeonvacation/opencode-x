@@ -1,4 +1,13 @@
 import { test, expect, mock, beforeEach } from "bun:test"
+import os from "os"
+import path from "path"
+import fs from "fs"
+
+// Isolate from real ~/.claude/plugins MCP auto-discovery (Bun caches os.homedir()
+// at process start, so we override the function on the os module instance).
+const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-mcp-isolated-home-"))
+;(os as any).homedir = () => isolatedHome
+mock.module("os", () => ({ ...os, homedir: () => isolatedHome, default: { ...os, homedir: () => isolatedHome } }))
 
 // --- Mock infrastructure ---
 

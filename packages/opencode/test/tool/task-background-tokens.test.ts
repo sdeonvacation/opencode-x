@@ -51,7 +51,7 @@ describe("background task token display", () => {
   test("tokens formats small counts", () => {
     expect(tokens(100)).toBe("~25 tok")
     expect(tokens(4)).toBe("~1 tok")
-    expect(tokens(3999)).toBe("~1000 tok")
+    expect(tokens(3996)).toBe("~999 tok")
   })
 
   test("tokens formats large counts with k suffix", () => {

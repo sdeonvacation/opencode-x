@@ -1,4 +1,4 @@
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, afterAll, beforeAll, describe, expect } from "bun:test"
 import { Cause, Effect, Exit, Layer } from "effect"
 import path from "path"
 import { Agent } from "../../src/agent/agent"
@@ -17,6 +17,18 @@ import { provideInstance, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 const FIXTURES_DIR = path.join(import.meta.dir, "fixtures")
+
+// Isolate from ambient OPENCODE_PERMISSION (e.g. set in dev shell) so the
+// default `read.*.env` ask rule isn't overridden.
+let prevEnvPermission: string | undefined
+beforeAll(() => {
+  prevEnvPermission = process.env.OPENCODE_PERMISSION
+  delete process.env.OPENCODE_PERMISSION
+})
+afterAll(() => {
+  if (prevEnvPermission === undefined) delete process.env.OPENCODE_PERMISSION
+  else process.env.OPENCODE_PERMISSION = prevEnvPermission
+})
 
 afterEach(async () => {
   await Instance.disposeAll()
@@ -261,7 +273,7 @@ describe("tool.read truncation", () => {
       const content = base.length >= target ? base : base.repeat(Math.ceil(target / base.length))
       yield* put(path.join(dir, "large.json"), content)
 
-      const result = yield* exec(dir, { filePath: path.join(dir, "large.json") })
+      const result = yield* exec(dir, { filePath: path.join(dir, "large.json"), limit: 100000 })
       expect(result.metadata.truncated).toBe(true)
       expect(result.output).toContain("Output capped at")
       expect(result.output).toContain("Use offset=")

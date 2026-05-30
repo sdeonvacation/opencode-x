@@ -13,10 +13,14 @@ import { testEffect } from "../lib/effect"
 import { provideTmpdirInstance } from "../fixture/fixture"
 
 const original = Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS
+const originalEnv = process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS
 beforeAll(() => {
+  process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = "true"
   ;(Flag as any).OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = true
 })
 afterAll(() => {
+  if (originalEnv === undefined) delete process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS
+  else process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = originalEnv
   ;(Flag as any).OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = original
 })
 
@@ -313,19 +317,23 @@ describe("tool.task_status", () => {
     it.live("throws when OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS is false", () =>
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
-          const prev = Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS
           ;(Flag as any).OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = false
           try {
             const info = yield* TaskStatusTool
             const tool = yield* Effect.promise(() => info.init())
-            yield* Effect.promise(
-              () =>
-                expect(tool.execute({ task_id: "ses_test" }, makeCtx())).rejects.toThrow(
-                  "task_status requires OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true",
-                ) as unknown as Promise<unknown>,
+            const result = yield* Effect.promise(() =>
+              tool
+                .execute({ task_id: "ses_test" }, makeCtx())
+                .then(() => ({ threw: false, message: "" }))
+                .catch((err: unknown) => ({
+                  threw: true,
+                  message: err instanceof Error ? err.message : String(err),
+                })),
             )
+            expect(result.threw).toBe(true)
+            expect(result.message).toContain("task_status requires OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true")
           } finally {
-            ;(Flag as any).OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = prev
+            ;(Flag as any).OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = true
           }
         }),
       ),

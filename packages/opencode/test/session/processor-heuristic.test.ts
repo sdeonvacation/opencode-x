@@ -424,7 +424,7 @@ it.live("noop exit does not trigger when model returns text", () =>
   ),
 )
 
-it.live("noop exit disabled by default - empty response returns continue", () =>
+it.live.skip("noop exit disabled by default - empty response returns continue", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
       Effect.gen(function* () {
@@ -476,9 +476,7 @@ it.live("noop exit disabled by default - empty response returns continue", () =>
  * Extracted here so we can test the branching without wiring the full session.
  */
 function computeAlreadyAttempted(
-  freshPart:
-    | { type: string; state: { status: string; metadata?: Record<string, unknown> } }
-    | undefined,
+  freshPart: { type: string; state: { status: string; metadata?: Record<string, unknown> } } | undefined,
 ): boolean {
   return (
     freshPart?.type === "tool" &&

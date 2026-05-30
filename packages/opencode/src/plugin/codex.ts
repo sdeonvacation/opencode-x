@@ -384,6 +384,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
           "gpt-5.4",
           "gpt-5.4-mini",
         ])
+        provider.models ??= {}
         for (const [modelId, model] of Object.entries(provider.models)) {
           if (modelId.includes("codex")) continue
           if (allowedModels.has(model.api.id)) continue
