@@ -1,7 +1,7 @@
 diff --git a/index-t4yn324k.js b/index-t4yn324k.js
 --- a/index-t4yn324k.js
 +++ b/index-t4yn324k.js
-@@ -18893,9 +18893,15 @@
+@@ -18893,5 +18893,11 @@
      const isInitialContent = this._streaming && !this._hadInitialContent;
      const shouldDrawUnstyledNow = this._streaming ? isInitialContent && this._drawUnstyledText : this._drawUnstyledText;
      if (this._streaming && !isInitialContent) {
