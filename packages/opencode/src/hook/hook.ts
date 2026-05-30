@@ -65,13 +65,15 @@ export namespace Hook {
 
   function matches(pattern: string, value: string): boolean {
     if (pattern === "*") return true
-    if (pattern === value) return true
-    if (!pattern.includes("*") && !pattern.includes("?")) return false
-    const escaped = pattern
+    const p = pattern.toLowerCase()
+    const v = value.toLowerCase()
+    if (p === v) return true
+    if (!p.includes("*") && !p.includes("?")) return false
+    const escaped = p
       .replace(/[.+^${}()|[\]\\]/g, "\\$&")
       .replace(/\*/g, ".*")
       .replace(/\?/g, ".")
-    return new RegExp("^" + escaped + "$").test(value)
+    return new RegExp("^" + escaped + "$").test(v)
   }
 
   function empty(): Rules {
