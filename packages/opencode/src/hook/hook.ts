@@ -278,7 +278,11 @@ export namespace Hook {
     return { name, description: description.replace(/\s*Trigger:.*/, "").trim(), trigger }
   }
 
-  async function execute(def: HookDef, payload: Payload): Promise<{ code: number; stdout: string; stderr: string }> {
+  async function execute(
+    def: HookDef,
+    event: Event,
+    payload: Payload,
+  ): Promise<{ code: number; stdout: string; stderr: string }> {
     // Claude Code spec: `timeout` is in SECONDS. Convert to ms for setTimeout.
     const timeout = def.timeout != null ? def.timeout * 1000 : TIMEOUT
     const env = {
@@ -291,7 +295,15 @@ export namespace Hook {
       CLAUDE_USER_PROMPT: payload.prompt ?? "",
     }
 
-    const body = JSON.stringify(payload)
+    // Claude Code stdin spec: https://docs.claude.com/en/docs/claude-code/hooks
+    const body = JSON.stringify({
+      session_id: payload.sessionID ?? "",
+      hook_event_name: event,
+      tool_name: payload.tool ?? "",
+      tool_input: payload.input ?? {},
+      tool_response: payload.result,
+      prompt: payload.prompt,
+    })
     const proc = Bun.spawn(["sh", "-c", def.command], {
       env,
       stdin: "pipe",
@@ -314,6 +326,8 @@ export namespace Hook {
     allowed: true
     /** Collected stdout from all successful hooks (non-empty only) */
     output: string[]
+    /** Rewritten tool input from PreToolUse hook (Claude Code `hookSpecificOutput.updatedInput`) */
+    updatedInput?: Record<string, unknown>
   }
 
   export const dispatch = Effect.fn("Hook.dispatch")(function* (
@@ -331,10 +345,11 @@ export namespace Hook {
     const tool = payload.tool ?? ""
     const matched = active.filter((r) => !r.matcher || matches(r.matcher, tool))
     const output: string[] = []
+    let updatedInput: Record<string, unknown> | undefined
 
     for (const rule of matched) {
       for (const hook of rule.hooks) {
-        const result = yield* Effect.promise(() => execute(hook, payload))
+        const result = yield* Effect.promise(() => execute(hook, event, payload))
 
         if ((event === "PreToolUse" || event === "UserPromptSubmit") && result.code !== 0) {
           return yield* Effect.fail(
@@ -352,25 +367,63 @@ export namespace Hook {
             code: result.code,
             stderr: result.stderr,
           })
-        } else if (result.stdout) {
-          if (event === "PreToolUse" || event === "UserPromptSubmit") {
-            try {
-              const parsed = JSON.parse(result.stdout)
-              if (parsed.decision === "block") {
-                return yield* Effect.fail(
-                  new HookDenied({
-                    message: parsed.reason || "blocked by hook",
-                    tool: payload.tool,
-                  }),
-                )
-              }
-            } catch {}
-          }
-          output.push(result.stdout)
+          continue
         }
+
+        if (!result.stdout) continue
+
+        let parsed: any
+        try {
+          parsed = JSON.parse(result.stdout)
+        } catch {
+          output.push(result.stdout)
+          continue
+        }
+
+        // Claude Code: `continue: false` halts regardless of event
+        if (parsed?.continue === false) {
+          return yield* Effect.fail(
+            new HookDenied({
+              message: parsed.stopReason || "blocked by hook",
+              tool: payload.tool,
+            }),
+          )
+        }
+
+        if (event === "PreToolUse" || event === "UserPromptSubmit") {
+          // Legacy shape
+          if (parsed?.decision === "block") {
+            return yield* Effect.fail(
+              new HookDenied({
+                message: parsed.reason || "blocked by hook",
+                tool: payload.tool,
+              }),
+            )
+          }
+          // Claude Code spec
+          const spec = parsed?.hookSpecificOutput
+          if (spec && typeof spec === "object") {
+            if (spec.permissionDecision === "deny") {
+              return yield* Effect.fail(
+                new HookDenied({
+                  message: spec.permissionDecisionReason || "blocked by hook",
+                  tool: payload.tool,
+                }),
+              )
+            }
+            if (event === "PreToolUse" && spec.updatedInput && typeof spec.updatedInput === "object") {
+              updatedInput = spec.updatedInput as Record<string, unknown>
+            }
+            // permissionDecision === "allow" — no-op, fall through
+          }
+        }
+
+        output.push(result.stdout)
       }
     }
 
-    return { allowed: true as const, output }
+    const ret: DispatchResult = { allowed: true, output }
+    if (updatedInput) ret.updatedInput = updatedInput
+    return ret
   })
 }

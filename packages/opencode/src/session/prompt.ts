@@ -458,7 +458,7 @@ export namespace SessionPrompt {
                     title: val.title,
                     metadata: val.metadata,
                     status: "running",
-                    input: args,
+                    input: match.state.input,
                     time: { start: Date.now() },
                   },
                 }
@@ -522,7 +522,10 @@ export namespace SessionPrompt {
                         },
                         rules,
                         cfg,
-                      ) as Effect.Effect<{ allowed: true; output: string[] }, any>
+                      ) as Effect.Effect<
+                        { allowed: true; output: string[]; updatedInput?: Record<string, unknown> },
+                        any
+                      >
                     ).pipe(
                       Effect.catch((denied: any) => {
                         return Effect.succeed({ allowed: false as const, reason: denied.message as string })
@@ -534,6 +537,20 @@ export namespace SessionPrompt {
                         output: `Tool execution denied by hook: ${"reason" in hookResult ? hookResult.reason : "unknown"}`,
                         metadata: { denied: true },
                       }
+                    }
+                    if (
+                      hookResult.updatedInput &&
+                      typeof hookResult.updatedInput === "object" &&
+                      !Array.isArray(hookResult.updatedInput)
+                    ) {
+                      args = hookResult.updatedInput as typeof args
+                      yield* input.processor.updateToolCall(options.toolCallId, (match) => {
+                        if (!["running", "pending"].includes(match.state.status)) return match
+                        return {
+                          ...match,
+                          state: { ...match.state, input: args as Record<string, any> },
+                        }
+                      })
                     }
                   }
                   const result = yield* Effect.promise(() => item.execute(args, ctx))
@@ -569,7 +586,11 @@ export namespace SessionPrompt {
                               },
                               rules,
                               cfg,
-                            ) as Effect.Effect<{ allowed: true; output: string[] }>
+                            ) as Effect.Effect<{
+                              allowed: true
+                              output: string[]
+                              updatedInput?: Record<string, unknown>
+                            }>
                           ).pipe(Effect.ignore),
                         )
                       }),
