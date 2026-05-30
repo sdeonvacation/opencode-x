@@ -1868,7 +1868,9 @@ describe("ProviderTransform.message - cache control on gateway", () => {
 
     const result = ProviderTransform.message(msgs, model, {}) as any[]
 
-    const ttl = !["0","false","off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase()) ? { ttl: "1h" } : {}
+    const ttl = !["0", "false", "off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase())
+      ? { ttl: "1h" }
+      : {}
     expect(result[0].providerOptions).toEqual({
       anthropic: {
         cacheControl: {
@@ -1929,7 +1931,9 @@ describe("ProviderTransform.message - cache control on gateway", () => {
 
     const result = ProviderTransform.message(msgs, model, {}) as any[]
 
-    const ttl = !["0","false","off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase()) ? { ttl: "1h" } : {}
+    const ttl = !["0", "false", "off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase())
+      ? { ttl: "1h" }
+      : {}
     expect(result[0].providerOptions).toEqual({
       anthropic: {
         cacheControl: {
@@ -2286,6 +2290,40 @@ describe("ProviderTransform.variants", () => {
         providerID: "gateway",
         api: {
           id: "anthropic/claude-opus-4.7",
+          url: "https://gateway.ai",
+          npm: "@ai-sdk/gateway",
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high", "xhigh", "max"])
+    })
+
+    test("anthropic opus 4.8 models return adaptive thinking options with xhigh", () => {
+      const model = createMockModel({
+        id: "anthropic/claude-opus-4-8",
+        providerID: "gateway",
+        api: {
+          id: "anthropic/claude-opus-4-8",
+          url: "https://gateway.ai",
+          npm: "@ai-sdk/gateway",
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high", "xhigh", "max"])
+      expect(result.high).toEqual({
+        thinking: {
+          type: "adaptive",
+        },
+        effort: "high",
+      })
+    })
+
+    test("anthropic opus 4.8 dot-format models return adaptive thinking options with xhigh", () => {
+      const model = createMockModel({
+        id: "anthropic/claude-opus-4-8",
+        providerID: "gateway",
+        api: {
+          id: "anthropic/claude-opus-4.8",
           url: "https://gateway.ai",
           npm: "@ai-sdk/gateway",
         },
@@ -2751,6 +2789,77 @@ describe("ProviderTransform.variants", () => {
         },
       })
     })
+
+    test("opus 4.8 returns adaptive thinking options with xhigh and summarized display", () => {
+      const model = createMockModel({
+        id: "anthropic/claude-opus-4-8",
+        providerID: "anthropic",
+        api: {
+          id: "claude-opus-4-8",
+          url: "https://api.anthropic.com",
+          npm: "@ai-sdk/anthropic",
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high", "xhigh", "max"])
+      expect(result.high).toEqual({
+        thinking: {
+          type: "adaptive",
+          display: "summarized",
+        },
+        effort: "high",
+      })
+      expect(result.max).toEqual({
+        thinking: {
+          type: "adaptive",
+          display: "summarized",
+        },
+        effort: "max",
+      })
+    })
+
+    test("opus 4.8 dot-format returns adaptive thinking options with xhigh and summarized display", () => {
+      const model = createMockModel({
+        id: "anthropic/claude-opus-4-8",
+        providerID: "anthropic",
+        api: {
+          id: "claude-opus-4.8",
+          url: "https://api.anthropic.com",
+          npm: "@ai-sdk/anthropic",
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high", "xhigh", "max"])
+      expect(result.xhigh).toEqual({
+        thinking: {
+          type: "adaptive",
+          display: "summarized",
+        },
+        effort: "xhigh",
+      })
+    })
+
+    test("github copilot opus 4.8 returns only medium reasoning effort with summarized display", () => {
+      const model = createMockModel({
+        id: "claude-opus-4.8",
+        providerID: "github-copilot",
+        api: {
+          id: "claude-opus-4.8",
+          url: "https://api.githubcopilot.com/v1",
+          npm: "@ai-sdk/anthropic",
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(result).toEqual({
+        medium: {
+          thinking: {
+            type: "adaptive",
+            display: "summarized",
+          },
+          effort: "medium",
+        },
+      })
+    })
     test("returns high and max with thinking config", () => {
       const model = createMockModel({
         id: "anthropic/claude-4",
@@ -2795,6 +2904,62 @@ describe("ProviderTransform.variants", () => {
         reasoningConfig: {
           type: "adaptive",
           maxReasoningEffort: "max",
+        },
+      })
+    })
+
+    test("anthropic opus 4.7 returns adaptive reasoning options with xhigh and summarized display", () => {
+      const model = createMockModel({
+        id: "bedrock/anthropic-claude-opus-4-7",
+        providerID: "bedrock",
+        api: {
+          id: "anthropic.claude-opus-4-7",
+          url: "https://bedrock.amazonaws.com",
+          npm: "@ai-sdk/amazon-bedrock",
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high", "xhigh", "max"])
+      expect(result.high).toEqual({
+        reasoningConfig: {
+          type: "adaptive",
+          maxReasoningEffort: "high",
+          display: "summarized",
+        },
+      })
+      expect(result.max).toEqual({
+        reasoningConfig: {
+          type: "adaptive",
+          maxReasoningEffort: "max",
+          display: "summarized",
+        },
+      })
+    })
+
+    test("anthropic opus 4.8 returns adaptive reasoning options with xhigh and summarized display", () => {
+      const model = createMockModel({
+        id: "bedrock/anthropic-claude-opus-4-8",
+        providerID: "bedrock",
+        api: {
+          id: "anthropic.claude-opus-4.8",
+          url: "https://bedrock.amazonaws.com",
+          npm: "@ai-sdk/amazon-bedrock",
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high", "xhigh", "max"])
+      expect(result.high).toEqual({
+        reasoningConfig: {
+          type: "adaptive",
+          maxReasoningEffort: "high",
+          display: "summarized",
+        },
+      })
+      expect(result.max).toEqual({
+        reasoningConfig: {
+          type: "adaptive",
+          maxReasoningEffort: "max",
+          display: "summarized",
         },
       })
     })
@@ -3254,7 +3419,9 @@ describe("ProviderTransform.toolCaching - session-stable", () => {
     ProviderTransform.toolCaching(t2, anthropic, sid) // skipped
     // Same tools again — should now latch
     const result = ProviderTransform.toolCaching(t2, anthropic, sid)
-    expect(result.mcp_search.providerOptions?.anthropic?.cacheControl).toEqual(expect.objectContaining({ type: "ephemeral" }))
+    expect(result.mcp_search.providerOptions?.anthropic?.cacheControl).toEqual(
+      expect.objectContaining({ type: "ephemeral" }),
+    )
   })
 
   test("different sessions have independent anchors", () => {

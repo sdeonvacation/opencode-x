@@ -558,11 +558,19 @@ export namespace ProviderTransform {
   const WIDELY_SUPPORTED_EFFORTS = ["low", "medium", "high"]
   const OPENAI_EFFORTS = ["none", "minimal", ...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
 
+  function anthropicOpus47OrLater(apiId: string) {
+    const version = /opus-(\d+)[.-](\d+)(?:[.-]|$)/i.exec(apiId)
+    if (!version) return false
+    const major = Number(version[1])
+    const minor = Number(version[2])
+    return major > 4 || (major === 4 && minor >= 7)
+  }
+
   export function variants(model: Provider.Model): Record<string, Record<string, any>> {
     if (!model.capabilities.reasoning) return {}
 
     const id = model.id.toLowerCase()
-    const isOpus47 = ["opus-4-7", "opus-4.7"].some((v) => model.api.id.includes(v))
+    const isOpus47 = anthropicOpus47OrLater(model.api.id)
     const isAnthropicAdaptive =
       isOpus47 || ["opus-4-6", "opus-4.6", "sonnet-4-6", "sonnet-4.6"].some((v) => model.api.id.includes(v))
     const adaptiveEfforts = isOpus47 ? ["low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high", "max"]
@@ -665,7 +673,7 @@ export namespace ProviderTransform {
           return {}
         }
         if (model.id.includes("claude")) {
-          if (model.api.id.includes("opus-4.7")) {
+          if (anthropicOpus47OrLater(model.api.id)) {
             return Object.fromEntries(["medium"].map((effort) => [effort, { reasoningEffort: effort }]))
           }
           return Object.fromEntries(WIDELY_SUPPORTED_EFFORTS.map((effort) => [effort, { reasoningEffort: effort }]))
@@ -761,7 +769,7 @@ export namespace ProviderTransform {
         if (isAnthropicAdaptive) {
           let efforts = [...adaptiveEfforts]
           if (model.providerID === "github-copilot") {
-            if (model.api.id.includes("opus-4.7")) {
+            if (anthropicOpus47OrLater(model.api.id)) {
               efforts = ["medium"]
             }
             efforts = efforts.filter((v) => v !== "max" && v !== "xhigh")
@@ -805,6 +813,7 @@ export namespace ProviderTransform {
                 reasoningConfig: {
                   type: "adaptive",
                   maxReasoningEffort: effort,
+                  ...(isOpus47 ? { display: "summarized" } : {}),
                 },
               },
             ]),
