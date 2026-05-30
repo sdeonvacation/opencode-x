@@ -163,17 +163,17 @@ export function Session() {
   const detached = () => detachedSet().has(route.sessionID ?? "")
 
   event.on(TuiEvent.BackgroundTaskUpdate.type, (evt: any) => {
-    if (evt.properties.sessionID !== route.sessionID) return
-    if (evt.properties.state === "running") setBgTasks((n) => n + 1)
-    else setBgTasks((n) => Math.max(0, n - 1))
-  })
-
-  event.on(TuiEvent.BackgroundTaskUpdate.type, (evt: any) => {
-    if (evt.properties.sessionID !== route.sessionID) return
-    if (evt.properties.state !== "running" && bgTasks() <= 1 && detachedSet().has(route.sessionID)) {
+    const sid = evt.properties.sessionID
+    // Track count for currently viewed session
+    if (sid === route.sessionID) {
+      if (evt.properties.state === "running") setBgTasks((n) => n + 1)
+      else setBgTasks((n) => Math.max(0, n - 1))
+    }
+    // Clear detached state regardless of current route — user may have navigated away
+    if (evt.properties.state !== "running" && detachedSet().has(sid)) {
       setDetachedSet((s) => {
         const next = new Set(s)
-        next.delete(route.sessionID)
+        next.delete(sid)
         return next
       })
     }
