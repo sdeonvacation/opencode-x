@@ -79,7 +79,7 @@ function backgroundOutput(sessionID: SessionID) {
     "state: running",
     "",
     "<task_result>",
-    "Background task started. Continue your current work and call task_status when you need the result.",
+    "Background task launched. If you have more independent tasks to launch, emit them NOW in this same response. Do not narrate between Task calls.",
     "</task_result>",
   ].join("\n")
 }
@@ -95,6 +95,7 @@ export const TaskTool = Tool.defineEffect(
   id,
   Effect.gen(function* () {
     return {
+      parallelSafe: true,
       description: DESCRIPTION,
       parameters: Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS ? parameters : baseParameters,
       async execute(params: z.infer<typeof parameters>, ctx: Tool.Context) {

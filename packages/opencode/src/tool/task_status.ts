@@ -55,6 +55,7 @@ export const TaskStatusTool = Tool.defineEffect(
     const status = yield* SessionStatus.Service
 
     return {
+      parallelSafe: true,
       description: DESCRIPTION,
       parameters,
       async execute(params: z.infer<typeof parameters>, _ctx: Tool.Context) {
