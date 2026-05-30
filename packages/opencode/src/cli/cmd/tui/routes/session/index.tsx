@@ -157,18 +157,29 @@ export function Session() {
   const disabled = createMemo(() => permissions().length > 0 || questions().length > 0)
 
   // fork: background-detach (#FORK) — begin (lifted from Prompt to survive unmount)
-  const [bgTasks, setBgTasks] = createSignal(0)
+  const [bgTaskMap, setBgTaskMap] = createSignal<Map<string, number>>(new Map())
+  const bgTasks = () => bgTaskMap().get(route.sessionID) ?? 0
+  const setBgTasks = (fn: (n: number) => number) => {
+    setBgTaskMap((m) => {
+      const next = new Map(m)
+      next.set(route.sessionID, fn(next.get(route.sessionID) ?? 0))
+      return next
+    })
+  }
   const [detachedSet, setDetachedSet] = createSignal<Set<string>>(new Set())
   const [bgCount, setBgCount] = createSignal(0)
   const detached = () => detachedSet().has(route.sessionID ?? "")
 
   event.on(TuiEvent.BackgroundTaskUpdate.type, (evt: any) => {
     const sid = evt.properties.sessionID
-    // Track count for currently viewed session
-    if (sid === route.sessionID) {
-      if (evt.properties.state === "running") setBgTasks((n) => n + 1)
-      else setBgTasks((n) => Math.max(0, n - 1))
-    }
+    // Track count per session — survives navigation between sessions
+    setBgTaskMap((m) => {
+      const next = new Map(m)
+      const cur = next.get(sid) ?? 0
+      if (evt.properties.state === "running") next.set(sid, cur + 1)
+      else next.set(sid, Math.max(0, cur - 1))
+      return next
+    })
     // Clear detached state regardless of current route — user may have navigated away
     if (evt.properties.state !== "running" && detachedSet().has(sid)) {
       setDetachedSet((s) => {
