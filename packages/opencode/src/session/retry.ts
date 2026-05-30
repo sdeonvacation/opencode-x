@@ -18,6 +18,10 @@ export namespace SessionRetry {
   export const RETRY_MAX_DELAY_NO_HEADERS = 30_000 // 30 seconds
   export const RETRY_MAX_DELAY = 2_147_483_647 // max 32-bit signed integer for setTimeout
   export const RETRY_MAX_ATTEMPTS = 8
+  // Mid-stream errors (no statusCode) are capped lower since they typically
+  // surface from already-established connections and rarely recover after a
+  // few attempts.
+  export const RETRY_MAX_ATTEMPTS_STREAM = 3
 
   function cap(ms: number) {
     return Math.min(ms, RETRY_MAX_DELAY)
@@ -114,8 +118,10 @@ export namespace SessionRetry {
   }) {
     return Schedule.fromStepWithMetadata(
       Effect.succeed((meta: Schedule.InputMetadata<unknown>) => {
-        if (meta.attempt > RETRY_MAX_ATTEMPTS) return Cause.done(meta.attempt)
         const error = opts.parse(meta.input)
+        const stream = MessageV2.APIError.isInstance(error) && error.data.statusCode === undefined
+        const max = stream ? RETRY_MAX_ATTEMPTS_STREAM : RETRY_MAX_ATTEMPTS
+        if (meta.attempt > max) return Cause.done(meta.attempt)
         const message = retryable(error)
         if (!message) return Cause.done(meta.attempt)
         return Effect.gen(function* () {

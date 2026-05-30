@@ -121,9 +121,16 @@ describe("session.retry.delay", () => {
     let runs = 0
     let set = 0
 
+    const httpErr = new MessageV2.APIError({
+      message: "boom",
+      isRetryable: true,
+      statusCode: 503,
+      responseHeaders: { "retry-after-ms": "0" },
+    }).toObject() as MessageV2.APIError
+
     const run = Effect.gen(function* () {
       runs += 1
-      return yield* Effect.fail(apiError({ "retry-after-ms": "0" }))
+      return yield* Effect.fail(httpErr)
     }).pipe(
       Effect.retry(
         SessionRetry.policy({
@@ -140,6 +147,37 @@ describe("session.retry.delay", () => {
     expect(Exit.isFailure(result)).toBe(true)
     expect(set).toBe(SessionRetry.RETRY_MAX_ATTEMPTS)
     expect(runs).toBe(SessionRetry.RETRY_MAX_ATTEMPTS + 1)
+  })
+
+  test("policy caps stream-origin retries at RETRY_MAX_ATTEMPTS_STREAM", async () => {
+    let runs = 0
+    let set = 0
+
+    const streamErr = new MessageV2.APIError({
+      message: "api_error: Internal server error",
+      isRetryable: true,
+      responseBody: '{"type":"error","error":{"type":"api_error","message":"Internal server error"}}',
+    }).toObject() as MessageV2.APIError
+
+    const run = Effect.gen(function* () {
+      runs += 1
+      return yield* Effect.fail(streamErr)
+    }).pipe(
+      Effect.retry(
+        SessionRetry.policy({
+          parse: (err) => err as MessageV2.APIError,
+          set: () =>
+            Effect.sync(() => {
+              set += 1
+            }),
+        }),
+      ),
+    )
+
+    const result = await Effect.runPromiseExit(run)
+    expect(Exit.isFailure(result)).toBe(true)
+    expect(set).toBe(SessionRetry.RETRY_MAX_ATTEMPTS_STREAM)
+    expect(runs).toBe(SessionRetry.RETRY_MAX_ATTEMPTS_STREAM + 1)
   })
 })
 

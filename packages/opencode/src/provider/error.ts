@@ -112,7 +112,7 @@ export namespace ProviderError {
     | {
         type: "api_error"
         message: string
-        isRetryable: false
+        isRetryable: boolean
         responseBody: string
       }
 
@@ -164,10 +164,15 @@ export namespace ProviderError {
     const prefix = parts.length ? parts.join("/") + ": " : ""
     const msg = typeof errMsg === "string" ? `${prefix}${errMsg}` : prefix || responseBody
 
+    // Transient server-side SSE errors should be retried. Other error types
+    // (invalid_request_error, authentication_error, permission_error,
+    // not_found_error, etc.) are deterministic and must not retry.
+    const transient = errType === "api_error" || errType === "overloaded_error" || errType === "rate_limit_error"
+
     return {
       type: "api_error",
       message: msg,
-      isRetryable: false,
+      isRetryable: transient,
       responseBody,
     }
   }
