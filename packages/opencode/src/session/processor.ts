@@ -790,12 +790,17 @@ export namespace SessionProcessor {
             const part = match.part
             const end = Date.now()
             const metadata = "metadata" in part.state && isRecord(part.state.metadata) ? part.state.metadata : {}
+            const error = !DetachedNotes.isDetaching(ctx.sessionID)
+              ? "Tool execution aborted"
+              : metadata.sessionId
+                ? `(background) task_id: ${metadata.sessionId}`
+                : "(background)"
             yield* session.updatePart({
               ...part,
               state: {
                 ...part.state,
                 status: "error",
-                error: DetachedNotes.isDetaching(ctx.sessionID) ? "(background)" : "Tool execution aborted",
+                error,
                 metadata: { ...metadata, interrupted: true },
                 time: { start: "time" in part.state ? part.state.time.start : end, end },
               },
