@@ -61,6 +61,10 @@ import { ModelID, ProviderID } from "./schema"
 export namespace Provider {
   const log = Log.create({ service: "provider" })
 
+  /** Default SSE chunk inactivity timeout (ms). If no bytes arrive within this
+   *  window the stream is aborted and the request retried. */
+  const DEFAULT_CHUNK_TIMEOUT = 60_000
+
   function shouldUseCopilotResponsesApi(modelID: string): boolean {
     const match = /^gpt-(\d+)/.exec(modelID)
     if (!match) return false
@@ -944,6 +948,7 @@ export namespace Provider {
     sdk: Map<string, BundledSDK>
     modelLoaders: Record<string, CustomModelLoader>
     varsLoaders: Record<string, CustomVarsLoader>
+    streamIdleTimeout: number | false
   }
 
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Provider") {}
@@ -1393,6 +1398,7 @@ export namespace Provider {
             sdk,
             modelLoaders,
             varsLoaders,
+            streamIdleTimeout: cfg.stream_idle_timeout ?? DEFAULT_CHUNK_TIMEOUT,
           }
         }),
       )
@@ -1455,7 +1461,7 @@ export namespace Provider {
           if (existing) return existing
 
           const customFetch = options["fetch"]
-          const chunkTimeout = options["chunkTimeout"]
+          const chunkTimeout = options["chunkTimeout"] ?? s.streamIdleTimeout
           delete options["chunkTimeout"]
 
           options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {

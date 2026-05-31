@@ -1242,6 +1242,12 @@ export namespace Config {
         .describe(
           "Thresholds for truncating tool output. When output exceeds either limit, the full text is written to the truncation directory and a preview is returned.",
         ),
+      stream_idle_timeout: z
+        .union([z.number().int().positive(), z.literal(false)])
+        .optional()
+        .describe(
+          "Timeout in milliseconds with no SSE data before aborting and retrying the stream. Default is 60000 (60s). Set to false to disable. Per-provider chunkTimeout overrides this.",
+        ),
       compaction: z
         .object({
           auto: z.boolean().optional().describe("Enable automatic compaction when context is full (default: true)"),

@@ -1140,6 +1140,14 @@ export namespace MessageV2 {
           },
           { cause: e },
         ).toObject()
+      case e instanceof Error && e.message === "SSE read timed out":
+        return new MessageV2.APIError(
+          {
+            message: "Stream stalled (no data received)",
+            isRetryable: true,
+          },
+          { cause: e },
+        ).toObject()
       case e instanceof Error && (e as FetchDecompressionError).code === "ZlibError":
         if (ctx.aborted) {
           return new MessageV2.AbortedError({ message: e.message }, { cause: e }).toObject()
