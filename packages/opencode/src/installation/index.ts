@@ -5,6 +5,7 @@ import { makeRuntime } from "@/effect/run-service"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import path from "path"
+import fs from "fs/promises"
 import z from "zod"
 import { BusEvent } from "@/bus/bus-event"
 import { Flag } from "../flag/flag"
@@ -144,23 +145,31 @@ export namespace Installation {
           return "opencode"
         })
 
+        const GITHUB_REPO = "sdeonvacation/opencode-x"
+
+        function assetName() {
+          const platform = process.platform === "win32" ? "windows" : process.platform
+          const arch = process.arch === "arm64" ? "arm64" : "x64"
+          const ext = process.platform === "win32" ? ".exe" : ""
+          return `opencode-x-${platform}-${arch}${ext}`
+        }
+
         const upgradeCurl = Effect.fnUntraced(
           function* (target: string) {
-            const response = yield* httpOk.execute(HttpClientRequest.get("https://opencode.ai/install"))
-            const body = yield* response.text
-            const bodyBytes = new TextEncoder().encode(body)
-            const proc = ChildProcess.make("bash", [], {
-              stdin: Stream.make(bodyBytes),
-              env: { VERSION: target },
-              extendEnv: true,
-            })
-            const handle = yield* spawner.spawn(proc)
-            const [stdout, stderr] = yield* Effect.all(
-              [Stream.mkString(Stream.decodeText(handle.stdout)), Stream.mkString(Stream.decodeText(handle.stderr))],
-              { concurrency: 2 },
+            const name = assetName()
+            const url = `https://github.com/${GITHUB_REPO}/releases/download/v${target}/${name}`
+            log.info("downloading binary", { url })
+            const response = yield* httpOk.execute(
+              HttpClientRequest.get(url).pipe(HttpClientRequest.setHeader("Accept", "application/octet-stream")),
             )
-            const code = yield* handle.exitCode
-            return { code, stdout, stderr }
+            const bytes = yield* response.arrayBuffer
+            const dest = process.execPath
+            const tmp = dest + ".tmp"
+            yield* Effect.promise(() => fs.writeFile(tmp, Buffer.from(bytes)))
+            yield* Effect.promise(() => fs.chmod(tmp, 0o755))
+            yield* Effect.promise(() => fs.rename(tmp, dest))
+            log.info("upgraded binary", { dest, size: bytes.byteLength })
+            return { code: ChildProcessSpawner.ExitCode(0), stdout: `Installed ${name} v${target}`, stderr: "" }
           },
           Effect.scoped,
           Effect.orDie,
@@ -253,7 +262,7 @@ export namespace Installation {
           }
 
           const response = yield* httpOk.execute(
-            HttpClientRequest.get("https://api.github.com/repos/sdeonvacation/opencode-x/releases/latest").pipe(
+            HttpClientRequest.get(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`).pipe(
               HttpClientRequest.acceptJson,
             ),
           )
