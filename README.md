@@ -10,6 +10,42 @@ Built on top of [opencode](https://github.com/anomalyco/opencode) — adds Claud
 
 ---
 
+## Install
+
+Download the binary for your platform from [Releases](https://github.com/sdeonvacation/opencode-x/releases/latest):
+
+| Asset                          | Platform                  |
+| ------------------------------ | ------------------------- |
+| `opencode-x-darwin-arm64`      | macOS Apple Silicon       |
+| `opencode-x-darwin-x64`        | macOS Intel               |
+| `opencode-x-linux-arm64`       | Linux arm64 (glibc)       |
+| `opencode-x-linux-x64`         | Linux x64 (glibc)         |
+| `opencode-x-linux-arm64-musl`  | Linux arm64 (Alpine/musl) |
+| `opencode-x-linux-x64-musl`    | Linux x64 (Alpine/musl)   |
+| `opencode-x-windows-arm64.exe` | Windows arm64             |
+| `opencode-x-windows-x64.exe`   | Windows x64               |
+
+```bash
+# macOS / Linux
+chmod +x opencode-x-<platform>
+sudo mv opencode-x-<platform> /usr/local/bin/opencode-x
+
+# Windows (PowerShell as Admin)
+move opencode-x-windows-x64.exe C:\Windows\opencode-x.exe
+
+# Run
+opencode-x
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/sdeonvacation/opencode-x
+cd opencode-x && bun install
+./packages/opencode/script/build.ts --single
+# Binary at: packages/opencode/dist/opencode-$(uname -s | tr A-Z a-z)-$(uname -m)/bin/opencode
+```
+
 ## What OpenCode X Adds (vs. Upstream + Claude Code)
 
 | Feature                                     | **OpenCode X**                                                                                                                                          | **Upstream OpenCode**                         | **Claude Code**                                     |
@@ -168,24 +204,6 @@ Rolling head+tail split. Summary cached by boundary position. Only re-summarizes
 - **Doom Loop Detector** — ring-buffer hash; aborts after N identical consecutive tool calls
 - **Per-model Concurrency** — prevents thundering-herd on rate-limited endpoints
 
-### Orchestration
-
-```json
-{
-  "experimental": {
-    "loop_detector_threshold": 5,
-    "max_subagent_depth": 3,
-    "max_subagent_descendants": 50,
-    "model_concurrency": { "anthropic:claude-sonnet-4-6": 2 },
-    "subagent_timeout": 300000,
-    "parallel_tool_calls": true,
-    "task_categories": {
-      "cheap": { "providerID": "opencode-go", "modelID": "minimax-m2.5" }
-    },
-    "ultrawork_model": { "providerID": "anthropic", "modelID": "claude-sonnet-4-6" }
-  }
-}
-```
 
 ### Slash Commands
 
@@ -210,44 +228,6 @@ A creative random pool for global spinner rotation ("Sherlocking…", "Overthink
 ### Easter Egg
 
 Clicking the opencode logo plays 3 variations of the _faaaaah_ sound.
-
----
-
-## Install
-
-Download the binary for your platform from [Releases](https://github.com/sdeonvacation/opencode-x/releases/latest):
-
-| Asset                          | Platform                  |
-| ------------------------------ | ------------------------- |
-| `opencode-x-darwin-arm64`      | macOS Apple Silicon       |
-| `opencode-x-darwin-x64`        | macOS Intel               |
-| `opencode-x-linux-arm64`       | Linux arm64 (glibc)       |
-| `opencode-x-linux-x64`         | Linux x64 (glibc)         |
-| `opencode-x-linux-arm64-musl`  | Linux arm64 (Alpine/musl) |
-| `opencode-x-linux-x64-musl`    | Linux x64 (Alpine/musl)   |
-| `opencode-x-windows-arm64.exe` | Windows arm64             |
-| `opencode-x-windows-x64.exe`   | Windows x64               |
-
-```bash
-# macOS / Linux
-chmod +x opencode-x-<platform>
-sudo mv opencode-x-<platform> /usr/local/bin/opencode-x
-
-# Windows (PowerShell as Admin)
-move opencode-x-windows-x64.exe C:\Windows\opencode-x.exe
-
-# Run
-opencode-x
-```
-
-### Build from Source
-
-```bash
-git clone https://github.com/sdeonvacation/opencode-x
-cd opencode-x && bun install
-./packages/opencode/script/build.ts --single
-# Binary at: packages/opencode/dist/opencode-$(uname -s | tr A-Z a-z)-$(uname -m)/bin/opencode
-```
 
 ### Development
 
