@@ -915,6 +915,36 @@ OPENCODE_EXPERIMENTAL_SLIDING_WINDOW=1 opencode
 
 Token savings per session are tracked and visible in the TUI status dialog (`/status`).
 
+### Stream Idle Timeout
+
+Controls how long to wait for SSE data before aborting and retrying a stalled LLM stream. Prevents subagents from hanging indefinitely when a provider stream goes silent.
+
+```json
+{
+  "stream_idle_timeout": 60000
+}
+```
+
+| Value             | Behavior                                          |
+| ----------------- | ------------------------------------------------- |
+| `60000` (default) | Abort after 60s with no data, retry up to 3 times |
+| any positive int  | Custom timeout in milliseconds                    |
+| `false`           | Disable stream idle timeout entirely              |
+
+Per-provider override via `chunkTimeout` in provider options:
+
+```json
+{
+  "provider": {
+    "anthropic": {
+      "options": { "chunkTimeout": 90000 }
+    }
+  }
+}
+```
+
+Precedence: per-provider `chunkTimeout` > global `stream_idle_timeout` > default (60s).
+
 ### Experimental Features
 
 ```json
