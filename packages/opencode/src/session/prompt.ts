@@ -1666,6 +1666,25 @@ export namespace SessionPrompt {
               !hasToolCalls &&
               lastUser.id < lastAssistant.id
             ) {
+              // Goal auto-continuation: if goal active + under budget, inject continuation
+              // instead of exiting the loop.
+              const exitCfg = yield* config.get()
+              if (exitCfg.experimental?.goal_system !== false) {
+                const goal = Goal.get(sessionID)
+                if (goal && GoalLoop.shouldContinue({ goal, step })) {
+                  Goal.tick({ id: goal.id, tokens: lastFinished?.tokens?.input ?? 0, turns: 1 })
+                  const updated = Goal.get(sessionID)
+                  if (updated && updated.status === "active") {
+                    yield* createUserMessage({
+                      sessionID,
+                      agent: lastUser.agent,
+                      model: lastUser.model,
+                      parts: [{ type: "text", text: GoalLoop.continuation(updated) }],
+                    })
+                    continue
+                  }
+                }
+              }
               const orphaned = lastAssistantMsg?.parts.filter(
                 (part) => part.type === "tool" && part.state.status === "error" && part.state.metadata?.interrupted,
               ).length
