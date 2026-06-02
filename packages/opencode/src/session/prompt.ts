@@ -1679,7 +1679,7 @@ export namespace SessionPrompt {
                       sessionID,
                       agent: lastUser.agent,
                       model: lastUser.model,
-                      parts: [{ type: "text", text: GoalLoop.continuation(updated) }],
+                      parts: [{ type: "text", text: GoalLoop.continuation(updated), synthetic: true }],
                     })
                     continue
                   }
@@ -2175,7 +2175,7 @@ export namespace SessionPrompt {
                       sessionID,
                       agent: lastUser.agent,
                       model: lastUser.model,
-                      parts: [{ type: "text", text: GoalLoop.continuation(updated) }],
+                      parts: [{ type: "text", text: GoalLoop.continuation(updated), synthetic: true }],
                     })
                     continue
                   }
