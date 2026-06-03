@@ -15,12 +15,65 @@ import { Effect, Layer, ScopedCache, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { SessionStatus } from "@/session/status"
+import { Global } from "../global"
+import fs from "fs/promises"
+import { writeFileSync } from "node:fs"
 
 export namespace LSP {
   const log = Log.create({ service: "lsp" })
 
   // Backstop: track all spawned LSP PIDs for emergency cleanup
   const pids = new Set<number>()
+
+  // PID file for cross-session cleanup of orphaned LSP processes
+  const pidFile = path.join(Global.Path.state, "lsp-pids.json")
+
+  async function persistPids() {
+    try {
+      await fs.writeFile(pidFile, JSON.stringify([...pids]))
+    } catch {}
+  }
+
+  function isProcessAlive(pid: number) {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Kill orphaned LSP processes from prior sessions */
+  export async function killOrphans() {
+    try {
+      const data = await fs.readFile(pidFile, "utf-8")
+      const stale: number[] = JSON.parse(data)
+      for (const pid of stale) {
+        if (pids.has(pid)) continue
+        if (!isProcessAlive(pid)) continue
+        log.info("killing orphaned LSP process", { pid })
+        try {
+          process.kill(-pid, "SIGKILL")
+        } catch {
+          try {
+            process.kill(pid, "SIGKILL")
+          } catch {}
+        }
+      }
+    } catch {}
+    await persistPids()
+
+    // Clean up legacy temp dirs from prior versions that used mkdtemp
+    try {
+      const { tmpdir } = await import("os")
+      const tmp = tmpdir()
+      const entries = await fs.readdir(tmp)
+      for (const entry of entries) {
+        if (!entry.startsWith("opencode-jdtls-data")) continue
+        await fs.rm(path.join(tmp, entry), { recursive: true, force: true }).catch(() => {})
+      }
+    } catch {}
+  }
 
   export function killAll() {
     for (const pid of pids) {
@@ -33,6 +86,10 @@ export namespace LSP {
       }
     }
     pids.clear()
+    // Best-effort sync clear of PID file
+    try {
+      writeFileSync(pidFile, "[]")
+    } catch {}
   }
 
   export const Event = {
@@ -236,28 +293,50 @@ export namespace LSP {
           yield* Effect.addFinalizer(() =>
             Effect.promise(async () => {
               s.disposing = true
-              // Wait for in-flight spawns to settle so their processes don't leak
-              if (s.spawning.size > 0) {
-                const inflight = [...s.spawning.values()]
-                const spawned = await Promise.allSettled(inflight)
-                // Any successfully spawned clients not yet in s.clients need shutdown too
-                for (const result of spawned) {
-                  if (result.status !== "fulfilled" || !result.value) continue
-                  if (!s.clients.includes(result.value)) {
-                    s.clients.push(result.value)
+
+              const graceful = async () => {
+                // Wait for in-flight spawns to settle so their processes don't leak
+                if (s.spawning.size > 0) {
+                  const inflight = [...s.spawning.values()]
+                  const spawned = await Promise.allSettled(inflight)
+                  // Any successfully spawned clients not yet in s.clients need shutdown too
+                  for (const result of spawned) {
+                    if (result.status !== "fulfilled" || !result.value) continue
+                    if (!s.clients.includes(result.value)) {
+                      s.clients.push(result.value)
+                    }
                   }
                 }
-              }
-              const results = await Promise.allSettled(s.clients.map((client) => client.shutdown()))
-              results.forEach((result, index) => {
-                if (result.status === "fulfilled") return
-                const client = s.clients[index]
-                log.warn("failed to shutdown lsp client", {
-                  error: result.reason,
-                  serverID: client?.serverID,
-                  root: client?.root,
+                const results = await Promise.allSettled(s.clients.map((client) => client.shutdown()))
+                results.forEach((result, index) => {
+                  if (result.status === "fulfilled") return
+                  const client = s.clients[index]
+                  log.warn("failed to shutdown lsp client", {
+                    error: result.reason,
+                    serverID: client?.serverID,
+                    root: client?.root,
+                  })
                 })
-              })
+              }
+
+              const deadline = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 10_000))
+              const result = await Promise.race([graceful().then(() => "done" as const), deadline])
+
+              if (result === "timeout") {
+                log.warn("LSP graceful shutdown timed out after 10s, force-killing remaining processes")
+              }
+
+              // Force-kill any survivors regardless of graceful outcome
+              for (const pid of pids) {
+                try {
+                  process.kill(-pid, "SIGKILL")
+                } catch {
+                  try {
+                    process.kill(pid, "SIGKILL")
+                  } catch {}
+                }
+              }
+              pids.clear()
             }),
           )
 
@@ -339,7 +418,11 @@ export namespace LSP {
             if (handle.process.pid) {
               const pid = handle.process.pid
               pids.add(pid)
-              handle.process.once("exit", () => pids.delete(pid))
+              persistPids()
+              handle.process.once("exit", () => {
+                pids.delete(pid)
+                persistPids()
+              })
             }
             log.info("spawned lsp server", { serverID: server.id, root })
 
@@ -419,6 +502,7 @@ export namespace LSP {
       })
 
       const init = Effect.fn("LSP.init")(function* () {
+        yield* Effect.promise(() => killOrphans())
         yield* InstanceState.get(state)
       })
 

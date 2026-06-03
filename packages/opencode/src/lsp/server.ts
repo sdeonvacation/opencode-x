@@ -1,6 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from "child_process"
 import path from "path"
-import os from "os"
 import { Global } from "../global"
 import { Log } from "../util/log"
 import { text } from "node:stream/consumers"
@@ -14,6 +13,7 @@ import { which } from "../util/which"
 import { Module } from "@opencode-ai/util/module"
 import { spawn } from "./launch"
 import { Npm } from "@/npm"
+import { Hash } from "../util/hash"
 
 export namespace LSPServer {
   const log = Log.create({ service: "lsp.server" })
@@ -1163,7 +1163,8 @@ export namespace LSPServer {
           }
         })(),
       )
-      const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-jdtls-data"))
+      const dataDir = path.join(Global.Path.data, "jdtls-data", Hash.fast(root).slice(0, 12))
+      await fs.mkdir(dataDir, { recursive: true })
       return {
         process: spawn(
           java,

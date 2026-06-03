@@ -166,13 +166,21 @@ export const TuiThreadCommand = cmd({
         process.off("uncaughtException", error)
         process.off("unhandledRejection", error)
         process.off("SIGUSR2", reload)
-        await withTimeout(client.call("shutdown", undefined), 5000).catch((error) => {
+        signals.forEach((sig) => process.off(sig, onSignal))
+        await withTimeout(client.call("shutdown", undefined), 15_000).catch((error) => {
           Log.Default.warn("worker shutdown failed", {
             error: errorMessage(error),
           })
         })
         worker.terminate()
       }
+
+      // Graceful shutdown on terminal signals
+      const onSignal = () => {
+        stop().finally(() => process.exit(0))
+      }
+      const signals: NodeJS.Signals[] = ["SIGTERM", "SIGINT", "SIGHUP"]
+      signals.forEach((sig) => process.on(sig, onSignal))
 
       const prompt = await input(args.prompt)
       const config = await Instance.provide({
