@@ -543,6 +543,7 @@ export namespace SessionPrompt {
                       typeof hookResult.updatedInput === "object" &&
                       !Array.isArray(hookResult.updatedInput)
                     ) {
+                      ctx.extra!.preHookInput = args
                       args = hookResult.updatedInput as typeof args
                       yield* input.processor.updateToolCall(options.toolCallId, (match) => {
                         if (!["running", "pending"].includes(match.state.status)) return match

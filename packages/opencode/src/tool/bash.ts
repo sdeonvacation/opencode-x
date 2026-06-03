@@ -599,8 +599,11 @@ export const BashTool = Tool.define(
             "Unable to analyze this shell command safely for permission checks. Rewrite as a single-line command.",
           )
         }
-        const scan = await collect(root, cwd, ps, shell)
-        if (params.command.trim() && noncwd(root, ps) && scan.patterns.size === 0) {
+        // Permission scan uses pre-hook command so agent allowlists match what LLM requested
+        const permCommand = (ctx.extra?.preHookInput as any)?.command as string | undefined
+        const permRoot = permCommand ? await parse(permCommand, ps) : root
+        const scan = await collect(permRoot, cwd, ps, shell)
+        if (params.command.trim() && noncwd(permRoot, ps) && scan.patterns.size === 0) {
           throw new Error(
             "Unable to derive permission patterns from this shell command. Rewrite as a single-line command.",
           )
