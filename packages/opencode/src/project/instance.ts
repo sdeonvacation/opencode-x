@@ -86,6 +86,17 @@ export const Instance = {
   },
 
   /**
+   * Base directory for computing permission-check relative paths.
+   * Uses worktree when VCS is present; falls back to directory for non-VCS projects
+   * (where worktree is "/") so that user-configured patterns like "plans/*.md"
+   * resolve correctly relative to the project root.
+   */
+  get permissionBase() {
+    const ctx = context.use()
+    return ctx.worktree === "/" ? ctx.directory : ctx.worktree
+  },
+
+  /**
    * Check if a path is within the project boundary.
    * Returns true if path is inside Instance.directory OR Instance.worktree.
    * Paths within the worktree but outside the working directory should not trigger external_directory permission.

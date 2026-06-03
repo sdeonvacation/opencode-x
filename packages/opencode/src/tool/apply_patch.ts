@@ -172,7 +172,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
     // Build per-file metadata for UI rendering (used for both permission and result)
     const files = fileChanges.map((change) => ({
       filePath: change.filePath,
-      relativePath: path.relative(Instance.worktree, change.movePath ?? change.filePath).replaceAll("\\", "/"),
+      relativePath: path.relative(Instance.permissionBase, change.movePath ?? change.filePath).replaceAll("\\", "/"),
       type: change.type,
       patch: change.diff,
       additions: change.additions,
@@ -181,7 +181,9 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
     }))
 
     // Check permissions if needed
-    const relativePaths = fileChanges.map((c) => path.relative(Instance.worktree, c.filePath).replaceAll("\\", "/"))
+    const relativePaths = fileChanges.map((c) =>
+      path.relative(Instance.permissionBase, c.filePath).replaceAll("\\", "/"),
+    )
     await ctx.ask({
       permission: "edit",
       patterns: relativePaths,
