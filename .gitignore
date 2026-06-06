@@ -1,6 +1,7 @@
 .DS_Store
 node_modules
 packages/opencode/bin/.opencode
+.artifacts
 .worktrees
 .sst
 .env
