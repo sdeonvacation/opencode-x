@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Effect } from "effect"
+import { ConfigProvider, Effect, Layer } from "effect"
 import { Service, layer, defaultLayer, type Info } from "../../src/effect/runtime-flags"
 
 describe("RuntimeFlags", () => {
@@ -74,5 +74,23 @@ describe("RuntimeFlags", () => {
       client: "cli",
     }
     expect(info.client).toBe("cli")
+  })
+
+  test("individual experimental flag=false overrides umbrella=true", async () => {
+    const provider = ConfigProvider.fromUnknown({
+      OPENCODE_EXPERIMENTAL: "true",
+      OPENCODE_EXPERIMENTAL_WORKSPACES: "false",
+    })
+    const flags = await Effect.gen(function* () {
+      return yield* Service
+    }).pipe(
+      Effect.provide(Service.defaultLayer.pipe(Layer.provide(ConfigProvider.layer(provider)), Layer.orDie)),
+      Effect.runPromise,
+    )
+
+    expect(flags.experimentalWorkspaces).toBe(false)
+    // other experimental flags still inherit umbrella=true
+    expect(flags.experimentalPlanMode).toBe(true)
+    expect(flags.experimentalBackgroundSubagents).toBe(true)
   })
 })
