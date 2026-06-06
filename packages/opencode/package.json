@@ -4,6 +4,13 @@
   "name": "@sdeonvacation/opencode-x",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sdeonvacation/opencode-x"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "private": false,
   "scripts": {
     "typecheck": "tsgo --noEmit",
