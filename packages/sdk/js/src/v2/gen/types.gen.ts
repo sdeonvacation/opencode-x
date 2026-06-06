@@ -1340,9 +1340,11 @@ export type AgentConfig = {
   /**
    * @deprecated Use 'permission' field instead
    */
-  tools?: {
-    [key: string]: boolean
-  }
+  tools?:
+    | {
+        [key: string]: boolean
+      }
+    | Array<string>
   disable?: boolean
   /**
    * Description of when to use the agent
@@ -1380,6 +1382,7 @@ export type AgentConfig = {
     | {
         [key: string]: boolean
       }
+    | Array<string>
     | boolean
     | "subagent"
     | "primary"
@@ -1544,6 +1547,10 @@ export type McpOAuthConfig = {
    * OAuth scopes to request during authorization
    */
   scope?: string
+  /**
+   * Port for the local OAuth callback server (default: 19876). Shorthand for redirectUri when only the port needs changing. Ignored if redirectUri is set.
+   */
+  callbackPort?: number
   /**
    * OAuth redirect URI (default: http://127.0.0.1:19876/mcp/oauth/callback).
    */
@@ -1828,6 +1835,23 @@ export type Config = {
      */
     url?: string
   }
+  /**
+   * Thresholds for truncating tool output. When output exceeds either limit, the full text is written to the truncation directory and a preview is returned.
+   */
+  tool_output?: {
+    /**
+     * Maximum lines of tool output before it is truncated and saved to disk (default: 2000)
+     */
+    max_lines?: number
+    /**
+     * Maximum bytes of tool output before it is truncated and saved to disk (default: 51200)
+     */
+    max_bytes?: number
+  }
+  /**
+   * Timeout in milliseconds with no SSE data before aborting and retrying the stream. Default is 60000 (60s). Set to false to disable. Per-provider chunkTimeout overrides this.
+   */
+  stream_idle_timeout?: number | false
   compaction?: {
     /**
      * Enable automatic compaction when context is full (default: true)
@@ -3179,6 +3203,10 @@ export type PtyUpdateErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
 }
 
 export type PtyUpdateError = PtyUpdateErrors[keyof PtyUpdateErrors]
@@ -6202,6 +6230,9 @@ export type AppSkillsResponses = {
     description: string
     location: string
     content: string
+    whenToUse?: string
+    disableModelInvocation?: boolean
+    paths?: Array<string>
   }>
 }
 
