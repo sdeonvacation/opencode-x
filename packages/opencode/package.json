@@ -21,11 +21,11 @@
     "upgrade-opentui": "bun run script/upgrade-opentui.ts",
     "dev": "bun run --conditions=browser ./src/index.ts",
     "db": "bun drizzle-kit",
-    "postinstall": "node bin/postinstall.js"
+    "postinstall": "node bin/postinstall.cjs"
   },
   "files": [
     "bin/opencode",
-    "bin/postinstall.js",
+    "bin/postinstall.cjs",
     "package.json",
     "README.md"
   ],

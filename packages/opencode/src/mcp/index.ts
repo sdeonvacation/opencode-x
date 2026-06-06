@@ -722,6 +722,7 @@ export namespace MCP {
 
 			const createAndStore = Effect.fn("MCP.createAndStore")(function* (name: string, mcp: Config.Mcp) {
 				const s = yield* InstanceState.get(state);
+				s.discovered[name] = mcp;
 				const result = yield* create(name, mcp);
 
 				s.status[name] = result.status;

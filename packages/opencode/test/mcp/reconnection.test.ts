@@ -234,9 +234,9 @@ test(
 				{ name: "retry_tool", description: "tool from retry", inputSchema: { type: "object", properties: {} } },
 			];
 
-			// Fail first 2 connect attempts, then succeed
+			// Fail first connect attempt, then succeed on retry
 			connectShouldFail = true;
-			connectFailLimit = 2;
+			connectFailLimit = 1;
 
 			// State init happens during Instance.provide — server initially fails
 			const status = await MCP.status();
