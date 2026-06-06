@@ -163,7 +163,13 @@ export namespace Filesystem {
   }
 
   export function contains(parent: string, child: string) {
-    return !relative(parent, child).startsWith("..")
+    const p = pathResolve(parent);
+    const c = pathResolve(child);
+    if (process.platform === "win32") {
+      if (p[1] === ":" && c[1] === ":" && p[0].toLowerCase() !== c[0].toLowerCase()) return false;
+      if (!c.match(/^[a-zA-Z]:/) && c.startsWith("/")) return false;
+    }
+    return !relative(p, c).startsWith("..");
   }
 
   export async function findUp(

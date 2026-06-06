@@ -149,6 +149,7 @@ export namespace Config {
   }
 
   export async function installDependencies(dir: string, input?: InstallInput) {
+    if (process.env.OPENCODE_SKIP_INSTALL) return;
     if (!(await isWritable(dir))) return
     await using _ = await Flock.acquire(`config-install:${Filesystem.resolve(dir)}`, {
       signal: input?.signal,
