@@ -69,7 +69,7 @@ jobs:
         run: bun turbo test:ci
         env:
           OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
-          OPENCODE_SKIP_INSTALL: "1"
+          OPENCODE_SKIP_INSTALL: ${{ runner.os == 'Windows' && '1' || '' }}
 
       - name: Publish unit reports
         if: always()
