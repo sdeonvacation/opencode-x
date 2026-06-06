@@ -1045,7 +1045,8 @@ export namespace ProviderTransform {
         if (
           input.model.api.npm === "@ai-sdk/openai" ||
           input.model.api.npm === "@ai-sdk/azure" ||
-          input.model.api.npm === "@ai-sdk/github-copilot"
+          input.model.api.npm === "@ai-sdk/github-copilot" ||
+          input.model.api.npm === "@ai-sdk/amazon-bedrock/mantle"
         ) {
           result["reasoningSummary"] = "auto"
         }
