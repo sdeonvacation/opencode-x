@@ -286,6 +286,124 @@ describe("BackgroundJob", () => {
     }
   })
 
+  test("extend adds continuation to running job", async () => {
+    await using tmp = await tmpdir()
+    const rt = setup()
+    try {
+      await run(
+        rt,
+        tmp.path,
+        BackgroundJob.Service.use((svc) =>
+          Effect.gen(function* () {
+            const first = yield* Deferred.make<void>()
+            const second = yield* Deferred.make<void>()
+            const info = yield* svc.start({
+              type: "extend-test",
+              run: Deferred.await(first).pipe(Effect.as("first")),
+            })
+            const extended = yield* svc.extend({
+              id: info.id,
+              run: Deferred.await(second).pipe(Effect.as("second")),
+            })
+            expect(extended).toBe(true)
+
+            // First completes but job stays running because extension pending
+            yield* Deferred.succeed(first, undefined)
+            yield* Effect.yieldNow
+            const mid = yield* svc.get(info.id)
+            expect(mid!.status).toBe("running")
+
+            // Extension completes, job finishes with latest output
+            yield* Deferred.succeed(second, undefined)
+            const result = yield* svc.wait({ id: info.id })
+            expect(result.info!.status).toBe("completed")
+            expect(result.info!.output).toBe("second")
+          }),
+        ),
+      )
+    } finally {
+      await rt.dispose()
+    }
+  })
+
+  test("extend returns false for non-running job", async () => {
+    await using tmp = await tmpdir()
+    const rt = setup()
+    try {
+      await run(
+        rt,
+        tmp.path,
+        BackgroundJob.Service.use((svc) =>
+          Effect.gen(function* () {
+            const info = yield* svc.start({
+              type: "done-job",
+              run: Effect.succeed("done"),
+            })
+            yield* svc.wait({ id: info.id })
+            const extended = yield* svc.extend({
+              id: info.id,
+              run: Effect.succeed("late"),
+            })
+            expect(extended).toBe(false)
+          }),
+        ),
+      )
+    } finally {
+      await rt.dispose()
+    }
+  })
+
+  test("extend returns false for unknown id", async () => {
+    await using tmp = await tmpdir()
+    const rt = setup()
+    try {
+      await run(
+        rt,
+        tmp.path,
+        BackgroundJob.Service.use((svc) =>
+          Effect.gen(function* () {
+            const extended = yield* svc.extend({
+              id: "job_unknown",
+              run: Effect.succeed("nope"),
+            })
+            expect(extended).toBe(false)
+          }),
+        ),
+      )
+    } finally {
+      await rt.dispose()
+    }
+  })
+
+  test("cancel interrupts both original and extended fibers", async () => {
+    await using tmp = await tmpdir()
+    const rt = setup()
+    try {
+      await run(
+        rt,
+        tmp.path,
+        BackgroundJob.Service.use((svc) =>
+          Effect.gen(function* () {
+            const gate = yield* Deferred.make<void>()
+            const info = yield* svc.start({
+              type: "cancel-ext",
+              run: Deferred.await(gate).pipe(Effect.as("never")),
+            })
+            yield* svc.extend({
+              id: info.id,
+              run: Deferred.await(gate).pipe(Effect.as("also-never")),
+            })
+            const cancelled = yield* svc.cancel(info.id)
+            expect(cancelled).toBeDefined()
+            expect(cancelled!.status).toBe("cancelled")
+          }),
+        ),
+      )
+    } finally {
+      await rt.dispose()
+    }
+  })
+
   test("metadata is preserved in info", async () => {
     await using tmp = await tmpdir()
     const rt = setup()

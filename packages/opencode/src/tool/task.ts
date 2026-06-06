@@ -84,6 +84,17 @@ function backgroundOutput(sessionID: SessionID) {
   ].join("\n")
 }
 
+function backgroundUpdateOutput(sessionID: SessionID) {
+  return [
+    `task_id: ${sessionID} (for polling this task with task_status)`,
+    "state: running",
+    "",
+    "<task_result>",
+    "Additional context sent to the background task.",
+    "</task_result>",
+  ].join("\n")
+}
+
 function errorText(error: unknown) {
   if (error instanceof Error) return error.message
   return String(error)
@@ -193,11 +204,6 @@ export const TaskTool = Tool.defineEffect(
 
         // --- Background execution path ---
         if (runInBackground) {
-          const job = await bgRuntime.runPromise((svc) => svc.get(nextSession.id))
-          if (job?.status === "running") {
-            throw new Error(`Task ${nextSession.id} is already running. Use task_status to check progress.`)
-          }
-
           const runTask = async (): Promise<string> => {
             let worktree: OrchestrationWorktree.WorktreePath | undefined
             let worktreeCtx: InstanceContext | undefined
@@ -304,25 +310,42 @@ export const TaskTool = Tool.defineEffect(
             }
           })
 
+          const makeRun = () =>
+            Effect.tryPromise({
+              try: () => runTask(),
+              catch: (err) => err,
+            }).pipe(
+              Effect.tap((text) => Effect.promise(() => inject("completed", text)).pipe(Effect.ignore)),
+              Effect.catch((cause: unknown) =>
+                Effect.gen(function* () {
+                  const err = errorText(cause)
+                  yield* Effect.promise(() => inject("error", err)).pipe(Effect.ignore)
+                  return yield* Effect.fail(cause)
+                }),
+              ),
+            )
+
+          // If job already running and we have a task_id, extend instead of starting new
+          const job = await bgRuntime.runPromise((svc) => svc.get(nextSession.id))
+          if (job?.status === "running" && params.task_id) {
+            const extended = await bgRuntime.runPromise((svc) => svc.extend({ id: nextSession.id, run: makeRun() }))
+            if (extended) {
+              if (subagent.spawned) subagent.spawnInfo.release()
+              return {
+                title: params.description,
+                metadata: { ...metadata, background: true, jobId: nextSession.id },
+                output: backgroundUpdateOutput(nextSession.id),
+              }
+            }
+          }
+
           await bgRuntime.runPromise((svc) =>
             svc.start({
               id: nextSession.id,
               type: id,
               title: params.description,
               metadata,
-              run: Effect.tryPromise({
-                try: () => runTask(),
-                catch: (err) => err,
-              }).pipe(
-                Effect.tap((text) => Effect.promise(() => inject("completed", text)).pipe(Effect.ignore)),
-                Effect.catch((cause: unknown) =>
-                  Effect.gen(function* () {
-                    const err = errorText(cause)
-                    yield* Effect.promise(() => inject("error", err)).pipe(Effect.ignore)
-                    return yield* Effect.fail(cause)
-                  }),
-                ),
-              ),
+              run: makeRun(),
             }),
           )
 
