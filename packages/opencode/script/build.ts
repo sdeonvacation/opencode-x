@@ -166,9 +166,17 @@ await $`rm -rf dist`
 
 const binaries: Record<string, string> = {}
 if (!skipInstall) {
-  // Install platform-specific packages individually to avoid bun hanging on --os="*" --cpu="*"
-  // These packages should already be installed via the regular `bun install` at the root
-  console.log("Note: Skipping platform-specific reinstall. Run `bun install` at repo root if packages are missing.")
+  // Install platform-specific native packages per-target to avoid bun hanging on --os="*" --cpu="*"
+  const seen = new Set<string>()
+  for (const item of targets) {
+    const key = `${item.os}-${item.arch}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const os = item.os === "win32" ? "win32" : item.os
+    const arch = item.arch
+    console.log(`Installing native deps for ${os}-${arch}...`)
+    await $`bun install --os=${os} --cpu=${arch} @opentui/core@${pkg.dependencies["@opentui/core"]} @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`.nothrow()
+  }
 }
 for (const item of targets) {
   const name = [
