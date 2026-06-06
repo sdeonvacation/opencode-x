@@ -5,7 +5,8 @@ import { Bus } from "../bus"
 import { Log } from "../util/log"
 import { createOpencodeClient } from "@opencode-ai/sdk"
 import { Flag } from "../flag/flag"
-import { CodexAuthPlugin } from "./codex"
+import { CodexAuthPlugin } from "./openai/codex"
+import { CHANNEL } from "../installation/meta"
 import { Session } from "../session"
 import { NamedError } from "@opencode-ai/util/error"
 import { CopilotAuthPlugin } from "./github-copilot/copilot"
@@ -16,9 +17,14 @@ import { XaiAuthPlugin } from "./xai"
 import { Effect, Layer, ServiceMap, Stream } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
+import { Service as RuntimeFlagsTag, defaultLayer as runtimeFlagsDefaultLayer } from "@/effect/runtime-flags"
 import { errorMessage } from "@/util/error"
 import { PluginLoader } from "./loader"
 import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
+
+export function experimentalWebSocketsEnabled(input: { enabled: boolean; channel?: string }) {
+  return input.enabled || ["local", "dev", "beta"].includes(input.channel ?? CHANNEL)
+}
 
 export namespace Plugin {
   const log = Log.create({ service: "plugin" })
@@ -51,15 +57,23 @@ export namespace Plugin {
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Plugin") {}
 
   // Built-in plugins that are directly imported (not installed from npm)
-  const INTERNAL_PLUGINS: PluginInstance[] = [
-    CodexAuthPlugin,
-    CopilotAuthPlugin,
-    GitlabAuthPlugin,
-    PoeAuthPlugin,
-    CloudflareWorkersAuthPlugin,
-    CloudflareAIGatewayAuthPlugin,
-    XaiAuthPlugin,
-  ]
+  function internalPlugins(flags: {
+    experimentalWebSockets: boolean
+    disableDefaultPlugins?: boolean
+  }): PluginInstance[] {
+    return [
+      (input) =>
+        CodexAuthPlugin(input, {
+          experimentalWebSockets: experimentalWebSocketsEnabled({ enabled: flags.experimentalWebSockets }),
+        }),
+      CopilotAuthPlugin,
+      GitlabAuthPlugin,
+      PoeAuthPlugin,
+      CloudflareWorkersAuthPlugin,
+      CloudflareAIGatewayAuthPlugin,
+      XaiAuthPlugin,
+    ]
+  }
 
   function isServerPlugin(value: unknown): value is PluginInstance {
     return typeof value === "function"
@@ -109,6 +123,7 @@ export namespace Plugin {
     Effect.gen(function* () {
       const bus = yield* Bus.Service
       const config = yield* Config.Service
+      const flags = yield* RuntimeFlagsTag
 
       const state = yield* InstanceState.make<State>(
         Effect.fn("Plugin.state")(function* (ctx) {
@@ -139,7 +154,7 @@ export namespace Plugin {
             $: typeof Bun === "undefined" ? undefined : Bun.$,
           }
 
-          for (const plugin of INTERNAL_PLUGINS) {
+          for (const plugin of internalPlugins(flags)) {
             log.info("loading internal plugin", { name: plugin.name })
             const init = yield* Effect.tryPromise({
               try: () => plugin(input),
@@ -297,7 +312,11 @@ export namespace Plugin {
     }),
   )
 
-  export const defaultLayer = layer.pipe(Layer.provide(Bus.layer), Layer.provide(Config.defaultLayer))
+  export const defaultLayer = layer.pipe(
+    Layer.provide(Bus.layer),
+    Layer.provide(Config.defaultLayer),
+    Layer.provide(runtimeFlagsDefaultLayer),
+  )
   const { runPromise } = makeRuntime(Service, defaultLayer)
 
   export async function trigger<

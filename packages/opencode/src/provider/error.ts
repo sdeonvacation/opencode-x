@@ -224,4 +224,11 @@ export namespace ProviderError {
       metadata,
     }
   }
+
+  export class ResponseStreamError extends Error {
+    public override readonly name = "ResponseStreamError"
+    constructor(message: string, options?: ErrorOptions) {
+      super(message, options)
+    }
+  }
 }

@@ -24,6 +24,7 @@ describe("RuntimeFlags", () => {
     expect(flags.experimentalPlanMode).toBe(false)
     expect(flags.experimentalWorkspaces).toBe(false)
     expect(flags.experimentalIconDiscovery).toBe(false)
+    expect(flags.experimentalWebSockets).toBe(false)
     expect(flags.outputTokenMax).toBeUndefined()
     expect(flags.bashDefaultTimeoutMs).toBeUndefined()
     expect(flags.client).toBe("cli")
@@ -69,6 +70,7 @@ describe("RuntimeFlags", () => {
       experimentalPlanMode: false,
       experimentalWorkspaces: false,
       experimentalIconDiscovery: false,
+      experimentalWebSockets: false,
       outputTokenMax: undefined,
       bashDefaultTimeoutMs: undefined,
       client: "cli",
