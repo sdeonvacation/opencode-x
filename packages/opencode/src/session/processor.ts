@@ -815,6 +815,13 @@ export namespace SessionProcessor {
           log.error("process", { error: e, stack: e instanceof Error ? e.stack : undefined })
           const error = parse(e)
           if (MessageV2.ContextOverflowError.isInstance(error)) {
+            if ((yield* config.get()).compaction?.auto === false && !ctx.assistantMessage.summary) {
+              ctx.assistantMessage.error = error
+              ctx.assistantMessage.finish = "error"
+              yield* bus.publish(Session.Event.Error, { sessionID: ctx.sessionID, error })
+              yield* status.set(ctx.sessionID, { type: "idle" })
+              return
+            }
             ctx.needsCompaction = true
             yield* bus.publish(Session.Event.Error, { sessionID: ctx.sessionID, error })
             return

@@ -519,4 +519,73 @@ describe("session.agent-resolution", () => {
       },
     })
   }, 30000)
+
+  test("loop stops provider overflow instead of auto-compacting when disabled", async () => {
+    let calls = 0
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const url = new URL(req.url)
+        if (!url.pathname.endsWith("/chat/completions")) {
+          return new Response("not found", { status: 404 })
+        }
+        calls++
+        return Response.json(
+          { error: { message: "context length exceeded", code: "context_length_exceeded" } },
+          { status: 413 },
+        )
+      },
+    })
+
+    try {
+      await using tmp = await tmpdir({
+        git: true,
+        init: async (dir) => {
+          await Bun.write(
+            path.join(dir, "opencode.json"),
+            JSON.stringify({
+              $schema: "https://opencode.ai/config.json",
+              enabled_providers: ["alibaba"],
+              provider: {
+                alibaba: {
+                  options: {
+                    apiKey: "test-key",
+                    baseURL: `${server.url.origin}/v1`,
+                  },
+                },
+              },
+              agent: {
+                build: {
+                  model: "alibaba/qwen-plus",
+                },
+              },
+              compaction: {
+                auto: false,
+              },
+            }),
+          )
+        },
+      })
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await Session.create({ title: "Overflow no compact" })
+          const result = await SessionPrompt.prompt({
+            sessionID: session.id,
+            agent: "build",
+            parts: [{ type: "text", text: "hello" }],
+          })
+
+          expect(result.info.role).toBe("assistant")
+          if (result.info.role !== "assistant") throw new Error("expected assistant")
+          expect(result.info.finish).toBe("error")
+          expect(MessageV2.ContextOverflowError.isInstance(result.info.error)).toBe(true)
+          expect(calls).toBe(1)
+        },
+      })
+    } finally {
+      server.stop(true)
+    }
+  }, 30000)
 })
