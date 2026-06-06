@@ -1179,7 +1179,7 @@ describe("tool.bash abort", () => {
         const updates: string[] = []
         const result = await bash.execute(
           {
-            command: `echo first && sleep 0.1 && echo second`,
+            command: `echo first && sleep 0.3 && echo second`,
             description: "Streaming test",
           },
           {

@@ -105,8 +105,8 @@ export namespace LLM {
     for (const [toolName, meta] of input.toolMeta) {
       if (toolName === "invalid") continue
       if (toolName === "read" && input.cfg.experimental?.parallel_read === false) return false
-      // [fork-perf] parallelSafe gates execution concurrency, not emission — skip non-safe tools
-      if (!meta.parallelSafe) continue
+      // [fork-perf] any non-parallel-safe tool disables parallel execution for the whole request
+      if (!meta.parallelSafe) return false
       if (Permission.evaluate(toolName, "*", permission).action !== "allow") return false
       if (
         permission.some(
