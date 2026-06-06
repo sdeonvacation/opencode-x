@@ -964,7 +964,12 @@ Precedence: per-provider `chunkTimeout` > global `stream_idle_timeout` > default
     "ultrawork_model": {
       "providerID": "anthropic",
       "modelID": "claude-sonnet-4-6"
-    }
+    },
+    "branch_pr_review": true,
+    "branch_pr_auto_merge": false,
+    "branch_pr_merge_strategy": "squash",
+    "branch_pr_max_diff_lines": 500,
+    "branch_pr_ttl_hours": 24
   }
 }
 ```
@@ -1037,6 +1042,31 @@ Precedence: per-provider `chunkTimeout` > global `stream_idle_timeout` > default
 
 - Enable experimental fire-and-forget task spawning (set `background: true` on Task tool calls)
 - Default: `false` — background param is silently ignored unless this is enabled
+
+**branch_pr_review:**
+
+- Enable branch-pr isolation mode for subagents. Each subagent gets its own git branch + worktree. After completion, a structured diff is returned to the primary agent for review before merge.
+- Default: `true`
+
+**branch_pr_auto_merge:**
+
+- Skip the review gate and auto-merge subagent branches on completion (for trusted subagents)
+- Default: `false`
+
+**branch_pr_merge_strategy:**
+
+- Merge strategy when approving a branch PR: `"fast-forward"`, `"merge-commit"`, or `"squash"`
+- Default: `"squash"`
+
+**branch_pr_max_diff_lines:**
+
+- Maximum diff lines shown to the primary agent for review. Larger diffs are truncated with a summary.
+- Default: `500`
+
+**branch_pr_ttl_hours:**
+
+- Hours before orphaned `opencode/*` branches (from crashes or rejections) are cleaned up on next startup
+- Default: `24`
 
 ### Hybrid Routing
 

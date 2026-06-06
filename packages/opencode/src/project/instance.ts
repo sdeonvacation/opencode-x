@@ -1,3 +1,4 @@
+import path from "path"
 import { GlobalBus } from "@/bus/global"
 import { disposeInstance } from "@/effect/instance-registry"
 import { Filesystem } from "@/util/filesystem"
@@ -12,6 +13,7 @@ export interface InstanceContext {
   directory: string
   worktree: string
   project: Project.Info
+  pathRemapFrom?: string
 }
 
 const context = Context.create<InstanceContext>("instance")
@@ -124,6 +126,46 @@ export const Instance = {
    */
   restore<R>(ctx: InstanceContext, fn: () => R): R {
     return context.provide(ctx, fn)
+  },
+  /**
+   * Remap path-typed arguments from the real project root to the current directory.
+   * Only active when pathRemapFrom is set (branch-pr worktree context).
+   */
+  remapArgs<T extends Record<string, unknown>>(args: T): T {
+    const ctx = context.use()
+    if (!ctx.pathRemapFrom) return args
+    const from = ctx.pathRemapFrom
+    const to = ctx.directory
+    if (from === to) return args
+
+    const PATH_KEYS = new Set(["filePath", "path", "workdir", "file_path", "directory", "dir", "file", "folder"])
+
+    const result = { ...args }
+    for (const key of Object.keys(result)) {
+      if (!PATH_KEYS.has(key)) continue
+      const val = result[key]
+      if (typeof val !== "string") continue
+      if (val === from) {
+        ;(result as any)[key] = to
+      } else if (val.startsWith(from + "/")) {
+        ;(result as any)[key] = to + val.slice(from.length)
+      }
+    }
+    return result
+  },
+  /**
+   * Resolve a file path, remapping if in worktree isolation context.
+   * Relative paths join to directory. Absolute paths remap when pathRemapFrom is set.
+   */
+  resolvePath(input: string): string {
+    const ctx = context.use()
+    if (!path.isAbsolute(input)) return path.join(ctx.directory, input)
+    if (!ctx.pathRemapFrom) return input
+    if (input === ctx.pathRemapFrom) return ctx.directory
+    if (input.startsWith(ctx.pathRemapFrom + "/")) {
+      return ctx.directory + input.slice(ctx.pathRemapFrom.length)
+    }
+    return input
   },
   state<S>(init: () => S, dispose?: (state: Awaited<S>) => Promise<void>): () => S {
     return State.create(() => Instance.directory, init, dispose)

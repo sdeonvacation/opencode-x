@@ -553,7 +553,7 @@ export namespace SessionPrompt {
                       })
                     }
                   }
-                  const result = yield* Effect.promise(() => item.execute(args, ctx))
+                  const result = yield* Effect.promise(() => item.execute(Instance.remapArgs(args), ctx))
                   const output = {
                     ...result,
                     attachments: result.attachments?.map((attachment) => ({

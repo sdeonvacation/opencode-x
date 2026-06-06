@@ -16,13 +16,13 @@ import { create as createGuard } from "../orchestration/tool-guard"
 import { withTimeout } from "@/util/timeout"
 import { spawnSubagent } from "../orchestration/task-spawn"
 import { resolveTaskModel } from "../orchestration/task-model-resolver"
-import { OrchestrationWorktree } from "../orchestration/worktree"
+import { branchPRHandler } from "../orchestration/branch-pr-handler"
 import { BackgroundJob } from "@/background/job"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import { makeRuntime } from "@/effect/run-service"
-import { Instance, type InstanceContext } from "@/project/instance"
+import { Instance } from "@/project/instance"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): void
@@ -50,8 +50,12 @@ const baseParameters = z.object({
     .optional(),
   command: z.string().describe("The command that triggered this task").optional(),
   isolation: z
-    .enum(["worktree"])
-    .describe("Isolation mode for the subagent. 'worktree' creates a git worktree for conflict-free edits")
+    .enum(["branch-pr"])
+    .describe("Isolation mode. All tasks use branch-pr review gate by default when enabled.")
+    .optional(),
+  pr_action: z
+    .enum(["approve", "reject"])
+    .describe("Action on a pending branch PR. Use with task_id of the PR session.")
     .optional(),
 })
 
@@ -201,83 +205,68 @@ export const TaskTool = Tool.defineEffect(
           metadata,
         })
 
+        // --- Branch-PR isolation path ---
+        if (cfg.experimental?.branch_pr_review || params.pr_action) {
+          return branchPRHandler.execute(params, ctx, {
+            session: nextSession,
+            model: finalModel,
+            agent: next,
+            guard,
+            concurrencyKey,
+            concurrencyLimit,
+            parentVariant,
+            messageID,
+            promptParts,
+          })
+        }
+
         // --- Background execution path ---
         if (runInBackground) {
           const runTask = async (): Promise<string> => {
-            let worktree: OrchestrationWorktree.WorktreePath | undefined
-            let worktreeCtx: InstanceContext | undefined
+            await guard.before({
+              toolName: "task",
+              input: {
+                prompt: params.prompt,
+                subagent_type: params.subagent_type,
+                task_category: params.task_category,
+                use_ultrawork: params.use_ultrawork,
+                task_id: params.task_id,
+                command: params.command,
+              },
+            })
+            await acquire(concurrencyKey, concurrencyLimit)
             try {
-              if (params.isolation === "worktree" && cfg.experimental?.worktree_isolation !== false) {
-                worktree = await OrchestrationWorktree.create({ sessionID: nextSession.id, cwd: Instance.directory })
-                worktreeCtx = { ...Instance.current, directory: worktree }
-              }
-
-              await guard.before({
-                toolName: "task",
-                input: {
-                  prompt: params.prompt,
-                  subagent_type: params.subagent_type,
-                  task_category: params.task_category,
-                  use_ultrawork: params.use_ultrawork,
-                  task_id: params.task_id,
-                  command: params.command,
-                },
-              })
-              await acquire(concurrencyKey, concurrencyLimit)
-              try {
-                const timeout = cfg.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT
-                const promptCall = () =>
-                  SessionPrompt.prompt({
-                    messageID,
-                    sessionID: nextSession.id,
-                    model: {
-                      modelID: ModelID.make(finalModel.modelID),
-                      providerID: ProviderID.make(finalModel.providerID),
-                    },
-                    variant: parentVariant,
-                    agent: next.name,
-                    tools: {
-                      ...(canTodo ? {} : { todowrite: false }),
-                      ...(canTask ? {} : { task: false }),
-                      ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
-                      goal_complete: false,
-                    },
-                    parts: promptParts,
-                  })
-                const result = await withTimeout(
-                  worktreeCtx ? Instance.restore(worktreeCtx, () => promptCall()) : promptCall(),
-                  timeout,
-                ).catch((err) => {
-                  if (err instanceof Error && err.message.includes("Operation timed out")) {
-                    SessionPrompt.cancel(nextSession.id)
-                    throw new Error(`Subagent timed out after ${timeout}ms`)
-                  }
-                  throw err
-                })
-
-                let mergeNote = ""
-                if (worktree) {
-                  try {
-                    await OrchestrationWorktree.merge({ sessionID: nextSession.id, worktree, cwd: Instance.directory })
-                  } catch (err) {
-                    if (err instanceof OrchestrationWorktree.MergeConflict) {
-                      mergeNote = `\n\n[worktree merge conflict — branch preserved: ${err.data.branch}]`
-                    } else {
-                      mergeNote = `\n\n[worktree merge failed: ${errorText(err)}]`
-                    }
-                  }
+              const timeout = cfg.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT
+              const result = await withTimeout(
+                SessionPrompt.prompt({
+                  messageID,
+                  sessionID: nextSession.id,
+                  model: {
+                    modelID: ModelID.make(finalModel.modelID),
+                    providerID: ProviderID.make(finalModel.providerID),
+                  },
+                  variant: parentVariant,
+                  agent: next.name,
+                  tools: {
+                    ...(canTodo ? {} : { todowrite: false }),
+                    ...(canTask ? {} : { task: false }),
+                    ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
+                    goal_complete: false,
+                  },
+                  parts: promptParts,
+                }),
+                timeout,
+              ).catch((err) => {
+                if (err instanceof Error && err.message.includes("Operation timed out")) {
+                  SessionPrompt.cancel(nextSession.id)
+                  throw new Error(`Subagent timed out after ${timeout}ms`)
                 }
+                throw err
+              })
 
-                return (result.parts.findLast((item) => item.type === "text")?.text ?? "") + mergeNote
-              } finally {
-                release(concurrencyKey)
-              }
+              return result.parts.findLast((item) => item.type === "text")?.text ?? ""
             } finally {
-              if (worktree) {
-                OrchestrationWorktree.cleanup({ sessionID: nextSession.id, worktree, cwd: Instance.directory }).catch(
-                  () => {},
-                )
-              }
+              release(concurrencyKey)
             }
           }
 
@@ -370,14 +359,7 @@ export const TaskTool = Tool.defineEffect(
         }
 
         ctx.abort.addEventListener("abort", cancel)
-        let worktree: OrchestrationWorktree.WorktreePath | undefined
-        let worktreeCtx: InstanceContext | undefined
         try {
-          if (params.isolation === "worktree" && cfg.experimental?.worktree_isolation !== false) {
-            worktree = await OrchestrationWorktree.create({ sessionID: nextSession.id, cwd: Instance.directory })
-            worktreeCtx = { ...Instance.current, directory: worktree }
-          }
-
           await guard.before({
             toolName: "task",
             input: {
@@ -393,27 +375,25 @@ export const TaskTool = Tool.defineEffect(
           await acquire(concurrencyKey, concurrencyLimit, ctx.abort)
           const timeout = cfg.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT
           let result: Awaited<ReturnType<typeof SessionPrompt.prompt>>
-          const promptCall = () =>
-            SessionPrompt.prompt({
-              messageID,
-              sessionID: nextSession.id,
-              model: {
-                modelID: ModelID.make(finalModel.modelID),
-                providerID: ProviderID.make(finalModel.providerID),
-              },
-              variant: parentVariant,
-              agent: next.name,
-              tools: {
-                ...(canTodo ? {} : { todowrite: false }),
-                ...(canTask ? {} : { task: false }),
-                ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
-                goal_complete: false,
-              },
-              parts: promptParts,
-            })
           try {
             result = await withTimeout(
-              worktreeCtx ? Instance.restore(worktreeCtx, () => promptCall()) : promptCall(),
+              SessionPrompt.prompt({
+                messageID,
+                sessionID: nextSession.id,
+                model: {
+                  modelID: ModelID.make(finalModel.modelID),
+                  providerID: ProviderID.make(finalModel.providerID),
+                },
+                variant: parentVariant,
+                agent: next.name,
+                tools: {
+                  ...(canTodo ? {} : { todowrite: false }),
+                  ...(canTask ? {} : { task: false }),
+                  ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
+                  goal_complete: false,
+                },
+                parts: promptParts,
+              }),
               timeout,
             ).catch((err) => {
               if (err instanceof Error && err.message.includes("Operation timed out")) {
@@ -426,20 +406,6 @@ export const TaskTool = Tool.defineEffect(
             release(concurrencyKey)
           }
 
-          // Merge worktree changes back
-          let mergeNote = ""
-          if (worktree) {
-            try {
-              await OrchestrationWorktree.merge({ sessionID: nextSession.id, worktree, cwd: Instance.directory })
-            } catch (err) {
-              if (err instanceof OrchestrationWorktree.MergeConflict) {
-                mergeNote = `\n\n[worktree merge conflict — branch preserved: ${err.data.branch}]`
-              } else {
-                mergeNote = `\n\n[worktree merge failed: ${errorText(err)}]`
-              }
-            }
-          }
-
           await Bus.publish(OrchestrationEvent.Complete, {
             sessionID: nextSession.id,
             parentSessionID: ctx.sessionID,
@@ -450,19 +416,11 @@ export const TaskTool = Tool.defineEffect(
           return {
             title: params.description,
             metadata,
-            output: output(
-              nextSession.id,
-              (result.parts.findLast((item) => item.type === "text")?.text ?? "") + mergeNote,
-            ),
+            output: output(nextSession.id, result.parts.findLast((item) => item.type === "text")?.text ?? ""),
           }
         } finally {
           ctx.abort.removeEventListener("abort", cancel)
           if (subagent.spawned) subagent.spawnInfo.release()
-          if (worktree) {
-            OrchestrationWorktree.cleanup({ sessionID: nextSession.id, worktree, cwd: Instance.directory }).catch(
-              () => {},
-            )
-          }
         }
       },
     }
