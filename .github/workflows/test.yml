@@ -11,7 +11,7 @@ on:
 concurrency:
   # Keep every run on dev so cancelled checks do not pollute the default branch
   # commit history. PRs and other branches still share a group and cancel stale runs.
-  group: ${{ case(github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main', format('{0}-{1}', github.workflow, github.run_id), format('{0}-{1}', github.workflow, github.event.pull_request.number || github.ref)) }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -64,6 +64,12 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-${{ hashFiles('turbo.json', '**/package.json') }}-
             turbo-${{ runner.os }}-
+
+      - name: Cache opencode bin
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/opencode/bin
+          key: opencode-bin-${{ runner.os }}-${{ runner.arch }}
 
       - name: Run unit tests
         run: bun turbo test:ci
