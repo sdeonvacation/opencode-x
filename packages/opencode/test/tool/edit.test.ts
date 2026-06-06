@@ -54,31 +54,30 @@ describe("tool.edit", () => {
       })
     })
 
-    test("preserves BOM when oldString is empty on existing files", async () => {
+    test("rejects empty oldString on existing files and leaves content unchanged", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "existing.cs")
       const bom = String.fromCharCode(0xfeff)
-      await fs.writeFile(filepath, `${bom}using System;\n`, "utf-8")
+      const original = `${bom}using System;\n`
+      await fs.writeFile(filepath, original, "utf-8")
 
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
           const edit = await EditTool.init()
-          const result = await edit.execute(
-            {
-              filePath: filepath,
-              oldString: "",
-              newString: "using Up;\n",
-            },
-            ctx,
-          )
-
-          expect(result.metadata.diff).toContain("-using System;")
-          expect(result.metadata.diff).toContain("+using Up;")
+          await expect(
+            edit.execute(
+              {
+                filePath: filepath,
+                oldString: "",
+                newString: "using Up;\n",
+              },
+              ctx,
+            ),
+          ).rejects.toThrow("oldString cannot be empty")
 
           const content = await fs.readFile(filepath, "utf-8")
-          expect(content.charCodeAt(0)).toBe(0xfeff)
-          expect(content.slice(1)).toBe("using Up;\n")
+          expect(content).toBe(original)
         },
       })
     })
@@ -265,6 +264,71 @@ describe("tool.edit", () => {
               ctx,
             ),
           ).rejects.toThrow()
+        },
+      })
+    })
+
+    test("rejects loose block-anchor matches and leaves content unchanged", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "file.ts")
+      const original = [
+        "function configure() {",
+        "  keepImportantState()",
+        "  removeAllUserData()",
+        "  archiveBackups()",
+        "  auditLog()",
+        "}",
+      ].join("\n")
+      await fs.writeFile(filepath, original, "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await FileTime.read(ctx.sessionID, filepath)
+
+          const edit = await EditTool.init()
+          await expect(
+            edit.execute(
+              {
+                filePath: filepath,
+                oldString: ["function configure() {", "  const enabled = true", "}"].join("\n"),
+                newString: ["function configure() {", "  const enabled = false", "}"].join("\n"),
+              },
+              ctx,
+            ),
+          ).rejects.toThrow("Could not find oldString")
+
+          const content = await fs.readFile(filepath, "utf-8")
+          expect(content).toBe(original)
+        },
+      })
+    })
+
+    test("rejects block-anchor matches with unrelated middle content", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "file.ts")
+      const original = ["function configure() {", "  removeAllUserData()", "}"].join("\n")
+      await fs.writeFile(filepath, original, "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await FileTime.read(ctx.sessionID, filepath)
+
+          const edit = await EditTool.init()
+          await expect(
+            edit.execute(
+              {
+                filePath: filepath,
+                oldString: ["function configure() {", "  const enabled = true", "}"].join("\n"),
+                newString: ["function configure() {", "  const enabled = false", "}"].join("\n"),
+              },
+              ctx,
+            ),
+          ).rejects.toThrow("Could not find oldString")
+
+          const content = await fs.readFile(filepath, "utf-8")
+          expect(content).toBe(original)
         },
       })
     })

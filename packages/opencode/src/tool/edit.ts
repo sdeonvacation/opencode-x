@@ -61,10 +61,14 @@ export const EditTool = Tool.define("edit", {
     await FileTime.withLock(filePath, async () => {
       if (params.oldString === "") {
         const existed = await Filesystem.exists(filePath)
-        const source = existed ? await Bom.read(filePath) : { bom: false, text: "" }
+        if (existed) {
+          throw new Error(
+            "oldString cannot be empty when editing an existing file. Provide the exact text to replace, or use write for an intentional full-file replacement.",
+          )
+        }
         const next = Bom.split(params.newString)
-        const bom = source.bom || next.bom
-        contentOld = source.text
+        const bom = next.bom
+        contentOld = ""
         contentNew = next.text
         diff = trimDiff(createTwoFilesPatch(filePath, filePath, contentOld, contentNew))
         await ctx.ask({
@@ -83,7 +87,7 @@ export const EditTool = Tool.define("edit", {
         Bus.publish(File.Event.Edited, { file: filePath })
         await Bus.publish(FileWatcher.Event.Updated, {
           file: filePath,
-          event: existed ? "change" : "add",
+          event: "add",
         })
         await FileTime.read(ctx.sessionID, filePath)
         return
@@ -179,8 +183,8 @@ export const EditTool = Tool.define("edit", {
 export type Replacer = (content: string, find: string) => Generator<string, void, unknown>
 
 // Similarity thresholds for block anchor fallback matching
-const SINGLE_CANDIDATE_SIMILARITY_THRESHOLD = 0.0
-const MULTIPLE_CANDIDATES_SIMILARITY_THRESHOLD = 0.3
+const SINGLE_CANDIDATE_SIMILARITY_THRESHOLD = 0.65
+const MULTIPLE_CANDIDATES_SIMILARITY_THRESHOLD = 0.65
 
 /**
  * Levenshtein distance algorithm implementation
@@ -262,6 +266,7 @@ export const BlockAnchorReplacer: Replacer = function* (content, find) {
   const firstLineSearch = searchLines[0].trim()
   const lastLineSearch = searchLines[searchLines.length - 1].trim()
   const searchBlockSize = searchLines.length
+  const maxLineDelta = Math.max(1, Math.floor(searchBlockSize * 0.25))
 
   // Collect all candidate positions where both anchors match
   const candidates: Array<{ startLine: number; endLine: number }> = []
@@ -273,7 +278,10 @@ export const BlockAnchorReplacer: Replacer = function* (content, find) {
     // Look for the matching last line after this first line
     for (let j = i + 2; j < originalLines.length; j++) {
       if (originalLines[j].trim() === lastLineSearch) {
-        candidates.push({ startLine: i, endLine: j })
+        const actualBlockSize = j - i + 1
+        if (Math.abs(actualBlockSize - searchBlockSize) <= maxLineDelta) {
+          candidates.push({ startLine: i, endLine: j })
+        }
         break // Only match the first occurrence of the last line
       }
     }
