@@ -134,7 +134,9 @@ it.live("OpenAI Codex headerTimeout default can be disabled by config", () =>
 
 it.live("OpenAI API auth gets default headerTimeout", () =>
   Effect.gen(function* () {
-    yield* withAuthContent(
+    yield* withEnvKey(
+      "OPENAI_API_KEY",
+      "sk-test",
       Effect.gen(function* () {
         yield* provideTmpdirInstance(() =>
           Effect.gen(function* () {
@@ -144,7 +146,6 @@ it.live("OpenAI API auth gets default headerTimeout", () =>
           }),
         )
       }),
-      { openai: { type: "api", key: "sk-test" } },
     )
   }),
 )
@@ -162,24 +163,22 @@ async function delayedHeaderServer(delay: number): Promise<{ server: Server; url
   return { server, url: `http://127.0.0.1:${address.port}` }
 }
 
-function withAuthContent<A, E, R>(self: Effect.Effect<A, E, R>, value: Record<string, unknown> = defaultAuthContent()) {
+function withEnvKey<A, E, R>(key: string, value: string, self: Effect.Effect<A, E, R>) {
   return Effect.acquireUseRelease(
     Effect.sync(() => {
-      const previous = process.env.OPENCODE_AUTH_CONTENT
-      process.env.OPENCODE_AUTH_CONTENT = JSON.stringify(value)
+      const previous = process.env[key]
+      process.env[key] = value
       return previous
     }),
     () => self,
     (previous) =>
       Effect.sync(() => {
-        if (previous === undefined) delete process.env.OPENCODE_AUTH_CONTENT
-        else process.env.OPENCODE_AUTH_CONTENT = previous
+        if (previous === undefined) delete process.env[key]
+        else process.env[key] = previous
       }),
   )
 }
 
-function defaultAuthContent() {
-  return {
-    openai: { type: "oauth", refresh: "refresh", access: "access", expires: Date.now() + 60_000 },
-  }
+function withAuthContent<A, E, R>(self: Effect.Effect<A, E, R>) {
+  return withEnvKey("OPENAI_API_KEY", "sk-test-oauth", self)
 }

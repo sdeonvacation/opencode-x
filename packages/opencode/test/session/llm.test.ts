@@ -1518,10 +1518,6 @@ describe("session.llm.stream", () => {
             role: "assistant",
             content: [
               {
-                type: "text",
-                text: "I checked your home directory and looked for PDF files.",
-              },
-              {
                 type: "tool_use",
                 id: "toolu_01N8mDEzG8DSTs7UPHFtmgCT",
                 name: "read",
@@ -1532,6 +1528,10 @@ describe("session.llm.stream", () => {
                 id: "toolu_01APxrADs7VozN8uWzw9WwHr",
                 name: "glob",
                 input: { pattern: "**/*.pdf", path: "/root" },
+              },
+              {
+                type: "text",
+                text: "I checked your home directory and looked for PDF files.",
                 cache_control: {
                   type: "ephemeral",
                   ...(!["0", "false", "off"].includes(String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase())

@@ -72,6 +72,9 @@ test("headers are passed to transports when oauth is enabled (default)", async (
   await Instance.provide({
     directory: tmp.path,
     fn: async () => {
+      // Clear any transports created during auto-init from config
+      transportCalls.length = 0
+
       // Trigger MCP initialization - it will fail to connect but we can check the transport options
       await MCP.add("test-server", {
         type: "remote",

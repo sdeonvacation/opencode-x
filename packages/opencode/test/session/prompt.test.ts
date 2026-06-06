@@ -562,6 +562,9 @@ describe("session.agent-resolution", () => {
               compaction: {
                 auto: false,
               },
+              experimental: {
+                reactive_compaction: false,
+              },
             }),
           )
         },
