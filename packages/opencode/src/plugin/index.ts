@@ -230,6 +230,20 @@ export namespace Plugin {
             }).pipe(Effect.ignore)
           }
 
+          yield* Effect.addFinalizer(() =>
+            Effect.forEach(
+              hooks,
+              (hook) =>
+                Effect.tryPromise({
+                  try: () => Promise.resolve(hook.dispose?.()),
+                  catch: (error) => {
+                    log.error("plugin dispose hook failed", { error })
+                  },
+                }).pipe(Effect.ignore),
+              { discard: true },
+            ),
+          )
+
           // Subscribe to bus events, fiber interrupted when scope closes
           yield* bus.subscribeAll().pipe(
             Stream.runForEach((input) =>
