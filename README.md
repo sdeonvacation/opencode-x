@@ -12,7 +12,16 @@ Built on top of [opencode](https://github.com/anomalyco/opencode) — adds Claud
 
 ## Install
 
-Download the binary for your platform from [Releases](https://github.com/sdeonvacation/opencode-x/releases/latest):
+### npm (Recommended)
+
+```bash
+npm install -g @sdeonvacation/opencode-x
+opencode
+```
+
+### Download Binary
+
+Download from [Releases](https://github.com/sdeonvacation/opencode-x/releases/latest):
 
 | Asset                          | Platform                  |
 | ------------------------------ | ------------------------- |
@@ -203,7 +212,6 @@ Rolling head+tail split. Summary cached by boundary position. Only re-summarizes
 - **Part Coalescer** — batches streaming updates (300ms), reduces SQLite writes
 - **Doom Loop Detector** — ring-buffer hash; aborts after N identical consecutive tool calls
 - **Per-model Concurrency** — prevents thundering-herd on rate-limited endpoints
-
 
 ### Slash Commands
 

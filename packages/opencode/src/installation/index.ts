@@ -201,7 +201,9 @@ export namespace Installation {
           for (const check of checks) {
             const output = yield* check.command()
             const installedName =
-              check.name === "brew" || check.name === "choco" || check.name === "scoop" ? "opencode" : "opencode-ai"
+              check.name === "brew" || check.name === "choco" || check.name === "scoop"
+                ? "opencode"
+                : "@sdeonvacation/opencode-x"
             if (output.includes(installedName)) {
               return check.name
             }
@@ -235,7 +237,9 @@ export namespace Installation {
             const registry = reg.endsWith("/") ? reg.slice(0, -1) : reg
             const channel = CHANNEL
             const response = yield* httpOk.execute(
-              HttpClientRequest.get(`${registry}/opencode-ai/${channel}`).pipe(HttpClientRequest.acceptJson),
+              HttpClientRequest.get(`${registry}/@sdeonvacation/opencode-x/${channel}`).pipe(
+                HttpClientRequest.acceptJson,
+              ),
             )
             const data = yield* HttpClientResponse.schemaBodyJson(NpmPackage)(response)
             return data.version
@@ -277,13 +281,13 @@ export namespace Installation {
               result = yield* upgradeCurl(target)
               break
             case "npm":
-              result = yield* run(["npm", "install", "-g", `opencode-ai@${target}`])
+              result = yield* run(["npm", "install", "-g", `@sdeonvacation/opencode-x@${target}`])
               break
             case "pnpm":
-              result = yield* run(["pnpm", "install", "-g", `opencode-ai@${target}`])
+              result = yield* run(["pnpm", "install", "-g", `@sdeonvacation/opencode-x@${target}`])
               break
             case "bun":
-              result = yield* run(["bun", "install", "-g", `opencode-ai@${target}`])
+              result = yield* run(["bun", "install", "-g", `@sdeonvacation/opencode-x@${target}`])
               break
             case "brew": {
               const formula = yield* getBrewFormula()

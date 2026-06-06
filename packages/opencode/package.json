@@ -1,10 +1,10 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "version": "1.4.3",
-  "name": "opencode-x",
+  "version": "1.0.3",
+  "name": "@sdeonvacation/opencode-x",
   "type": "module",
   "license": "MIT",
-  "private": true,
+  "private": false,
   "scripts": {
     "typecheck": "tsgo --noEmit",
     "test": "bun test --timeout 30000",
@@ -13,8 +13,15 @@
     "fix-node-pty": "bun run script/fix-node-pty.ts",
     "upgrade-opentui": "bun run script/upgrade-opentui.ts",
     "dev": "bun run --conditions=browser ./src/index.ts",
-    "db": "bun drizzle-kit"
+    "db": "bun drizzle-kit",
+    "postinstall": "node bin/postinstall.js"
   },
+  "files": [
+    "bin/opencode",
+    "bin/postinstall.js",
+    "package.json",
+    "README.md"
+  ],
   "bin": {
     "opencode": "./bin/opencode"
   },
