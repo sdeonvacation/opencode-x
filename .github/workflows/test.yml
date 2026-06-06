@@ -24,6 +24,7 @@ env:
 jobs:
   unit:
     name: unit (${{ matrix.settings.name }})
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -71,6 +72,7 @@ jobs:
 
       - name: Publish unit reports
         if: always()
+        timeout-minutes: 5
         uses: mikepenz/action-junit-report@v6
         with:
           report_paths: packages/*/.artifacts/unit/junit.xml
@@ -91,6 +93,7 @@ jobs:
 
   e2e:
     name: e2e (${{ matrix.settings.name }})
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
