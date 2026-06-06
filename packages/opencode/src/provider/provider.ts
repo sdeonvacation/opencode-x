@@ -22,6 +22,7 @@ import { Filesystem } from "../util/filesystem"
 import { Effect, Layer, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
+import { ProviderError } from "./error"
 
 // Direct imports for bundled providers
 import { createAmazonBedrock, type AmazonBedrockProviderSettings } from "@ai-sdk/amazon-bedrock"
@@ -64,6 +65,17 @@ export namespace Provider {
   /** Default SSE chunk inactivity timeout (ms). If no bytes arrive within this
    *  window the stream is aborted and the request retried. */
   const DEFAULT_CHUNK_TIMEOUT = 60_000
+
+  const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
+
+  function timeoutController(ms: number) {
+    const ctl = new AbortController()
+    const id = setTimeout(() => ctl.abort(new ProviderError.HeaderTimeoutError(ms)), ms)
+    return {
+      signal: ctl.signal,
+      clear: () => clearTimeout(id),
+    }
+  }
 
   function shouldUseCopilotResponsesApi(modelID: string): boolean {
     const match = /^gpt-(\d+)/.exec(modelID)
@@ -215,7 +227,7 @@ export namespace Provider {
           async getModel(sdk: any, modelID: string, _options?: Record<string, any>) {
             return sdk.responses(modelID)
           },
-          options: {},
+          options: { headerTimeout: OPENAI_HEADER_TIMEOUT_DEFAULT },
         }),
       xai: () =>
         Effect.succeed({
@@ -1463,6 +1475,10 @@ export namespace Provider {
           const customFetch = options["fetch"]
           const chunkTimeout = options["chunkTimeout"] ?? s.streamIdleTimeout
           delete options["chunkTimeout"]
+          const headerTimeout = options["headerTimeout"]
+          delete options["headerTimeout"]
+          const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
+          const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
 
           options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
             const fetchFn = customFetch ?? fetch
@@ -1473,6 +1489,7 @@ export namespace Provider {
 
             if (opts.signal) signals.push(opts.signal)
             if (chunkAbortCtl) signals.push(chunkAbortCtl.signal)
+            if (headerTimeoutCtl) signals.push(headerTimeoutCtl.signal)
             if (options["timeout"] !== undefined && options["timeout"] !== null && options["timeout"] !== false)
               signals.push(AbortSignal.timeout(options["timeout"]))
 
@@ -1498,7 +1515,7 @@ export namespace Provider {
               ...opts,
               // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
               timeout: false,
-            })
+            }).finally(() => headerTimeoutCtl?.clear())
 
             if (!chunkAbortCtl) return res
             return wrapSSE(res, chunkTimeout, chunkAbortCtl)

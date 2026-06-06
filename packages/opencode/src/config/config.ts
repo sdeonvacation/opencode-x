@@ -149,7 +149,7 @@ export namespace Config {
   }
 
   export async function installDependencies(dir: string, input?: InstallInput) {
-    if (process.env.OPENCODE_SKIP_INSTALL) return;
+    if (process.env.OPENCODE_SKIP_INSTALL) return
     if (!(await isWritable(dir))) return
     await using _ = await Flock.acquire(`config-install:${Filesystem.resolve(dir)}`, {
       signal: input?.signal,
@@ -946,13 +946,26 @@ export namespace Config {
                 .int()
                 .positive()
                 .describe(
-                  "Timeout in milliseconds for requests to this provider. Default is 300000 (5 minutes). Set to false to disable timeout.",
+                  "Timeout in milliseconds for full requests to this provider. Set to false to disable timeout.",
                 ),
               z.literal(false).describe("Disable timeout for this provider entirely."),
             ])
             .optional()
+            .describe("Timeout in milliseconds for full requests to this provider. Set to false to disable timeout."),
+          headerTimeout: z
+            .union([
+              z
+                .number()
+                .int()
+                .positive()
+                .describe(
+                  "Timeout in milliseconds to wait for response headers. Provider integrations may set defaults. Set to false to disable timeout.",
+                ),
+              z.literal(false).describe("Disable header timeout entirely."),
+            ])
+            .optional()
             .describe(
-              "Timeout in milliseconds for requests to this provider. Default is 300000 (5 minutes). Set to false to disable timeout.",
+              "Timeout in milliseconds to wait for response headers. Provider integrations may set defaults. Set to false to disable timeout.",
             ),
           chunkTimeout: z
             .number()

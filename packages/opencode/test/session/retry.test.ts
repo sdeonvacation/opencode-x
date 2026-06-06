@@ -6,6 +6,7 @@ import { Effect, Exit, Schedule } from "effect"
 import { SessionRetry } from "../../src/session/retry"
 import { MessageV2 } from "../../src/session/message-v2"
 import { ProviderID } from "../../src/provider/schema"
+import { ProviderError } from "../../src/provider/error"
 import { SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { Instance } from "../../src/project/instance"
@@ -225,6 +226,14 @@ describe("session.retry.retryable", () => {
     const msg = "Too many requests, please slow down"
     const error = wrap(msg)
     expect(SessionRetry.retryable(error)).toBe(msg)
+  })
+
+  test("retries transport timeout errors", () => {
+    const request = MessageV2.fromError(new ProviderError.HeaderTimeoutError(10000), { providerID })
+    expect(MessageV2.APIError.isInstance(request)).toBe(true)
+    expect(SessionRetry.retryable(request as ReturnType<NamedError["toObject"]>)).toEqual(
+      "Provider response headers timed out after 10000ms",
+    )
   })
 
   test("does not retry context overflow errors", () => {
