@@ -28,7 +28,6 @@ export interface TaskPromptOps {
   cancel(sessionID: SessionID): void
   resolvePromptParts(template: string): Promise<SessionPrompt.PromptInput["parts"]>
   prompt(input: SessionPrompt.PromptInput): Promise<MessageV2.WithParts>
-  loop(input: { sessionID: SessionID }): Promise<MessageV2.WithParts>
 }
 
 const id = "task"

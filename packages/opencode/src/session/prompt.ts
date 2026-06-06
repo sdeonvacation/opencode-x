@@ -443,7 +443,6 @@ export namespace SessionPrompt {
               cancel: (sessionID) => SessionPrompt.cancel(sessionID),
               resolvePromptParts: (template) => SessionPrompt.resolvePromptParts(template),
               prompt: (promptInput) => SessionPrompt.prompt(promptInput),
-              loop: (loopInput) => SessionPrompt.loop(loopInput),
             } satisfies TaskPromptOps,
           },
           agent: input.agent.name,

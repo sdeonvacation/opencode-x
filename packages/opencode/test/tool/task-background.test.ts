@@ -245,12 +245,10 @@ describe("tool.task background", () => {
       cancel: () => {},
       resolvePromptParts: async () => [],
       prompt: async () => ({ info: {} as any, parts: [] }),
-      loop: async () => ({ info: {} as any, parts: [] }),
     }
     expect(ops.cancel).toBeFunction()
     expect(ops.resolvePromptParts).toBeFunction()
     expect(ops.prompt).toBeFunction()
-    expect(ops.loop).toBeFunction()
   })
 
   test("metadata includes background:true when background param set", async () => {

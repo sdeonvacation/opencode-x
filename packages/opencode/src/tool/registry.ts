@@ -7,7 +7,7 @@ import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
-import { TaskStatusTool } from "./task_status"
+
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
@@ -43,7 +43,7 @@ import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
 import { Permission } from "@/permission"
 import { filterTools } from "./tool-filter"
-import { SessionStatus } from "@/session/status"
+
 import { BackgroundJob } from "@/background/job"
 import { GoalCompleteTool } from "./goal-complete"
 import { MemoryPersistTool } from "./memory-persist"
@@ -87,7 +87,6 @@ export namespace ToolRegistry {
     | Instruction.Service
     | AppFileSystem.Service
     | HttpClient.HttpClient
-    | SessionStatus.Service
     | BackgroundJob.Service
   > = Layer.effect(
     Service,
@@ -98,7 +97,6 @@ export namespace ToolRegistry {
       const skill = yield* Skill.Service
 
       const task = yield* TaskTool
-      const taskStatus = yield* TaskStatusTool
       const read = yield* ReadTool
       const question = yield* QuestionTool
       const todo = yield* TodoWriteTool
@@ -183,7 +181,6 @@ export namespace ToolRegistry {
           EditTool,
           WriteTool,
           task,
-          ...(Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS ? [taskStatus] : []),
           webfetch,
           todo,
           websearch,
@@ -299,7 +296,6 @@ export namespace ToolRegistry {
       Layer.provide(Instruction.defaultLayer),
       Layer.provide(AppFileSystem.defaultLayer),
       Layer.provide(FetchHttpClient.layer),
-      Layer.provide(SessionStatus.defaultLayer),
       Layer.provide(BackgroundJob.defaultLayer),
     ),
   )
