@@ -1654,7 +1654,7 @@ export namespace Config {
             .optional()
             .describe("Split system prompt into cached/dynamic sections for improved provider caching"),
           goal_system: z.boolean().optional().describe("Enable autonomous goal system with /goal command"),
-
+          worktree_isolation: z.boolean().optional().describe("Enable git worktree isolation for parallel subagents"),
           hooks: z.boolean().optional().describe("Enable plugin hooks system (Claude Code compatible)"),
           persistent_memory: z.boolean().optional().describe("Enable cross-session persistent memory"),
           multi_step: z
@@ -1682,27 +1682,6 @@ export namespace Config {
             .describe(
               "Strip inline <thinking>...</thinking> segments from text parts before sending to LLM. Saves input tokens at the cost of CoT continuity. Default false.",
             ),
-          branch_pr_review: z
-            .boolean()
-            .default(true)
-            .optional()
-            .describe("Enable branch-pr isolation mode for subagents"),
-          branch_pr_auto_merge: z
-            .boolean()
-            .optional()
-            .describe("Auto-merge without review for trusted subagents (skip review gate)"),
-
-          branch_pr_max_diff_lines: z
-            .number()
-            .int()
-            .positive()
-            .optional()
-            .describe("Max diff lines shown to primary agent (default: 500). Larger diffs truncated with summary."),
-          branch_pr_ttl_hours: z
-            .number()
-            .positive()
-            .optional()
-            .describe("Hours before orphaned opencode/* branches are cleaned up (default: 24)"),
         })
         .optional(),
     })

@@ -31,7 +31,6 @@ import path from "path"
 import { pathToFileURL } from "url"
 import { Effect, Layer, ServiceMap } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
-import { Instance } from "@/project/instance"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { Question } from "../question"
@@ -119,8 +118,8 @@ export namespace ToolRegistry {
                 execute: async (args, toolCtx) => {
                   const pluginCtx: PluginToolContext = {
                     ...toolCtx,
-                    directory: Instance.directory,
-                    worktree: Instance.worktree,
+                    directory: ctx.directory,
+                    worktree: ctx.worktree,
                   }
                   const result = await def.execute(args as any, pluginCtx)
                   const output = typeof result === "string" ? result : result.output

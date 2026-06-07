@@ -148,12 +148,10 @@ export namespace MCP {
       inputSchema: jsonSchema(schema),
       execute: async (args: unknown) => {
         const value = timeout ?? DEFAULT_TIMEOUT
-        const remapped =
-          typeof args === "object" && args !== null ? Instance.remapArgs(args as Record<string, unknown>) : args
         return client.callTool(
           {
             name: mcpTool.name,
-            arguments: (remapped || {}) as Record<string, unknown>,
+            arguments: (args || {}) as Record<string, unknown>,
           },
           CallToolResultSchema,
           {

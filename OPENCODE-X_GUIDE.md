@@ -99,24 +99,16 @@ Your custom instructions here.
 
 ### Configuration Options
 
-| Option              | Type                                   | Description                                                   |
-| ------------------- | -------------------------------------- | ------------------------------------------------------------- |
-| `description`       | string                                 | Brief description (required)                                  |
-| `mode`              | `"primary"` \| `"subagent"` \| `"all"` | Agent type                                                    |
-| `model`             | string                                 | Model ID (`provider/model-id`)                                |
-| `variant`           | string                                 | Default model variant for this agent                          |
-| `prompt`            | string                                 | Custom system prompt or `{file:./path}`                       |
-| `temperature`       | number                                 | 0.0-1.0 randomness control                                    |
-| `top_p`             | number                                 | Top-P sampling parameter                                      |
-| `steps`             | number                                 | Max agentic iterations before forcing text-only response      |
-| `color`             | string                                 | Hex `#RRGGBB` or theme name (`primary`, `accent`, `error`, …) |
-| `parallelToolCalls` | boolean                                | Override safe parallel tool-call behavior for this agent      |
-| `permission`        | object                                 | Tool permissions                                              |
-| `options`           | object                                 | Extra provider-specific options passed through                |
-| `hidden`            | boolean                                | Hide from autocomplete (subagents only)                       |
-| `disable`           | boolean                                | Disable agent                                                 |
-
-> **Deprecated**: `tools` (use `permission`), `maxSteps` (use `steps`).
+| Option        | Type                                   | Description                             |
+| ------------- | -------------------------------------- | --------------------------------------- |
+| `description` | string                                 | Brief description (required)            |
+| `mode`        | `"primary"` \| `"subagent"` \| `"all"` | Agent type                              |
+| `model`       | string                                 | Model ID (`provider/model-id`)          |
+| `prompt`      | string                                 | Custom system prompt or `{file:./path}` |
+| `temperature` | number                                 | 0.0-1.0 randomness control              |
+| `permission`  | object                                 | Tool permissions                        |
+| `hidden`      | boolean                                | Hide from autocomplete                  |
+| `disable`     | boolean                                | Disable agent                           |
 
 ### Permissions
 
@@ -337,9 +329,7 @@ These slash commands are implemented in this fork:
 | `/btw`           | Inject context into the running session without starting a new turn. Opens a dialog; text is inserted as a system message visible to the agent but not displayed as a user message. |
 | `/clear`         | Clear all messages in the current session.                                                                                                                                          |
 | `/clear-compact` | Clear messages and run compaction to summarize history.                                                                                                                             |
-| `/config`        | Show all merged config key-values in a dialog. Supports in-place editing of non-redacted values (writes back to config file).                                                       |
 | `/goto`          | Jump to a file or symbol. Opens a dialog for file/symbol input.                                                                                                                     |
-| `/usage`         | Show per-model cost/tokens/duration + subagent costs for the current session.                                                                                                       |
 
 ### Creating Commands
 
@@ -648,30 +638,12 @@ export AWS_REGION=us-east-1
   "provider": {
     "anthropic": {
       "options": {
-        "baseURL": "https://api.anthropic.com/v1",
-        "apiKey": "sk-...",
-        "timeout": 120000,
-        "headerTimeout": 30000,
-        "chunkTimeout": 60000,
-        "caching": false,
-        "setCacheKey": false
+        "baseURL": "https://api.anthropic.com/v1"
       }
     }
   }
 }
 ```
-
-**Provider options:**
-
-| Option          | Description                                                       |
-| --------------- | ----------------------------------------------------------------- |
-| `apiKey`        | API key override                                                  |
-| `baseURL`       | Base URL override                                                 |
-| `timeout`       | Full request timeout in ms (`false` to disable)                   |
-| `headerTimeout` | Timeout waiting for response headers in ms (`false` to disable)   |
-| `chunkTimeout`  | Timeout between SSE chunks in ms; overrides `stream_idle_timeout` |
-| `caching`       | Enable explicit `cache_control` markers (Deepseek, Fireworks)     |
-| `setCacheKey`   | Enable `promptCacheKey` for providers that support it             |
 
 ---
 
@@ -861,31 +833,19 @@ project-root/
 
 ### Key Options
 
-| Field                | Description                                                           |
-| -------------------- | --------------------------------------------------------------------- |
-| `model`              | Default model                                                         |
-| `small_model`        | Small model for lightweight tasks (title generation, etc.)            |
-| `default_agent`      | Default primary agent                                                 |
-| `username`           | Custom username displayed in conversations instead of system username |
-| `instructions`       | Additional instruction files or URLs                                  |
-| `snapshot`           | Enable/disable filesystem snapshot tracking (default: `true`)         |
-| `share`              | Sharing behavior: `"manual"`, `"auto"`, or `"disabled"`               |
-| `autoupdate`         | Auto-update: `true`, `false`, or `"notify"`                           |
-| `disabled_providers` | Disable providers loaded automatically                                |
-| `enabled_providers`  | Allowlist of providers; all others are ignored                        |
-| `permission`         | Global permissions                                                    |
-| `agent`              | Agent configs                                                         |
-| `command`            | Custom commands                                                       |
-| `skills`             | Skill paths/URLs                                                      |
-| `provider`           | Provider configs                                                      |
-| `mcp`                | MCP server configs                                                    |
-| `hooks`              | Inline hook rules (same format as `hooks.json`, merged with external) |
-| `formatter`          | Code formatter configs per language/extension                         |
-| `lsp`                | LSP server configs                                                    |
-| `tool_output`        | Truncation thresholds for tool output (`max_lines`, `max_bytes`)      |
-| `compaction`         | Compaction settings                                                   |
-| `hybrid`             | Hybrid cloud/local routing config                                     |
-| `experimental`       | Experimental features                                                 |
+| Field           | Description                  |
+| --------------- | ---------------------------- |
+| `model`         | Default model                |
+| `default_agent` | Default primary agent        |
+| `instructions`  | Additional instruction files |
+| `permission`    | Global permissions           |
+| `agent`         | Agent configs                |
+| `command`       | Custom commands              |
+| `skills`        | Skill paths/URLs             |
+| `provider`      | Provider configs             |
+| `mcp`           | MCP server configs           |
+| `compaction`    | Compaction settings          |
+| `experimental`  | Experimental features        |
 
 ### Permission Configuration
 
@@ -916,9 +876,7 @@ project-root/
   "compaction": {
     "auto": true,
     "prune": true,
-    "reserved": 20000,
-    "tail_turns": 2,
-    "tail_tokens": 40000
+    "reserved": 20000
   }
 }
 ```
@@ -926,8 +884,6 @@ project-root/
 - `auto`: Automatically compact when approaching limit
 - `prune`: Remove old tool outputs
 - `reserved`: Token buffer for compaction overhead
-- `tail_turns`: Recent user turns (+ their following assistant/tool responses) to keep verbatim (default: `2`)
-- `tail_tokens`: Token budget for retained recent turn spans
 
 #### Sliding Window Compaction (opencode-x)
 
@@ -939,25 +895,17 @@ Replaces hard-truncation with a rolling-window strategy. History is split into a
     "sliding_window": {
       "enabled": true,
       "threshold": 50000,
-      "tail_ratio": 0.5,
-      "primary_only": true,
-      "timeout_ms": 30000,
-      "proactive_ratio": 0.95,
-      "hysteresis_min_tokens": 30000
+      "tail_ratio": 0.5
     }
   }
 }
 ```
 
-| Field                   | Default | Description                                                     |
-| ----------------------- | ------- | --------------------------------------------------------------- |
-| `enabled`               | `false` | Enable sliding window compaction                                |
-| `threshold`             | `50000` | Token count at which compaction triggers                        |
-| `tail_ratio`            | `0.5`   | Fraction of tokens reserved for verbatim tail                   |
-| `primary_only`          | `true`  | Only apply to primary agents (not subagents)                    |
-| `timeout_ms`            | `30000` | Timeout for summary generation call (ms)                        |
-| `proactive_ratio`       | —       | Derive threshold from model context limit (e.g. `0.95`)         |
-| `hysteresis_min_tokens` | `30000` | Min new tail tokens before next compact fires (prevents thrash) |
+| Field        | Default | Description                                   |
+| ------------ | ------- | --------------------------------------------- |
+| `enabled`    | `false` | Enable sliding window compaction              |
+| `threshold`  | `50000` | Token count at which compaction triggers      |
+| `tail_ratio` | `0.5`   | Fraction of tokens reserved for verbatim tail |
 
 Enable via env var instead of config:
 
@@ -966,26 +914,6 @@ OPENCODE_EXPERIMENTAL_SLIDING_WINDOW=1 opencode
 ```
 
 Token savings per session are tracked and visible in the TUI status dialog (`/status`).
-
-### Tool Output Truncation
-
-Large tool outputs are truncated when they exceed thresholds; the full output is saved to disk and a preview is returned to the model.
-
-```json
-{
-  "tool_output": {
-    "max_lines": 2000,
-    "max_bytes": 51200
-  }
-}
-```
-
-| Field       | Default | Description                         |
-| ----------- | ------- | ----------------------------------- |
-| `max_lines` | `2000`  | Max lines before truncation to disk |
-| `max_bytes` | `51200` | Max bytes before truncation to disk |
-
----
 
 ### Stream Idle Timeout
 
@@ -1027,7 +955,6 @@ Precedence: per-provider `chunkTimeout` > global `stream_idle_timeout` > default
     "permission_ask_timeout": 2700000,
     "parallel_tool_calls": true,
     "parallel_read": true,
-    "parallel_bash_readonly": true,
     "continue_loop_on_deny": true,
     "loop_detector_threshold": 5,
     "max_subagent_depth": 3,
@@ -1037,30 +964,7 @@ Precedence: per-provider `chunkTimeout` > global `stream_idle_timeout` > default
     "ultrawork_model": {
       "providerID": "anthropic",
       "modelID": "claude-sonnet-4-6"
-    },
-    "branch_pr_review": true,
-    "branch_pr_auto_merge": false,
-    "branch_pr_merge_strategy": "squash",
-    "branch_pr_max_diff_lines": 500,
-    "branch_pr_ttl_hours": 24,
-    "worktree_isolation": false,
-    "tool_result_budget": 50000,
-    "microcompact": true,
-    "context_collapse": true,
-    "prompt_split_caching": true,
-    "goal_system": false,
-    "persistent_memory": true,
-    "multi_step": true,
-    "multi_step_count": 5,
-    "noop_exit": true,
-    "proactive_prune": false,
-    "subagent_context_transfer": false,
-    "strip_thinking_text": false,
-    "openTelemetry": false,
-    "batch_tool": false,
-    "history_cache": false,
-    "part_coalescer": false,
-    "registry_cache": false
+    }
   }
 }
 ```
@@ -1073,11 +977,6 @@ Precedence: per-provider `chunkTimeout` > global `stream_idle_timeout` > default
 **parallel_read:**
 
 - Allow the read tool to participate in parallel tool calls (requires `parallel_tool_calls: true`)
-- Default: `false`
-
-**parallel_bash_readonly:**
-
-- Allow read-only bash commands (ls, cat, grep, etc.) to run in parallel tool calls
 - Default: `false`
 
 **continue_loop_on_deny:**
@@ -1134,121 +1033,10 @@ Precedence: per-provider `chunkTimeout` > global `stream_idle_timeout` > default
 - Activates when a task prompt contains `ulw` / `ultrawork`
 - No effect if this model is not configured in your providers
 
-**branch_pr_review:**
+**background_subagents:**
 
-- Enable branch-pr isolation mode for subagents. Each subagent gets its own git branch + worktree. After completion, a structured diff is returned to the primary agent for review before merge.
-- Default: `true`
-
-**branch_pr_auto_merge:**
-
-- Skip the review gate and auto-merge subagent branches on completion (for trusted subagents)
-- Default: `false`
-
-**branch_pr_merge_strategy:**
-
-- Merge strategy when approving a branch PR: `"fast-forward"`, `"merge-commit"`, or `"squash"`
-- Default: `"squash"`
-
-**branch_pr_max_diff_lines:**
-
-- Maximum diff lines shown to the primary agent for review. Larger diffs are truncated with a summary.
-- Default: `500`
-
-**branch_pr_ttl_hours:**
-
-- Hours before orphaned `opencode/*` branches (from crashes or rejections) are cleaned up on next startup
-- Default: `24`
-
-**worktree_isolation:**
-
-- Enable git worktree isolation for parallel subagents (independent worktrees per subagent run)
-- Default: `false`
-
-**tool_result_budget:**
-
-- Global character budget for tool results in history (Tier 1 context safety net)
-- Default: disabled; set to e.g. `50000` to enable
-
-**microcompact:**
-
-- Enable gradual MicroCompact at 75% context utilization (Tier 2 context safety net)
-- Default: `false`
-
-**context_collapse:**
-
-- Enable emergency context collapse at 97% context utilization (Tier 3 context safety net)
-- Default: `false`
-
-**prompt_split_caching:**
-
-- Split system prompt into stable cached prefix and dynamic suffix to maximize provider cache hits
-- Default: `false`
-
-**goal_system:**
-
-- Enable autonomous goal system with `/goal` command
-- Default: `false`
-
-**persistent_memory:**
-
-- Enable cross-session persistent memory (markdown files in `~/.local/share/opencode/memory/`)
-- Default: `false`
-
-**multi_step:**
-
-- Enable multi-step streamText for safe tool chains (SDK-internal steps)
-- Default: `true`
-
-**multi_step_count:**
-
-- Max SDK-internal steps when `multi_step` enabled
-- Default: `5`, max: `10`
-
-**noop_exit:**
-
-- Exit agent loop early when model returns empty response with no tool calls
-- Default: `false`
-
-**proactive_prune:**
-
-- Aggressively prune tool outputs at 80% context usage to avoid hitting compaction
-- Default: `false`
-
-**subagent_context_transfer:**
-
-- Transfer relevant parent context to subagent sessions on spawn
-- Default: `false`
-
-**strip_thinking_text:**
-
-- Strip inline `<thinking>…</thinking>` segments from text parts before sending to LLM
-- Saves input tokens at cost of CoT continuity
-- Default: `false`
-
-**openTelemetry:**
-
-- Enable OpenTelemetry spans for AI SDK calls via `experimental_telemetry` flag
-- Default: `false`
-
-**batch_tool:**
-
-- Enable the batch tool for executing multiple tool calls in one turn
-- Default: `false`
-
-**history_cache:**
-
-- Cache ModelMessage rebuild across loop iterations; invalidates on compaction (perf optimization)
-- Default: `false`
-
-**part_coalescer:**
-
-- Coalesce part updates during streaming; flush on terminal state or window timer (perf optimization)
-- Default: `false`
-
-**registry_cache:**
-
-- Cache `Tool.init()` results across runs (perf optimization)
-- Default: `false`
+- Enable experimental fire-and-forget task spawning (set `background: true` on Task tool calls)
+- Default: `false` — background param is silently ignored unless this is enabled
 
 ### Hybrid Routing
 
@@ -1262,18 +1050,9 @@ Hybrid routing splits work between a local (cheap/fast) model and a cloud model.
       "providerID": "anthropic",
       "modelID": "claude-haiku-4-5"
     },
-    "cloud_model": {
-      "providerID": "anthropic",
-      "modelID": "claude-sonnet-4-6"
-    },
-    "compression_timeout_ms": 5000,
-    "compression_max_tokens": 4096,
-    "compression_tail_lines": 20,
-    "compression_thresholds": {
-      "grep": 50,
-      "webfetch": 50,
-      "bash": 30
-    },
+    "compression_timeout_ms": 8000,
+    "compression_max_tokens": 2048,
+    "compression_tail_lines": 5,
     "log_routing": true
   }
 }
@@ -1289,10 +1068,6 @@ Hybrid routing splits work between a local (cheap/fast) model and a cloud model.
 - Local model reference used for lightweight tasks routed away from the cloud model
 - Required for hybrid routing to activate; omitting disables local routing silently
 
-**cloud_model:**
-
-- Cloud model override; if omitted, session model is used
-
 **compression_timeout_ms:**
 
 - Timeout in milliseconds for the local model compression call
@@ -1301,19 +1076,12 @@ Hybrid routing splits work between a local (cheap/fast) model and a cloud model.
 **compression_max_tokens:**
 
 - Max output tokens for the compression response
-- Default: `4096`
+- Default: `1024`
 
 **compression_tail_lines:**
 
 - Number of trailing lines from the original output to always preserve verbatim in the compressed result (anti-hallucination anchor)
-- Default: `20`
-
-**compression_thresholds:**
-
-- Per-tool line count thresholds for compression eligibility
-- `grep`: lines before grep/glob output is compressed (default: `50`)
-- `webfetch`: lines before webfetch/websearch output is compressed (default: `50`)
-- `bash`: lines before bash output is compressed (default: `30`)
+- Default: `3`
 
 **log_routing:**
 
@@ -1322,7 +1090,7 @@ Hybrid routing splits work between a local (cheap/fast) model and a cloud model.
 
 #### How compression works
 
-Large tool outputs (above the line-count threshold) are pre-processed by the local model before being sent to the cloud model. Three templates are used, selected automatically by tool type:
+Large tool outputs (above a line-count threshold) are pre-processed by the local model before being sent to the cloud model. Three templates are used, selected automatically by tool type:
 
 | Template    | Used for               | Output                             |
 | ----------- | ---------------------- | ---------------------------------- |
@@ -1331,59 +1099,6 @@ Large tool outputs (above the line-count threshold) are pre-processed by the loc
 | `FILTER`    | logs, diffs            | Matching items only, noise dropped |
 
 Falls back silently to raw output on error or timeout — never corrupts results.
-
----
-
-### Keybinds
-
-Keybinds are configured in `tui.json` (not `opencode.json`):
-
-```json
-{
-  "keybinds": {
-    "leader": "ctrl+x",
-    "session_new": "<leader>n",
-    "session_list": "<leader>l",
-    "session_compact": "<leader>c",
-    "session_background": "<leader>d",
-    "model_list": "<leader>m",
-    "agent_list": "<leader>a",
-    "agent_cycle": "tab",
-    "command_list": "ctrl+p",
-    "status_view": "<leader>s",
-    "messages_copy": "<leader>y",
-    "messages_undo": "<leader>u",
-    "messages_redo": "<leader>r",
-    "session_export": "<leader>x"
-  }
-}
-```
-
-Key defaults:
-
-| Keybind                  | Default        | Action                       |
-| ------------------------ | -------------- | ---------------------------- |
-| `leader`                 | `ctrl+x`       | Leader key prefix            |
-| `session_new`            | `<leader>n`    | New session                  |
-| `session_list`           | `<leader>l`    | Session list                 |
-| `session_compact`        | `<leader>c`    | Compact session              |
-| `session_background`     | `<leader>d`    | Push to background           |
-| `session_fork`           | `none`         | Fork session from message    |
-| `session_cycle_recent`   | `<leader>]`    | Cycle to prev recent session |
-| `session_quick_switch_1` | `<leader>1`    | Switch to quick slot 1       |
-| `model_list`             | `<leader>m`    | Model picker                 |
-| `model_cycle_recent`     | `f2`           | Next recently used model     |
-| `agent_list`             | `<leader>a`    | Agent picker                 |
-| `agent_cycle`            | `tab`          | Next agent                   |
-| `command_list`           | `ctrl+p`       | Command palette              |
-| `status_view`            | `<leader>s`    | Status dialog                |
-| `messages_copy`          | `<leader>y`    | Copy message                 |
-| `messages_undo`          | `<leader>u`    | Undo message                 |
-| `messages_redo`          | `<leader>r`    | Redo message                 |
-| `session_export`         | `<leader>x`    | Export session to editor     |
-| `session_interrupt`      | `escape`       | Interrupt current session    |
-| `input_submit`           | `return`       | Submit input                 |
-| `input_newline`          | `shift+return` | Insert newline               |
 
 ---
 
@@ -1553,20 +1268,19 @@ OAuth tokens are cached at `~/.local/share/opencode/mcp-auth.json`.
 
 ### Field reference
 
-| Field                | Applies to | Type                    | Required | Description                                                     |
-| -------------------- | ---------- | ----------------------- | -------- | --------------------------------------------------------------- |
-| `type`               | both       | `"local"` \| `"remote"` | ✓        | Transport type                                                  |
-| `command`            | local      | `string[]`              | ✓        | Executable + args array                                         |
-| `url`                | remote     | `string`                | ✓        | MCP server URL                                                  |
-| `environment`        | local      | `Record<string,string>` | –        | Env vars for subprocess                                         |
-| `headers`            | remote     | `Record<string,string>` | –        | HTTP headers; supports `{env:VAR}`                              |
-| `oauth`              | remote     | `object \| false`       | –        | OAuth config or `false` to disable                              |
-| `oauth.clientId`     | remote     | `string`                | –        | Pre-registered client ID                                        |
-| `oauth.clientSecret` | remote     | `string`                | –        | Client secret                                                   |
-| `oauth.scope`        | remote     | `string`                | –        | Space-separated OAuth scopes                                    |
-| `tools`              | both       | `string[]`              | –        | Allowlist of tool names to expose; all tools exposed if omitted |
-| `enabled`            | both       | `boolean`               | –        | `false` skips connection at startup                             |
-| `timeout`            | both       | `number` (ms)           | –        | Per-server timeout (default: 5000)                              |
+| Field                | Applies to | Type                    | Required | Description                         |
+| -------------------- | ---------- | ----------------------- | -------- | ----------------------------------- |
+| `type`               | both       | `"local"` \| `"remote"` | ✓        | Transport type                      |
+| `command`            | local      | `string[]`              | ✓        | Executable + args array             |
+| `url`                | remote     | `string`                | ✓        | MCP server URL                      |
+| `environment`        | local      | `Record<string,string>` | –        | Env vars for subprocess             |
+| `headers`            | remote     | `Record<string,string>` | –        | HTTP headers; supports `{env:VAR}`  |
+| `oauth`              | remote     | `object \| false`       | –        | OAuth config or `false` to disable  |
+| `oauth.clientId`     | remote     | `string`                | –        | Pre-registered client ID            |
+| `oauth.clientSecret` | remote     | `string`                | –        | Client secret                       |
+| `oauth.scope`        | remote     | `string`                | –        | Space-separated OAuth scopes        |
+| `enabled`            | both       | `boolean`               | –        | `false` skips connection at startup |
+| `timeout`            | both       | `number` (ms)           | –        | Per-server timeout (default: 5000)  |
 
 Global timeout override: `"experimental": { "mcp_timeout": 30000 }`.
 
@@ -1810,8 +1524,6 @@ All sources are **merged** (not overridden). Rules from all sources that exist a
 | 2        | `<project>/.claude/settings.json` → `hooks` | Project-level Claude Code hooks                      |
 | 3        | `~/.claude/settings.json` → `hooks`         | User-level Claude Code hooks (auto-loaded)           |
 
-Hooks can also be defined directly in `opencode.json` under the `hooks` key using the same format as `hooks.json`. Config hooks override loaded rules for the matching event.
-
 **Key point**: If you already have hooks in `~/.claude/settings.json`, they work immediately. You only need `~/.config/opencode/hooks.json` if you want to add hooks that should NOT apply to Claude Code, or to extend Claude hooks with opencode-specific events.
 
 ### Additional Claude Code Sources
@@ -1927,6 +1639,7 @@ Detach a running session to the background without killing it. The TUI immediate
 
 ### Requirements
 
+- Feature flag: `experimental.background_subagents` must be enabled
 - Session must be actively running (not idle)
 
 ---
