@@ -67,6 +67,7 @@ export namespace DetachedNotes {
   type ParentState = {
     children: Map<string, { description: string; result?: ChildResult }>
     model: { providerID: string; modelID: string }
+    variant?: string
     agent: string
     pending: number
   }
@@ -78,12 +79,13 @@ export namespace DetachedNotes {
     children: Array<{ childID: SessionID; description: string }>,
     model: { providerID: string; modelID: string },
     agent: string,
+    variant?: string,
   ) {
     const map = new Map<string, { description: string; result?: ChildResult }>()
     for (const child of children) {
       map.set(child.childID, { description: child.description })
     }
-    parents.set(parentID, { children: map, model, agent, pending: children.length })
+    parents.set(parentID, { children: map, model, agent, variant, pending: children.length })
   }
 
   export function childCompleted(

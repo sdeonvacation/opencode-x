@@ -172,6 +172,7 @@ export namespace SessionPrompt {
             ? { providerID: lastAssist.info.providerID, modelID: lastAssist.info.modelID }
             : { providerID: "unknown" as any, modelID: "unknown" as any }
         const agent = lastAssist && lastAssist.info.role === "assistant" ? lastAssist.info.agent : "build"
+        const variant = lastAssist && lastAssist.info.role === "assistant" ? lastAssist.info.variant : undefined
 
         // Protect children from cancel cascade
         for (const child of running) {
@@ -184,6 +185,7 @@ export namespace SessionPrompt {
           running.map((c) => ({ childID: c.childID, description: c.description })),
           model,
           agent,
+          variant,
         )
 
         // Register BackgroundJob watcher per child
@@ -226,6 +228,7 @@ export namespace SessionPrompt {
               await SessionPrompt.prompt({
                 sessionID: parentID,
                 model: { providerID: model.providerID, modelID: model.modelID },
+                variant,
                 agent,
                 parts: [{ type: "text", text, synthetic: true }],
               })
