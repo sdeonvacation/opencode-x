@@ -31,7 +31,7 @@
     "README.md"
   ],
   "bin": {
-    "opencode": "./bin/opencode"
+    "opencode-x": "./bin/opencode"
   },
   "exports": {
     "./*": "./src/*.ts"

@@ -23,7 +23,7 @@ Built on top of [opencode](https://github.com/anomalyco/opencode) — adds Claud
 
 ```bash
 npm install -g @sdeonvacation/opencode-x
-opencode
+opencode-x
 ```
 
 ### Download Binary

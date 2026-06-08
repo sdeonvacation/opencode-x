@@ -313,7 +313,7 @@
       "name": "@sdeonvacation/opencode-x",
       "version": "1.0.3",
       "bin": {
-        "opencode": "./bin/opencode",
+        "opencode-x": "./bin/opencode",
       },
       "dependencies": {
         "@actions/core": "1.11.1",
