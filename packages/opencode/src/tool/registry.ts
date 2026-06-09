@@ -7,6 +7,7 @@ import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
+import { TaskStatusTool } from "./task_status"
 
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
@@ -181,6 +182,7 @@ export namespace ToolRegistry {
           EditTool,
           WriteTool,
           task,
+          ...(Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS ? [TaskStatusTool] : []),
           webfetch,
           todo,
           websearch,
