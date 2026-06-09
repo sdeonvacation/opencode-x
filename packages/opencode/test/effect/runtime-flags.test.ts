@@ -19,7 +19,7 @@ describe("RuntimeFlags", () => {
     expect(flags.enableParallel).toBe(false)
     expect(flags.enableExperimentalModels).toBe(false)
     expect(flags.enableQuestionTool).toBe(false)
-    expect(flags.experimentalBackgroundSubagents).toBe(false)
+    expect(flags.experimentalBackgroundSubagents).toBe(true)
     expect(flags.experimentalLspTool).toBe(false)
     expect(flags.experimentalPlanMode).toBe(false)
     expect(flags.experimentalWorkspaces).toBe(false)

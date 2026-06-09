@@ -79,7 +79,7 @@ describe("LSP service lifecycle", () => {
       await Bun.write(path.join(root, "tsconfig.json"), "{}")
 
       const result = await LSPServer.Typescript.root(path.join(root, "src", "test.ts"))
-      expect(result).toBe(root)
+      expect(result).toBe(dir)
     }),
   )
 
@@ -92,7 +92,7 @@ describe("LSP service lifecycle", () => {
       await Bun.write(path.join(root, "package.json"), "{}")
 
       const result = await LSPServer.Typescript.root(path.join(root, "src", "test.ts"))
-      expect(result).toBe(root)
+      expect(result).toBe(dir)
     }),
   )
 

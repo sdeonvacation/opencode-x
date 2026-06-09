@@ -7,13 +7,12 @@ function makeDeps(overrides?: Partial<WorktreeCommandDeps>): WorktreeCommandDeps
     dialog: { clear: mock(() => {}), replace: mock((_view?: unknown, _onClose?: unknown) => {}) },
     sdk: {
       client: {
-        experimental: {
-          worktree: {
-            create: mock(async () => ({ data: { name: "feat", branch: "feat", directory: "/tmp/wt/feat" } })),
-            list: mock(async () => ({ data: ["/tmp/wt/a", "/tmp/wt/b"] })),
-            remove: mock(async () => ({ data: true })),
-          },
+        worktree: {
+          create: mock(async () => ({ data: { name: "feat", branch: "feat", directory: "/tmp/wt/feat" } })),
+          list: mock(async () => ({ data: ["/tmp/wt/a", "/tmp/wt/b"] })),
+          remove: mock(async () => ({ data: true })),
         },
+        project: { current: mock(async () => ({})) },
       },
       changeDirectory: mock(async () => {}),
     },

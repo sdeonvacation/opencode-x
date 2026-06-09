@@ -59,7 +59,7 @@ describe("lsp.spawn", () => {
     }
   })
 
-  test("spawns typescript with nearest package boundary", async () => {
+  test("spawns typescript rooted at project root", async () => {
     await using tmp = await tmpdir()
     const spy = spyOn(LSPServer.Typescript, "spawn").mockResolvedValue(undefined)
     const root = path.join(tmp.path, "packages", "app")
@@ -81,7 +81,7 @@ describe("lsp.spawn", () => {
       })
 
       expect(spy).toHaveBeenCalledTimes(1)
-      expect(spy).toHaveBeenCalledWith(root)
+      expect(spy).toHaveBeenCalledWith(tmp.path)
     } finally {
       spy.mockRestore()
       await Instance.disposeAll()
