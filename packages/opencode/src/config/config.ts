@@ -1656,6 +1656,20 @@ export namespace Config {
           goal_system: z.boolean().optional().describe("Enable autonomous goal system with /goal command"),
           hooks: z.boolean().optional().describe("Enable plugin hooks system (Claude Code compatible)"),
           persistent_memory: z.boolean().optional().describe("Enable cross-session persistent memory"),
+          swarm: z.boolean().optional().describe("Enable swarm mode tool and /swarm command"),
+          swarm_max_items: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Hard cap on items per swarm invocation (default: 128)"),
+          swarm_concurrency: z
+            .number()
+            .int()
+            .positive()
+            .max(20)
+            .optional()
+            .describe("Default per-swarm parallelism cap (default: 5)"),
           multi_step: z
             .boolean()
             .optional()

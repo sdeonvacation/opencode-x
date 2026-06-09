@@ -48,6 +48,7 @@ import { filterTools } from "./tool-filter"
 import { BackgroundJob } from "@/background/job"
 import { GoalCompleteTool } from "./goal-complete"
 import { MemoryPersistTool } from "./memory-persist"
+import { SwarmTool } from "./swarm"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -105,6 +106,7 @@ export namespace ToolRegistry {
       const plan = yield* PlanExitTool
       const webfetch = yield* WebFetchTool
       const websearch = yield* WebSearchTool
+      const swarm = yield* SwarmTool
 
       const state = yield* InstanceState.make<State>(
         Effect.fn("ToolRegistry.state")(function* (ctx) {
@@ -192,6 +194,7 @@ export namespace ToolRegistry {
           ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [plan] : []),
           ...(cfg.experimental?.goal_system !== false ? [GoalCompleteTool] : []),
           ...(cfg.experimental?.persistent_memory !== false ? [MemoryPersistTool] : []),
+          ...(cfg.experimental?.swarm !== false ? [swarm] : []),
           ...s.custom,
         ]
       })

@@ -1,0 +1,14 @@
+Launch a batch of parallel subagents, each processing one item from an array using the same prompt template.
+
+Use this tool when you need to perform the same operation across multiple items in parallel — for example, reviewing multiple files, translating multiple documents, or processing multiple data entries.
+
+The template uses {{placeholder}} syntax. Each item provides values for the placeholders.
+
+Results are returned as structured XML with per-item status, output, and timing.
+
+Usage notes:
+- Each item spawns an independent subagent session
+- Items are processed in parallel up to the concurrency limit
+- Individual item failures don't abort the swarm — other items continue
+- Set background=true to dispatch and continue immediately (results injected when done)
+- Swarm subagents cannot spawn their own subagents or swarms (no recursion)

@@ -11,6 +11,7 @@ import { Skill } from "../skill"
 import { Log } from "../util/log"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
+import PROMPT_SWARM from "./template/swarm.txt"
 
 export namespace Command {
   const log = Log.create({ service: "command" })
@@ -102,6 +103,18 @@ export namespace Command {
           },
           subtask: true,
           hints: hints(PROMPT_REVIEW),
+        }
+
+        if (cfg.experimental?.swarm !== false) {
+          commands["swarm"] = {
+            name: "swarm",
+            description: "batch-parallel subagent execution across multiple items",
+            source: "command",
+            get template() {
+              return PROMPT_SWARM
+            },
+            hints: hints(PROMPT_SWARM),
+          }
         }
 
         for (const [name, command] of Object.entries(cfg.command ?? {})) {
