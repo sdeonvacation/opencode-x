@@ -1654,6 +1654,7 @@ export namespace Config {
             .optional()
             .describe("Split system prompt into cached/dynamic sections for improved provider caching"),
           goal_system: z.boolean().optional().describe("Enable autonomous goal system with /goal command"),
+          worktree_isolation: z.boolean().optional().describe("Enable worktree isolation for subagent tasks"),
           hooks: z.boolean().optional().describe("Enable plugin hooks system (Claude Code compatible)"),
           persistent_memory: z.boolean().optional().describe("Enable cross-session persistent memory"),
           swarm: z.boolean().optional().describe("Enable swarm mode tool and /swarm command"),

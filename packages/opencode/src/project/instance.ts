@@ -12,6 +12,7 @@ export interface InstanceContext {
   directory: string
   worktree: string
   project: Project.Info
+  isolated?: boolean
 }
 
 const context = Context.create<InstanceContext>("instance")
@@ -20,8 +21,6 @@ const cache = new Map<string, Promise<InstanceContext>>()
 const disposal = {
   all: undefined as Promise<void> | undefined,
 }
-
-function emitDisposed(directory: string) {}
 
 function boot(input: { directory: string; init?: () => Promise<any>; worktree?: string; project?: Project.Info }) {
   return iife(async () => {
@@ -54,8 +53,20 @@ function track(directory: string, next: Promise<InstanceContext>) {
 }
 
 export const Instance = {
-  async provide<R>(input: { directory: string; init?: () => Promise<any>; fn: () => R }): Promise<R> {
+  async provide<R>(input: {
+    directory: string
+    init?: () => Promise<any>
+    fn: () => R
+    isolated?: boolean
+  }): Promise<R> {
     const directory = Filesystem.resolve(input.directory)
+
+    if (input.isolated) {
+      const ctx = await boot({ directory, init: input.init })
+      ctx.isolated = true
+      return context.provide(ctx, async () => input.fn())
+    }
+
     let existing = cache.get(directory)
     if (!existing) {
       Log.Default.info("creating instance", { directory })
@@ -83,6 +94,9 @@ export const Instance = {
   },
   get project() {
     return context.use().project
+  },
+  get isolated() {
+    return context.use().isolated ?? false
   },
 
   /**

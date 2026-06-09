@@ -22,6 +22,7 @@ import { Log } from "@/util/log"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import { makeRuntime } from "@/effect/run-service"
 import { Instance } from "@/project/instance"
+import { isolatedRun } from "../orchestration/isolation"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): void
@@ -48,6 +49,12 @@ const baseParameters = z.object({
     )
     .optional(),
   command: z.string().describe("The command that triggered this task").optional(),
+  isolation: z
+    .boolean()
+    .describe(
+      "Run subagent in an isolated git worktree. Use when multiple subagents run in parallel and may edit overlapping files. Each gets a private copy of the repo; changes are captured as a patch and applied back sequentially. Not needed for read-only tasks or when only one subagent writes at a time.",
+    )
+    .optional(),
 })
 
 export const parameters = baseParameters.extend({
@@ -92,6 +99,13 @@ function backgroundUpdateOutput(sessionID: SessionID) {
 function errorText(error: unknown) {
   if (error instanceof Error) return error.message
   return String(error)
+}
+
+function formatIsolation(result: Awaited<ReturnType<typeof isolatedRun>>): string {
+  if (result.patch.status === "applied") return result.output + "\n\n[ISOLATION] Changes applied to parent worktree."
+  if (result.patch.status === "conflict")
+    return result.output + `\n\n[ISOLATION] Patch conflict on branch ${result.patch.branch}: ${result.patch.message}`
+  return result.output
 }
 
 const bgRuntime = makeRuntime(BackgroundJob.Service, BackgroundJob.defaultLayer)
@@ -274,9 +288,18 @@ export const TaskTool = Tool.defineEffect(
             }
           })
 
+          const shouldIsolate =
+            params.isolation && cfg.experimental?.worktree_isolation && Instance.project.vcs === "git"
+
+          // Bind to parent Instance context — BackgroundJob fibers lose Node.js ALS
+          const executeTask = Instance.bind(async (): Promise<string> => {
+            if (shouldIsolate) return formatIsolation(await isolatedRun({ sessionID: nextSession.id, run: runTask }))
+            return runTask()
+          })
+
           const makeRun = () =>
             Effect.tryPromise({
-              try: () => runTask(),
+              try: () => executeTask(),
               catch: (err) => err,
             }).pipe(
               Effect.tap((text) => Effect.promise(() => inject("completed", text)).pipe(Effect.ignore)),
@@ -348,30 +371,63 @@ export const TaskTool = Tool.defineEffect(
             },
           })
 
-          await acquire(concurrencyKey, concurrencyLimit, ctx.abort)
           const timeout = cfg.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT
+          const promptArgs = {
+            messageID,
+            sessionID: nextSession.id,
+            model: {
+              modelID: ModelID.make(finalModel.modelID),
+              providerID: ProviderID.make(finalModel.providerID),
+            },
+            variant: parentVariant,
+            agent: next.name,
+            tools: {
+              ...(canTodo ? {} : { todowrite: false }),
+              ...(canTask ? {} : { task: false }),
+              ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
+              goal_complete: false,
+            },
+            parts: promptParts,
+          }
+
+          if (params.isolation && cfg.experimental?.worktree_isolation && Instance.project.vcs === "git") {
+            const isolated = await isolatedRun({
+              sessionID: nextSession.id,
+              run: async () => {
+                await acquire(concurrencyKey, concurrencyLimit, ctx.abort)
+                try {
+                  const res = await withTimeout(SessionPrompt.prompt(promptArgs), timeout).catch((err) => {
+                    if (err instanceof Error && err.message.includes("Operation timed out")) {
+                      cancel()
+                      throw new Error(`Subagent timed out after ${timeout}ms`)
+                    }
+                    throw err
+                  })
+                  return res.parts.findLast((item) => item.type === "text")?.text ?? ""
+                } finally {
+                  release(concurrencyKey)
+                }
+              },
+            })
+
+            await Bus.publish(OrchestrationEvent.Complete, {
+              sessionID: nextSession.id,
+              parentSessionID: ctx.sessionID,
+              agent: next.name,
+              durationMs: 0,
+            })
+
+            return {
+              title: params.description,
+              metadata,
+              output: output(nextSession.id, formatIsolation(isolated)),
+            }
+          }
+
+          await acquire(concurrencyKey, concurrencyLimit, ctx.abort)
           let result: Awaited<ReturnType<typeof SessionPrompt.prompt>>
           try {
-            result = await withTimeout(
-              SessionPrompt.prompt({
-                messageID,
-                sessionID: nextSession.id,
-                model: {
-                  modelID: ModelID.make(finalModel.modelID),
-                  providerID: ProviderID.make(finalModel.providerID),
-                },
-                variant: parentVariant,
-                agent: next.name,
-                tools: {
-                  ...(canTodo ? {} : { todowrite: false }),
-                  ...(canTask ? {} : { task: false }),
-                  ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
-                  goal_complete: false,
-                },
-                parts: promptParts,
-              }),
-              timeout,
-            ).catch((err) => {
+            result = await withTimeout(SessionPrompt.prompt(promptArgs), timeout).catch((err) => {
               if (err instanceof Error && err.message.includes("Operation timed out")) {
                 cancel()
                 throw new Error(`Subagent timed out after ${timeout}ms`)

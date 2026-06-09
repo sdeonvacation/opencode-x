@@ -31,6 +31,7 @@ export namespace FileIgnore {
     "mypy_cache",
     ".history",
     ".gradle",
+    ".worktrees",
   ])
 
   const FILES = [

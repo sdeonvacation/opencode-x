@@ -1,6 +1,5 @@
 import z from "zod"
 import { NamedError } from "@opencode-ai/util/error"
-import { Global } from "../global"
 import { Instance } from "../project/instance"
 import { InstanceBootstrap } from "../project/bootstrap"
 import { Project } from "../project/project"
@@ -225,7 +224,7 @@ export namespace Worktree {
           throw new NotGitError({ message: "Worktrees are only supported for git projects" })
         }
 
-        const root = pathSvc.join(Global.Path.data, "worktree", ctx.project.id)
+        const root = pathSvc.join(ctx.worktree, ".worktrees")
         yield* fs.makeDirectory(root, { recursive: true }).pipe(Effect.orDie)
 
         const base = name ? slugify(name) : ""

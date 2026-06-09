@@ -240,6 +240,16 @@ export namespace LSP {
 
       const state = yield* InstanceState.make<State>(
         Effect.fn("LSP.state")(function* () {
+          if (Instance.isolated) {
+            return {
+              clients: [],
+              servers: {},
+              broken: new Set(),
+              spawning: new Map(),
+              disposing: false,
+            } satisfies State
+          }
+
           const cfg = yield* config.get()
 
           const servers: Record<string, LSPServer.Info> = {}
@@ -502,6 +512,7 @@ export namespace LSP {
       })
 
       const init = Effect.fn("LSP.init")(function* () {
+        if (Instance.isolated) return
         yield* Effect.promise(() => killOrphans())
         yield* InstanceState.get(state)
       })

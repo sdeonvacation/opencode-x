@@ -6,6 +6,7 @@ import { createMemoryCommands } from "@tui/command/memory-commands"
 import { createClearCommands } from "@tui/command/clear-commands"
 import { createGoalCommand } from "@tui/command/goal-command"
 import { createGotoCommand } from "@tui/command/goto-command"
+import { createWorktreeCommand } from "@tui/command/worktree-command"
 import { createConfigCommand } from "@tui/command/config-command"
 import { createUsageCommand } from "@tui/command/usage-command"
 import { useTerminalTitle } from "@tui/component/terminal-title"
@@ -574,6 +575,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     },
     createGotoCommand({ dialog, sdk, toast, sync }),
     createGoalCommand({ dialog, sdk, toast, route }),
+    createWorktreeCommand({ dialog, sdk, toast, sync }),
     createConfigCommand({ sdk: { url: sdk.url, fetch: sdk.fetch }, toast, dialog }),
     createUsageCommand({ sdk: { url: sdk.url, fetch: sdk.fetch }, toast, dialog, route }),
     {
