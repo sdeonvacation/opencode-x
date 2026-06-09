@@ -99,6 +99,7 @@ jobs:
           path: packages/*/.artifacts/unit/junit.xml
 
   e2e:
+    if: false # disabled — no packages/app in this fork
     name: e2e (${{ matrix.settings.name }})
     timeout-minutes: 60
     strategy:
