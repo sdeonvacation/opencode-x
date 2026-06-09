@@ -240,16 +240,6 @@ export namespace LSP {
 
       const state = yield* InstanceState.make<State>(
         Effect.fn("LSP.state")(function* () {
-          if (Instance.isolated) {
-            return {
-              clients: [],
-              servers: {},
-              broken: new Set(),
-              spawning: new Map(),
-              disposing: false,
-            } satisfies State
-          }
-
           const cfg = yield* config.get()
 
           const servers: Record<string, LSPServer.Info> = {}
@@ -411,6 +401,12 @@ export namespace LSP {
           const extension = path.parse(file).ext || file
           const result: LSPClient.Info[] = []
 
+          // For isolated instances, translate file path to parent-equivalent
+          // to find matching parent LSP clients (don't spawn new ones)
+          const ctx = Instance.current
+          const isolated = ctx.isolated && ctx.parent
+          const lookup = isolated ? file.replace(ctx.directory, ctx.parent!) : file
+
           async function schedule(server: LSPServer.Info, root: string, key: string) {
             const handle = await server
               .spawn(root)
@@ -463,7 +459,7 @@ export namespace LSP {
           for (const server of Object.values(s.servers)) {
             if (server.extensions.length && !server.extensions.includes(extension)) continue
 
-            const root = await server.root(file)
+            const root = await server.root(lookup)
             if (!root) continue
             if (s.broken.has(root + server.id)) continue
 
@@ -512,7 +508,6 @@ export namespace LSP {
       })
 
       const init = Effect.fn("LSP.init")(function* () {
-        if (Instance.isolated) return
         yield* Effect.promise(() => killOrphans())
         yield* InstanceState.get(state)
       })

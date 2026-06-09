@@ -33,7 +33,10 @@ export namespace InstanceState {
     return (yield* WorkspaceRef) ?? WorkspaceContext.workspaceID
   })
 
-  export const directory = Effect.map(context, (ctx) => ctx.directory)
+  export const directory = Effect.map(
+    context,
+    (ctx) => ctx.parent ?? (ctx.worktree !== "/" ? ctx.worktree : ctx.directory),
+  )
 
   export const make = <A, E = never, R = never>(
     init: (ctx: InstanceContext) => Effect.Effect<A, E, R | Scope.Scope>,

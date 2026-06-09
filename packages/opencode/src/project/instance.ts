@@ -13,6 +13,7 @@ export interface InstanceContext {
   worktree: string
   project: Project.Info
   isolated?: boolean
+  parent?: string
 }
 
 const context = Context.create<InstanceContext>("instance")
@@ -23,8 +24,8 @@ const disposal = {
 }
 
 function boot(input: { directory: string; init?: () => Promise<any>; worktree?: string; project?: Project.Info }) {
-  return iife(async () => {
-    const ctx =
+  return iife(async (): Promise<InstanceContext> => {
+    const ctx: InstanceContext =
       input.project && input.worktree
         ? {
             directory: input.directory,
@@ -58,13 +59,19 @@ export const Instance = {
     init?: () => Promise<any>
     fn: () => R
     isolated?: boolean
+    parent?: string
   }): Promise<R> {
     const directory = Filesystem.resolve(input.directory)
 
     if (input.isolated) {
       const ctx = await boot({ directory, init: input.init })
       ctx.isolated = true
-      return context.provide(ctx, async () => input.fn())
+      if (input.parent) ctx.parent = Filesystem.resolve(input.parent)
+      try {
+        return await context.provide(ctx, async () => input.fn())
+      } finally {
+        await State.dispose(directory)
+      }
     }
 
     let existing = cache.get(directory)

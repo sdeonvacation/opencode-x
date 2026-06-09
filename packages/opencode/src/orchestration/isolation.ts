@@ -38,6 +38,7 @@ export async function isolatedRun(input: IsolationInput): Promise<IsolationResul
     const result = await Instance.provide({
       directory: info.directory,
       isolated: true,
+      parent: target,
       init: InstanceBootstrap,
       fn: async () => {
         try {
@@ -81,7 +82,10 @@ export async function isolatedRun(input: IsolationInput): Promise<IsolationResul
 }
 
 async function gitDiff(cwd: string): Promise<string> {
-  const proc = Bun.spawn(["git", "diff", "HEAD", "--binary"], { cwd, stdout: "pipe", stderr: "pipe" })
+  // Stage all files (including untracked) so new files appear in the diff
+  const add = Bun.spawn(["git", "add", "-A"], { cwd, stdout: "pipe", stderr: "pipe" })
+  await add.exited
+  const proc = Bun.spawn(["git", "diff", "HEAD", "--binary", "--staged"], { cwd, stdout: "pipe", stderr: "pipe" })
   const text = await new Response(proc.stdout).text()
   await proc.exited
   return text

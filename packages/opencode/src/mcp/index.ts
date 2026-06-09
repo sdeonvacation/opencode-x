@@ -215,6 +215,7 @@ export namespace MCP {
     clients: Record<string, MCPClient>
     defs: Record<string, MCPToolDef[]>
     discovered: Record<string, any>
+    timers: Set<ReturnType<typeof setTimeout>>
   }
 
   export interface Interface {
@@ -500,7 +501,8 @@ export namespace MCP {
 
           const attempt = (retries: number) => {
             const delay = Math.min(1000 * Math.pow(2, maxRetries - retries), 60000)
-            setTimeout(() => {
+            const id = setTimeout(() => {
+              s.timers.delete(id)
               if (s.status[name]?.status === "disabled") return
               const run = () =>
                 Effect.runPromise(
@@ -528,6 +530,7 @@ export namespace MCP {
               if (ctx) Instance.restore(ctx, run)
               else run()
             }, delay)
+            s.timers.add(id)
           }
           attempt(maxRetries)
         }
@@ -555,7 +558,8 @@ export namespace MCP {
             })
           }
 
-          setTimeout(() => {
+          const id = setTimeout(() => {
+            s.timers.delete(id)
             if (s.status[name]?.status === "disabled") return
             const run = () =>
               Effect.runPromise(
@@ -593,6 +597,7 @@ export namespace MCP {
             if (ctx) Instance.restore(ctx, run)
             else run()
           }, delay)
+          s.timers.add(id)
         }
         attempt(0)
       }
@@ -636,6 +641,7 @@ export namespace MCP {
             clients: {},
             defs: {},
             discovered: config,
+            timers: new Set(),
           }
 
           yield* Effect.forEach(
@@ -670,6 +676,15 @@ export namespace MCP {
 
           yield* Effect.addFinalizer(() =>
             Effect.gen(function* () {
+              // Cancel all pending retry/reconnect timers so they cannot fire
+              // after the instance scope has been torn down.
+              for (const id of s.timers) clearTimeout(id)
+              s.timers.clear()
+              // Mark all servers disabled so any timer that already fired but
+              // hasn't yet checked the guard sees "disabled" and aborts.
+              for (const key of Object.keys(s.status)) {
+                s.status[key] = { status: "disabled" }
+              }
               yield* Effect.forEach(
                 Object.values(s.clients),
                 (client) =>

@@ -44,13 +44,18 @@ export namespace LSPServer {
 
   type RootFunction = (file: string) => Promise<string | undefined>
 
-  const NearestRoot = (includePatterns: string[], excludePatterns?: string[]): RootFunction => {
+  const projectRoot = () => {
+    const ctx = Instance.current
+    return ctx.parent ?? (ctx.worktree !== "/" ? ctx.worktree : ctx.directory)
+  }
+
+  const NearestRoot = (_includePatterns: string[], excludePatterns?: string[]): RootFunction => {
     return async (file) => {
       if (excludePatterns) {
         const excluded = await nearest(file, excludePatterns)
         if (excluded) return undefined
       }
-      return (await nearest(file, includePatterns)) ?? Instance.directory
+      return projectRoot()
     }
   }
 
@@ -94,12 +99,7 @@ export namespace LSPServer {
     id: "typescript",
     root: async (file) => {
       if (await nearest(file, ["deno.json", "deno.jsonc"])) return
-      return (
-        (await nearest(file, ["tsconfig.json", "jsconfig.json"])) ??
-        (await nearest(file, ["package.json"])) ??
-        (await nearest(file, ["package-lock.json", "bun.lockb", "bun.lock", "pnpm-lock.yaml", "yarn.lock"])) ??
-        Instance.directory
-      )
+      return projectRoot()
     },
     extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"],
     async spawn(root) {
