@@ -24,6 +24,9 @@ Guide based on OpenCode codebase analysis.
 18. [Context Safety Net](#context-safety-net)
 19. [Cache Stability](#cache-stability)
 20. [Plugins](#plugins)
+21. [Swarm Mode](#swarm-mode)
+22. [Worktree Isolation](#worktree-isolation)
+23. [Global LSP/MCP](#global-lspmcp)
 
 ---
 
@@ -1897,3 +1900,222 @@ if (event?.type === "session.deleted") children.delete(event.properties.sessionI
 | TUI worker crashes                     | `console.log` / `process.stderr.write`     | Use `fs.writeFile("/tmp/debug.log", ...)`         |
 | Stuck at "loading plugins"             | Stray `});` / `]);` from incremental edits | Rewrite the file cleanly in one shot              |
 | `event.type` is undefined              | Accessing `event.payload.type`             | Access directly: `event.type`, `event.properties` |
+
+---
+
+## Swarm Mode
+
+Batch-parallel subagent execution. Dispatch the same prompt template across multiple items simultaneously.
+
+### Configuration
+
+```json
+{
+  "experimental": {
+    "swarm": true,
+    "swarm_max_items": 20,
+    "swarm_concurrency": 5
+  }
+}
+```
+
+### How It Works
+
+1. LLM calls `SwarmTool` with a template string containing `{{placeholder}}` markers
+2. Items array provides values for each placeholder (each item has `id` + key-value pairs)
+3. Each item spawns an independent subagent session (agent type configurable)
+4. Subagents run in parallel up to `swarm_concurrency` limit
+5. Results collected and returned as structured XML
+
+### Parameters
+
+| Parameter     | Type    | Default    | Description                          |
+| ------------- | ------- | ---------- | ------------------------------------ |
+| `template`    | string  | (required) | Prompt with `{{placeholder}}` syntax |
+| `items`       | array   | (required) | Array of `{id, ...placeholders}`     |
+| `agent`       | string  | "general"  | Agent type for subagents             |
+| `concurrency` | number  | 5          | Max parallel subagents (1-20)        |
+| `background`  | boolean | false      | Fire-and-forget mode                 |
+
+### Execution Modes
+
+**Foreground** (default): Blocks until all items complete. Returns full results.
+
+**Background** (`background: true`): Returns immediately with acknowledgment. Results injected into conversation when all items complete.
+
+### Result Format
+
+```xml
+<swarm_results>
+  <item id="file1" status="completed" duration_ms="2340">
+    Review findings for file1...
+  </item>
+  <item id="file2" status="error" duration_ms="500">
+    Error: Agent failed with timeout
+  </item>
+</swarm_results>
+```
+
+### Restrictions
+
+- Swarm subagents cannot spawn their own subagents or swarms (no recursion)
+- Individual item failures don't abort the swarm
+- Items processed independently (no shared state between items)
+
+### Use Cases
+
+- Reviewing multiple files in parallel
+- Translating documents to multiple languages
+- Processing data entries (linting, formatting, analysis)
+- Running the same check across multiple modules
+
+### Slash Command
+
+`/swarm` — server-side command for swarm management (gated on `experimental.swarm`).
+
+---
+
+## Worktree Isolation + `/worktree` Command
+
+Git worktree-based isolation for parallel subagents that may edit overlapping files.
+
+> **Upstream Note:** Upstream opencode supports automatic worktree isolation for subagents (steps 1-7 below). OpenCode X extends this with user-initiated worktree management via the `/worktree` slash command — our exclusive addition.
+
+### Configuration
+
+```json
+{
+  "experimental": {
+    "worktree_isolation": true
+  }
+}
+```
+
+### How It Works (Subagent Isolation — also in upstream)
+
+1. Primary agent sets `isolation: true` on a Task tool call
+2. System creates a private git worktree on a dedicated branch (e.g., `opencode/ses-xxx`)
+3. Subagent executes in the isolated worktree with full read/write access
+4. After completion, system captures all changes: `git add -A && git diff HEAD --binary --staged`
+5. PatchLock ensures only one patch applies at a time (sequential mutex)
+6. Patch applied to parent worktree via `git apply --3way`
+7. Worktree cleaned up on success
+
+> Steps 1-7 work similarly in upstream opencode. The flow below (`/worktree` command) is OpenCode X exclusive.
+
+### Task Tool Parameter
+
+```typescript
+Task(
+  (subagent_type = "coder"),
+  (description = "Implement feature A"),
+  (prompt = "..."),
+  (isolation = true), // Each subagent gets its own worktree
+)
+```
+
+### Patch Outcomes
+
+| Status     | Meaning                                                     | Worktree Cleanup |
+| ---------- | ----------------------------------------------------------- | ---------------- |
+| `applied`  | Patch applied successfully to parent                        | Yes (removed)    |
+| `empty`    | Subagent made no file changes                               | Yes (removed)    |
+| `conflict` | Patch failed to apply; branch preserved for manual recovery | No (preserved)   |
+
+### Conflict Recovery
+
+When a patch conflict occurs:
+
+- The worktree branch is preserved (not deleted)
+- Error message includes branch name and conflict details
+- User can manually inspect the branch and cherry-pick or merge
+
+### /worktree Command (OpenCode X Exclusive)
+
+Slash command for user-initiated worktree management. Aliases: `/wt`
+
+Unlike the automatic subagent isolation above (which upstream also has), this command gives users direct control over worktree lifecycle — create, list, remove, and switch between worktrees interactively.
+
+| Action | Description                              |
+| ------ | ---------------------------------------- |
+| Create | Create a new worktree with optional name |
+| List   | Show all active worktrees                |
+| Remove | Remove a worktree by directory           |
+| Switch | Change working directory to a worktree   |
+
+### Requirements
+
+- Project must use git as VCS
+- `experimental.worktree_isolation` must be `true`
+- Parent directory captured before worktree creation (for LSP sharing)
+
+---
+
+## Global LSP/MCP
+
+Single LSP/MCP instance per project shared across all agent types. Eliminates redundant server spawns.
+
+### How It Works
+
+Previously, each subagent (especially isolated worktree instances) spawned its own LSP servers, wasting resources and producing inconsistent diagnostics.
+
+Now:
+
+- LSP/MCP servers spawned once on first file interaction
+- Instance state keyed by project root directory
+- Isolated instances use `parent` field to resolve to the same cache key
+- Path translation maps worktree file paths to parent-equivalent before server lookup
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Project Root                       │
+│                                                     │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
+│  │ Primary  │  │ Subagent │  │ Isolated Worktree│  │
+│  │ Agent    │  │ (fg/bg)  │  │ Subagent         │  │
+│  └────┬─────┘  └────┬─────┘  └────────┬─────────┘  │
+│       │              │                  │            │
+│       └──────────────┼──────────────────┘            │
+│                      ▼                               │
+│           ┌──────────────────┐                       │
+│           │  Shared LSP/MCP  │                       │
+│           │  (keyed by root) │                       │
+│           └──────────────────┘                       │
+└─────────────────────────────────────────────────────┘
+```
+
+### Path Translation
+
+Isolated worktree subagents operate in `.worktrees/ses-xxx/` directories. Before LSP operations:
+
+```
+.worktrees/ses-abc123/src/index.ts  →  /project/root/src/index.ts
+```
+
+This ensures the same LSP client handles requests regardless of which agent type makes them.
+
+### Agent Types Sharing LSP
+
+| Agent Type                  | Shares LSP | Notes                    |
+| --------------------------- | ---------- | ------------------------ |
+| Primary agents              | Yes        | Direct access            |
+| Foreground subagents        | Yes        | Same process             |
+| Background subagents        | Yes        | Same process             |
+| Push-to-background sessions | Yes        | Same process             |
+| Isolated worktree subagents | Yes        | Via path translation     |
+| Swarm subagents             | Yes        | Via parent directory key |
+
+### Idle Shutdown
+
+- 30-minute inactivity timer per LSP server
+- On timeout: invalidates InstanceState, triggers finalizer, shuts down all clients
+- Automatically respawns on next file interaction
+
+### Benefits
+
+- No redundant server spawns (saves memory + startup time)
+- Consistent diagnostics across all agents in a session
+- Worktree isolation works without LSP overhead multiplication
+- Single TypeScript/ESLint/etc server for entire project
