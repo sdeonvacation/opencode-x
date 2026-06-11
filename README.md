@@ -23,6 +23,8 @@ Think Claude Code, but open source, provider-agnostic, and free.
 
 ## Why OpenCode X?
 
+Native support for claude code plugins and hooks. Bundles several claude code features like /btw, /goal, push-to-background subagents, memory and detailed usage tracking.
+
 |                         | OpenCode X                                           | Claude Code           |
 | ----------------------- | ---------------------------------------------------- | --------------------- |
 | **Cost**                | Free + bring your own API keys                       | $200/mo subscription  |
@@ -30,7 +32,7 @@ Think Claude Code, but open source, provider-agnostic, and free.
 | **Swarm execution**     | Batch-parallel subagents with bounded concurrency    | Native                |
 | **Worktree management** | `/worktree` command for user-initiated isolation     | `--worktree` CLI flag |
 | **Global LSP**          | Single instance shared across all agents + worktrees | Unknown               |
-| **Autonomous goals**    | `/goal` with 200-turn auto-continuation              | No equivalent         |
+| **Autonomous goals**    | `/goal` with 200-turn auto-continuation              | /goal but no configurable turn/token limits         |
 | **Token savings**       | LLM compression saves 30-60% on tool output          | Raw output to model   |
 | **Claude Code hooks**   | Native compatibility (same config, same env vars)    | Native                |
 | **Open source**         | MIT, no telemetry, no account                        | Proprietary           |
