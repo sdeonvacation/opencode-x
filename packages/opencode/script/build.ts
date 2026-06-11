@@ -180,7 +180,7 @@ if (!skipInstall) {
 }
 for (const item of targets) {
   const name = [
-    pkg.name,
+    "opencode-x",
     // changing to win32 flags npm for some reason
     item.os === "win32" ? "windows" : item.os,
     item.arch,
@@ -211,7 +211,7 @@ for (const item of targets) {
       autoloadDotenv: false,
       autoloadTsconfig: true,
       autoloadPackageJson: true,
-      target: name.replace(pkg.name, "bun") as any,
+      target: name.replace("opencode-x", "bun") as any,
       outfile: `dist/${name}/bin/opencode`,
       execArgv: [`--user-agent=opencode/${Script.version}`, "--use-system-ca", "--"],
       windows: {},
@@ -260,14 +260,15 @@ for (const item of targets) {
 }
 
 if (Script.release) {
+  const assets: string[] = []
   for (const key of Object.keys(binaries)) {
-    if (key.includes("linux")) {
-      await $`tar -czf ../../${key}.tar.gz *`.cwd(`dist/${key}/bin`)
-    } else {
-      await $`zip -r ../../${key}.zip *`.cwd(`dist/${key}/bin`)
-    }
+    const isWin = key.includes("windows")
+    const src = `dist/${key}/bin/opencode${isWin ? ".exe" : ""}`
+    const dest = `dist/${key}${isWin ? ".exe" : ""}`
+    await $`cp ${src} ${dest}`
+    assets.push(dest)
   }
-  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`
+  await $`gh release upload v${Script.version} ${assets} --clobber --repo ${process.env.GH_REPO}`
 }
 
 export { binaries }
