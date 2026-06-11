@@ -23,7 +23,7 @@ Think Claude Code, but open source, provider-agnostic, and free.
 
 ## Why OpenCode X?
 
-Native support for claude code plugins and hooks. Bundles several claude code features like /btw, /goal, push-to-background subagents, memory and detailed usage tracking.
+Native support for claude code plugins and hooks. Bundles several claude code features like /btw, /goal, push-to-background subagents, memory and detailed usage tracking. All of this, while giving you the provider-agnostic flavour of opencode. Best of both worlds.
 
 |                         | OpenCode X                                           | Claude Code           |
 | ----------------------- | ---------------------------------------------------- | --------------------- |
