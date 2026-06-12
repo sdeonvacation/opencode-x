@@ -1,5 +1,52 @@
 # opencode database guide
 
+## **[CRITICAL] npm Release Process**
+
+The published npm package is a **self-contained binary** (downloaded by postinstall from GitHub releases). It must have **ZERO dependencies** in the published package.json.
+
+### Steps (in exact order):
+
+1. **Bump version** in `packages/opencode/package.json`
+2. **Pack the tarball** (this runs prepack/postpack lifecycle scripts that strip deps):
+   ```bash
+   cd packages/opencode && npm pack
+   ```
+3. **Verify the tarball has no dependencies** — extract and check:
+   ```bash
+   tar -xzf sdeonvacation-opencode-x-<version>.tgz
+   node -e "const p=require('./package/package.json'); console.log('deps:', p.dependencies, 'devDeps:', p.devDependencies)"
+   # MUST print: deps: undefined devDeps: undefined
+   rm -rf package
+   ```
+4. **Publish FROM THE TARBALL** (never `npm publish .` — that may skip prepack):
+   ```bash
+   npm publish sdeonvacation-opencode-x-<version>.tgz --access public --registry https://registry.npmjs.org/ --//registry.npmjs.org/:_authToken=<TOKEN>
+   ```
+5. **Verify on registry**:
+   ```bash
+   npm view @sdeonvacation/opencode-x@<version> dependencies --registry https://registry.npmjs.org/
+   # MUST return empty/no output
+   ```
+6. **Test install**:
+   ```bash
+   npm i --dry-run -g @sdeonvacation/opencode-x@<version> --registry https://registry.npmjs.org/
+   # MUST show "added 1 package" (not 96+)
+   ```
+
+### Why this matters:
+
+- `npm publish .` with auth flags (`--//registry...`) skips lifecycle scripts (prepack won't run)
+- Without prepack, all 96 build dependencies leak into the published package.json
+- Users get install failures or massive unnecessary dependency trees
+- npm versions are **immutable** — a broken publish requires a new version number
+
+### GitHub Release:
+
+- Create AFTER npm publish succeeds
+- Tag format: `v<version>`, target: `main`
+- Upload all 12 platform binaries (the postinstall.cjs downloads from `releases/download/v<version>/`)
+- If the release doesn't exist for the published npm version, postinstall will silently fail
+
 ## Database
 
 - **Schema**: Drizzle schema lives in `src/**/*.sql.ts`.
