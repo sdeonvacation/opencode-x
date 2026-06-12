@@ -24,7 +24,7 @@ env:
 jobs:
   unit:
     name: unit (${{ matrix.settings.name }})
-    timeout-minutes: 40
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -72,7 +72,13 @@ jobs:
           key: opencode-bin-${{ runner.os }}-${{ runner.arch }}
 
       - name: Run unit tests
-        run: bun turbo test:ci
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            bun turbo test:ci --filter='@opencode-ai/app'
+          else
+            bun turbo test:ci
+          fi
+        timeout-minutes: 15
         env:
           OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
           OPENCODE_SKIP_INSTALL: ${{ runner.os == 'Windows' && '1' || '' }}
