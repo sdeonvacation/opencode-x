@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test"
 import { resolve } from "path"
 import { existsSync, unlinkSync } from "fs"
 
-const root = resolve(import.meta.dirname, "..")
+const root = resolve(import.meta.dirname, "../..")
 const pkg = resolve(root, "package.json")
 const backup = resolve(root, "package.json.bak")
 
@@ -37,7 +37,7 @@ describe("prepack", () => {
     const minimal = JSON.parse(await Bun.file(pkg).text())
     expect(minimal.name).toBe(parsed.name)
     expect(minimal.version).toBe(parsed.version)
-    expect(minimal.type).toBe(parsed.type)
+    expect(minimal.type).toBeUndefined()
     expect(minimal.license).toBe(parsed.license)
     expect(minimal.repository).toEqual(parsed.repository)
     expect(minimal.publishConfig).toEqual(parsed.publishConfig)
