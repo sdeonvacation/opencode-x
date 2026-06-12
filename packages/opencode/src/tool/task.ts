@@ -52,7 +52,7 @@ const baseParameters = z.object({
   isolation: z
     .boolean()
     .describe(
-      "Run subagent in an isolated git worktree. Use when multiple subagents run in parallel and may edit overlapping files. Each gets a private copy of the repo; changes are captured as a patch and applied back sequentially. Not needed for read-only tasks or when only one subagent writes at a time.",
+      "Run subagent in an isolated git worktree. Use when multiple subagents run in parallel and may edit overlapping files. Each gets a private copy of the repo; changes are captured as a patch and applied back sequentially. Not needed for read-only tasks or when only one subagent writes at a time. NEVER use for sequential fixes to files already modified by a prior task — patch-back will conflict.",
     )
     .optional(),
 })
