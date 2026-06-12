@@ -19,7 +19,6 @@ const pkg = JSON.parse(raw)
 const minimal = {
   name: pkg.name,
   version: pkg.version,
-  type: pkg.type,
   license: pkg.license,
   description: pkg.description,
   repository: pkg.repository,
