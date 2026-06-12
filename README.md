@@ -207,7 +207,7 @@ System prompt split into stable prefix (cached) + dynamic suffix (changes freely
 
 ---
 
-## Slash Commands
+## Featured Slash Commands
 
 | Command          | Description                                                |
 | ---------------- | ---------------------------------------------------------- |
