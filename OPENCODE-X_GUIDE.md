@@ -332,7 +332,6 @@ These slash commands are implemented in this fork:
 | `/btw`           | Inject context into the running session without starting a new turn. Opens a dialog; text is inserted as a system message visible to the agent but not displayed as a user message. |
 | `/clear`         | Clear all messages in the current session.                                                                                                                                          |
 | `/clear-compact` | Clear messages and run compaction to summarize history.                                                                                                                             |
-| `/goto`          | Jump to a file or symbol. Opens a dialog for file/symbol input.                                                                                                                     |
 
 ### Creating Commands
 

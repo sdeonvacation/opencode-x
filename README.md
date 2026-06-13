@@ -25,17 +25,17 @@ Think Claude Code, but open source, provider-agnostic, and free.
 
 Native support for claude code plugins and hooks. Bundles several claude code features like /btw, /goal, push-to-background subagents, memory and detailed usage tracking. All of this, while giving you the provider-agnostic flavour of opencode. Best of both worlds.
 
-|                         | OpenCode X                                           | Claude Code           |
-| ----------------------- | ---------------------------------------------------- | --------------------- |
-| **Cost**                | Free + bring your own API keys                       | $200/mo subscription  |
-| **Models**              | Any provider (Claude, GPT, Gemini, Mistral, local)   | Anthropic only        |
-| **Swarm execution**     | Batch-parallel subagents with bounded concurrency    | Native                |
-| **Worktree management** | `/worktree` command for user-initiated isolation     | `--worktree` CLI flag |
-| **Global LSP**          | Single instance shared across all agents + worktrees | Unknown               |
-| **Autonomous goals**    | `/goal` with 200-turn auto-continuation              | /goal but no configurable turn/token limits         |
-| **Token savings**       | LLM compression saves 30-60% on tool output          | Raw output to model   |
-| **Claude Code hooks**   | Native compatibility (same config, same env vars)    | Native                |
-| **Open source**         | MIT, no telemetry, no account                        | Proprietary           |
+|                         | OpenCode X                                           | Claude Code                                 |
+| ----------------------- | ---------------------------------------------------- | ------------------------------------------- |
+| **Cost**                | Free + bring your own API keys                       | $200/mo subscription                        |
+| **Models**              | Any provider (Claude, GPT, Gemini, Mistral, local)   | Anthropic only                              |
+| **Swarm execution**     | Batch-parallel subagents with bounded concurrency    | Native                                      |
+| **Worktree management** | `/worktree` command for user-initiated isolation     | `--worktree` CLI flag                       |
+| **Global LSP**          | Single instance shared across all agents + worktrees | Unknown                                     |
+| **Autonomous goals**    | `/goal` with 200-turn auto-continuation              | /goal but no configurable turn/token limits |
+| **Token savings**       | LLM compression saves 30-60% on tool output          | Raw output to model                         |
+| **Claude Code hooks**   | Native compatibility (same config, same env vars)    | Native                                      |
+| **Open source**         | MIT, no telemetry, no account                        | Proprietary                                 |
 
 vs. **upstream opencode**: OpenCode X adds 280+ fork-only commits — swarm, persistent memory, goal system, session memory, context safety net, push-to-background, tool compression, cache optimization, global LSP sharing, `/worktree` command, and more. Full comparison below.
 
@@ -192,7 +192,6 @@ System prompt split into stable prefix (cached) + dynamic suffix (changes freely
 | **`/clear`**                                 | Clear session messages (keeps session alive)                                                                                                            | None                                           | `/clear` equivalent                                 |
 | **`/clear-compact`**                         | Clear + trigger compaction of history                                                                                                                   | None                                           | Native - /compact                                   |
 | **`/btw`**                                   | Inject context without starting new turn (no LLM call)                                                                                                  | None                                           | Native                                              |
-| **`/goto`**                                  | Switch project directory                                                                                                                                | None                                           | None                                                |
 | **`/status` (improved)**                     | Shows session ID, model, provider, token counts, cost; copyable session ID for debugging                                                                | Basic status                                   | Native                                              |
 | **Per-tool token usage**                     | Streaming token count displayed per tool call during execution                                                                                          | None                                           | None                                                |
 | **`/config`**                                | Shows all merged config key-values in a toast                                                                                                           | None                                           | Part of `/status`                                   |
@@ -216,7 +215,6 @@ System prompt split into stable prefix (cached) + dynamic suffix (changes freely
 | `/clear-compact` | Clear messages and compact history                         |
 | `/config`        | Show all merged config key-values in toast                 |
 | `/goal`          | Set autonomous objective                                   |
-| `/goto`          | Jump to a file or symbol                                   |
 | `/memory_add`    | Add session memory entry                                   |
 | `/memory_edit`   | Edit existing memory entry                                 |
 | `/memory_delete` | Remove memory entry                                        |
