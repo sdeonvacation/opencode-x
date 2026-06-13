@@ -7,7 +7,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Built with Effect](https://img.shields.io/badge/Built%20with-Effect--TS-purple)](https://effect.website/)
 
-A terminal-based AI coding agent that works with **any LLM provider**. Built on [opencode](https://github.com/anomalyco/opencode), adding production-grade features: swarm execution, global LSP sharing, persistent memory, autonomous goals, and cost-aware context management.
+A terminal-based AI coding agent that works with **any LLM provider**. Built on [opencode](https://github.com/anomalyco/opencode), adding production-grade features: swarm execution, global LSP sharing, persistent memory, autonomous goals, and native support for claude code plugins/hooks.
 
 Think Claude Code, but open source, provider-agnostic, and free.
 
