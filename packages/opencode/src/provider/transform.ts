@@ -946,6 +946,7 @@ export namespace ProviderTransform {
       input.model.api.npm === "@ai-sdk/github-copilot"
     ) {
       result["store"] = false
+      result["truncation"] = "auto"
     }
 
     if (input.model.api.npm === "@openrouter/ai-sdk-provider") {
@@ -974,6 +975,7 @@ export namespace ProviderTransform {
 
     if (input.model.providerID === "openai" || input.providerOptions?.setCacheKey) {
       result["promptCacheKey"] = input.sessionID
+      result["promptCacheRetention"] = "24h"
     }
 
     if (input.model.api.npm === "@ai-sdk/google" || input.model.api.npm === "@ai-sdk/google-vertex") {
@@ -1043,6 +1045,7 @@ export namespace ProviderTransform {
 
       if (input.model.providerID.startsWith("opencode")) {
         result["promptCacheKey"] = input.sessionID
+        result["promptCacheRetention"] = "24h"
         result["include"] = ["reasoning.encrypted_content"]
         result["reasoningSummary"] = "auto"
       }

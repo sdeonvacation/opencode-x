@@ -327,6 +327,7 @@ export namespace LLM {
     })
 
     return streamText({
+      allowSystemInMessages: true,
       onError(error) {
         // [fork-perf] Phase 5: log overflow errors; processor.halt() catches and sets needsCompaction
         if (ReactiveCompact.isOverflow(error)) {
