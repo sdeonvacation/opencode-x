@@ -138,7 +138,7 @@ export function Prompt(props: PromptProps) {
             setSpinnerColorSpec(SpinnerVerbs.colorSpecFor(next))
             return next
           })
-        }, 5000)
+        }, 10_000)
         onCleanup(() => clearInterval(timer))
       },
     ),
