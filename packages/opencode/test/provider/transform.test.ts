@@ -918,7 +918,7 @@ describe("ProviderTransform.message - DeepSeek reasoning content", () => {
     )
 
     expect(result).toHaveLength(1)
-    expect(result[0].content).toEqual([
+    expect(result[0].content).toMatchObject([
       {
         type: "tool-call",
         toolCallId: "test",
@@ -1696,7 +1696,8 @@ describe("ProviderTransform.message - providerOptions key remapping", () => {
 
     const result = ProviderTransform.message(msgs, model, {})
 
-    expect(result[0].providerOptions?.copilot).toEqual({ someOption: "value" })
+    expect(result[0].providerOptions?.copilot).toMatchObject({ someOption: "value" })
+    expect(result[0].providerOptions?.copilot?.copilot_cache_control).toEqual({ type: "ephemeral" })
     expect(result[0].providerOptions?.["github-copilot"]).toBeUndefined()
   })
 
@@ -1867,6 +1868,7 @@ describe("ProviderTransform.message - cache control on gateway", () => {
       anthropic: {
         cacheControl: {
           type: "ephemeral",
+          scope: "global",
           ...ttl,
         },
       },
@@ -1930,6 +1932,7 @@ describe("ProviderTransform.message - cache control on gateway", () => {
       anthropic: {
         cacheControl: {
           type: "ephemeral",
+          scope: "global",
           ...ttl,
         },
       },

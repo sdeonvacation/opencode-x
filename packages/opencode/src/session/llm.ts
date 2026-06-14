@@ -203,6 +203,13 @@ export namespace LLM {
       mergeOptions(mergeOptions(base, model.options), input.agent.options),
       variant,
     )
+    // [fork-perf] Variants must not override toolStreaming for anthropic — breaks streaming stability
+    if (
+      (model.api.npm === "@ai-sdk/google-vertex/anthropic" || model.api.npm === "@ai-sdk/anthropic") &&
+      (base as Record<string, any>).toolStreaming === false
+    ) {
+      options.toolStreaming = false
+    }
     if (isOpenaiOauth) {
       options.instructions = system.join("\n")
     }

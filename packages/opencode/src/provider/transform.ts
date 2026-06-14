@@ -248,7 +248,7 @@ export namespace ProviderTransform {
     // markers and let the 4th go to tool definitions (3000-8000 tokens, often
     // the largest stable cacheable block).  Providers without tool caching use
     // all 4 slots for messages.
-    const hasToolSlot =
+    const isAnthropicNative =
       model.providerID === "anthropic" ||
       model.providerID === "google-vertex-anthropic" ||
       model.providerID.includes("bedrock") ||
@@ -257,7 +257,7 @@ export namespace ProviderTransform {
     const nonSystem = msgs.filter((msg) => msg.role !== "system")
 
     let targets: ModelMessage[]
-    if (hasToolSlot) {
+    if (isAnthropicNative) {
       // 3 markers: system[0] + last 2 non-system messages (tool exchange boundary)
       const system = msgs.filter((msg) => msg.role === "system").slice(0, 1)
       const final = nonSystem.slice(-2)
@@ -278,7 +278,19 @@ export namespace ProviderTransform {
     )
     const cacheTtl = cachingDisabled ? undefined : "1h"
     const ttl = cacheTtl ? { ttl: cacheTtl } : {}
+    // Global scope enables cross-session caching for stable content (system prompts).
+    // Only native Anthropic APIs support scope; proxies/routers ignore it safely.
+    const globalScope = isAnthropicNative ? { scope: "global" } : {}
     const providerOptions: Record<string, unknown> = {
+      anthropic: { cacheControl: { type: "ephemeral", ...ttl, ...globalScope } },
+      openrouter: { cacheControl: { type: "ephemeral", ...ttl } },
+      bedrock: { cachePoint: { type: "default" } },
+      alibaba: { cacheControl: { type: "ephemeral" } },
+      copilot: { copilot_cache_control: { type: "ephemeral" } },
+      openaiCompatible: { cache_control: { type: "ephemeral", ...ttl } },
+    }
+    // Session-specific options for non-system messages (no global scope — content changes per turn)
+    const sessionProviderOptions: Record<string, unknown> = {
       anthropic: { cacheControl: { type: "ephemeral", ...ttl } },
       openrouter: { cacheControl: { type: "ephemeral", ...ttl } },
       bedrock: { cachePoint: { type: "default" } },
@@ -290,13 +302,11 @@ export namespace ProviderTransform {
     // [fork-perf] Build patched versions of target messages without mutating originals
     const patched = new Map<ModelMessage, ModelMessage>()
     for (const msg of targets) {
+      // System messages get global scope (stable across sessions); others get session scope
+      const opts = msg.role === "system" ? providerOptions : sessionProviderOptions
       const useMessageLevelOptions =
         options.caching === true || // [fork-perf] opt-in caching uses message-level
-        model.providerID === "anthropic" ||
-        model.providerID === "google-vertex-anthropic" || // [fork-perf] cache-stability fix
-        model.api.npm === "@ai-sdk/google-vertex/anthropic" || // [fork-perf] cache-stability fix
-        model.providerID.includes("bedrock") ||
-        model.api.npm === "@ai-sdk/amazon-bedrock"
+        isAnthropicNative
       const shouldUseContentOptions = !useMessageLevelOptions && Array.isArray(msg.content) && msg.content.length > 0
 
       if (shouldUseContentOptions) {
@@ -309,10 +319,7 @@ export namespace ProviderTransform {
         ) {
           const newLastContent = {
             ...lastContent,
-            providerOptions: mergeDeep(
-              lastContent.providerOptions ?? {},
-              providerOptions,
-            ) as typeof lastContent.providerOptions,
+            providerOptions: mergeDeep(lastContent.providerOptions ?? {}, opts) as typeof lastContent.providerOptions,
           }
           const newContent = [...msg.content]
           newContent[newContent.length - 1] = newLastContent
@@ -323,7 +330,7 @@ export namespace ProviderTransform {
 
       patched.set(msg, {
         ...msg,
-        providerOptions: mergeDeep(msg.providerOptions ?? {}, providerOptions) as typeof msg.providerOptions,
+        providerOptions: mergeDeep(msg.providerOptions ?? {}, opts) as typeof msg.providerOptions,
       })
     }
 
@@ -368,8 +375,18 @@ export namespace ProviderTransform {
     })
   }
 
-  // Module-level state for session-stable tool caching
+  // Module-level state for session-stable tool caching (bounded to prevent memory leak)
+  const TOOL_ANCHORS_MAX = 512
   const toolAnchors = new Map<string, { hash: string; anchor: string }>()
+
+  function setToolAnchor(key: string, value: { hash: string; anchor: string }) {
+    toolAnchors.set(key, value)
+    if (toolAnchors.size > TOOL_ANCHORS_MAX) {
+      // Evict oldest entry (first key in insertion order)
+      const first = toolAnchors.keys().next().value
+      if (first) toolAnchors.delete(first)
+    }
+  }
 
   export function toolCaching(
     tools: Record<string, { providerOptions?: Record<string, any> }>,
@@ -404,12 +421,12 @@ export namespace ProviderTransform {
       if (prev) {
         if (prev.hash !== hash) {
           // Tools changed (MCP dynamic) — skip tool caching to avoid cache bust
-          toolAnchors.set(key, { hash, anchor: keys[keys.length - 1] })
+          setToolAnchor(key, { hash, anchor: keys[keys.length - 1] })
           return tools
         }
       } else {
         // First call — latch anchor
-        toolAnchors.set(key, { hash, anchor: keys[keys.length - 1] })
+        setToolAnchor(key, { hash, anchor: keys[keys.length - 1] })
       }
     }
 
@@ -426,7 +443,7 @@ export namespace ProviderTransform {
         ...tools[target],
         providerOptions: mergeDeep(tools[target].providerOptions ?? {}, {
           anthropic: {
-            cacheControl: { type: "ephemeral", ...cacheTtl },
+            cacheControl: { type: "ephemeral", scope: "global", ...cacheTtl },
           },
           bedrock: { cachePoint: { type: "default" } },
         }),
@@ -452,11 +469,14 @@ export namespace ProviderTransform {
       (model.providerID === "anthropic" ||
         model.providerID === "google-vertex-anthropic" ||
         model.providerID === "openrouter" ||
+        model.providerID === "github-copilot" ||
+        model.providerID === "deepseek" ||
         model.api.id.includes("anthropic") ||
         model.api.id.includes("claude") ||
         model.id.includes("anthropic") ||
         model.id.includes("claude") ||
         model.api.npm === "@ai-sdk/anthropic" ||
+        model.api.npm === "@ai-sdk/github-copilot" ||
         model.api.npm === "@openrouter/ai-sdk-provider" ||
         model.api.npm === "@ai-sdk/alibaba") &&
       model.api.npm !== "@ai-sdk/gateway"
@@ -1028,7 +1048,7 @@ export namespace ProviderTransform {
       }
     }
 
-    if (input.model.providerID === "venice") {
+    if (input.model.providerID === "venice" || input.model.providerID === "moonshotai") {
       result["promptCacheKey"] = input.sessionID
     }
 
@@ -1133,9 +1153,9 @@ export namespace ProviderTransform {
       parallelToolCalls?: boolean
     }
   }) {
-    if (input.provider?.parallelToolCalls === false) return {}
     if (input.model.api.npm === "@ai-sdk/openai" || input.model.api.npm === "@ai-sdk/github-copilot") {
-      return { parallelToolCalls: input.enabled }
+      const enabled = input.provider?.parallelToolCalls ?? input.enabled
+      return { parallelToolCalls: enabled }
     }
     return {}
   }
@@ -1252,6 +1272,14 @@ export namespace ProviderTransform {
           delete result.properties
           delete result.required
         }
+
+        // Strip JSON Schema keywords unsupported by Gemini
+        delete result.additionalProperties
+        delete result.patternProperties
+        delete result.if
+        delete result.then
+        delete result.else
+        delete result.not
 
         return result
       }
