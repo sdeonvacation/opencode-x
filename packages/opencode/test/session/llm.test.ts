@@ -621,6 +621,12 @@ describe("session.llm.stream", () => {
                   apiKey: "test-key",
                   baseURL: `${server.url.origin}/v1`,
                 },
+                models: {
+                  [modelID]: {
+                    ...configModel(model),
+                    reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
+                  },
+                },
               },
             },
           }),
