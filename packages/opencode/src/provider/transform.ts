@@ -929,6 +929,7 @@ export namespace ProviderTransform {
     model: Provider.Model
     sessionID: string
     providerOptions?: Record<string, any>
+    lastResponseId?: string
   }): Record<string, any> {
     const result: Record<string, any> = {}
 
@@ -940,10 +941,19 @@ export namespace ProviderTransform {
     }
 
     // openai and providers using openai package should set store to false by default.
+    // Native openai: store: true (enables response chaining via previousResponseId)
+    if (input.model.providerID === "openai" && input.model.api.npm === "@ai-sdk/openai") {
+      result["store"] = true
+      result["truncation"] = "auto"
+      if (input.lastResponseId) {
+        result["previousResponseId"] = input.lastResponseId
+      }
+    }
+
+    // Copilot and openai-compatible: store: false (no chaining)
     if (
-      input.model.providerID === "openai" ||
-      input.model.api.npm === "@ai-sdk/openai" ||
-      input.model.api.npm === "@ai-sdk/github-copilot"
+      input.model.api.npm === "@ai-sdk/github-copilot" ||
+      (input.model.api.npm === "@ai-sdk/openai" && input.model.providerID !== "openai")
     ) {
       result["store"] = false
       result["truncation"] = "auto"

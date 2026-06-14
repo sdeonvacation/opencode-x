@@ -2072,6 +2072,34 @@ export namespace SessionPrompt {
                 }
               }
 
+              // [response-chaining] Read last response_id for OpenAI previousResponseId chaining
+              // Chain breaks if compaction occurred after the last step-finish with response_id
+              const lastResponseId = (() => {
+                let rid: string | undefined
+                let ridPartId: string | undefined
+                for (let i = msgs.length - 1; i >= 0; i--) {
+                  const msg = msgs[i]
+                  if (msg.info.role !== "assistant") continue
+                  for (let j = msg.parts.length - 1; j >= 0; j--) {
+                    const part = msg.parts[j]
+                    if (part.type === "step-finish" && part.response_id) {
+                      rid = part.response_id
+                      ridPartId = part.id
+                      break
+                    }
+                  }
+                  if (rid) break
+                }
+                if (!rid || !ridPartId) return undefined
+                // Check if compaction occurred after the response_id part
+                for (const msg of msgs) {
+                  for (const part of msg.parts) {
+                    if (part.type === "compaction" && part.id > ridPartId!) return undefined
+                  }
+                }
+                return rid
+              })()
+
               const result = yield* handle.process({
                 user: lastUser,
                 agent,
@@ -2085,6 +2113,7 @@ export namespace SessionPrompt {
                 model,
                 toolChoice: format.type === "json_schema" ? "required" : undefined,
                 maxSteps: steps,
+                lastResponseId,
               })
               // [fork-perf] history-cache: assistant message's parts mutate during streaming
               // (tool calls/results appended in place to the existing assistant message ID).

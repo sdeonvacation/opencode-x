@@ -258,6 +258,7 @@ export namespace MessageV2 {
     reason: z.string(),
     snapshot: z.string().optional(),
     cost: z.number(),
+    response_id: z.string().optional(),
     tokens: z.object({
       total: z.number().optional(),
       input: z.number(),

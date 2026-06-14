@@ -547,6 +547,21 @@ export type EventOrchestrationConcurrencyReleased = {
   }
 }
 
+export type EventWorktreeReady = {
+  type: "worktree.ready"
+  properties: {
+    name: string
+    branch: string
+  }
+}
+
+export type EventWorktreeFailed = {
+  type: "worktree.failed"
+  properties: {
+    message: string
+  }
+}
+
 export type Todo = {
   /**
    * Brief description of the task
@@ -567,6 +582,38 @@ export type EventTodoUpdated = {
   properties: {
     sessionID: string
     todos: Array<Todo>
+  }
+}
+
+export type EventSwarmStarted = {
+  type: "swarm.started"
+  properties: {
+    sessionID: string
+    agent: string
+    total: number
+    concurrency: number
+  }
+}
+
+export type EventSwarmItemComplete = {
+  type: "swarm.item-complete"
+  properties: {
+    sessionID: string
+    itemID: string
+    status: "done" | "error"
+    completed: number
+    total: number
+  }
+}
+
+export type EventSwarmDone = {
+  type: "swarm.done"
+  properties: {
+    sessionID: string
+    success: number
+    failed: number
+    total: number
+    durationMs: number
   }
 }
 
@@ -606,21 +653,6 @@ export type EventPtyDeleted = {
   type: "pty.deleted"
   properties: {
     id: string
-  }
-}
-
-export type EventWorktreeReady = {
-  type: "worktree.ready"
-  properties: {
-    name: string
-    branch: string
-  }
-}
-
-export type EventWorktreeFailed = {
-  type: "worktree.failed"
-  properties: {
-    message: string
   }
 }
 
@@ -918,6 +950,7 @@ export type StepFinishPart = {
   reason: string
   snapshot?: string
   cost: number
+  response_id?: string
   tokens: {
     total?: number
     input: number
@@ -1134,13 +1167,16 @@ export type Event =
   | EventOrchestrationLoopDetected
   | EventOrchestrationConcurrencyQueued
   | EventOrchestrationConcurrencyReleased
+  | EventWorktreeReady
+  | EventWorktreeFailed
   | EventTodoUpdated
+  | EventSwarmStarted
+  | EventSwarmItemComplete
+  | EventSwarmDone
   | EventPtyCreated
   | EventPtyUpdated
   | EventPtyExited
   | EventPtyDeleted
-  | EventWorktreeReady
-  | EventWorktreeFailed
   | EventMessageUpdated
   | EventMessageRemoved
   | EventMessagePartUpdated
@@ -1427,9 +1463,13 @@ export type ProviderConfig = {
      */
     setCacheKey?: boolean
     /**
-     * Timeout in milliseconds for requests to this provider. Default is 300000 (5 minutes). Set to false to disable timeout.
+     * Timeout in milliseconds for full requests to this provider. Set to false to disable timeout.
      */
     timeout?: number | false
+    /**
+     * Timeout in milliseconds to wait for response headers. Provider integrations may set defaults. Set to false to disable timeout.
+     */
+    headerTimeout?: number | false
     /**
      * Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted.
      */
@@ -1438,7 +1478,7 @@ export type ProviderConfig = {
      * Enable explicit cache_control markers for this provider (e.g. Deepseek, Fireworks)
      */
     caching?: boolean
-    [key: string]: unknown | string | boolean | number | false | number | undefined
+    [key: string]: unknown | string | boolean | number | false | number | false | number | undefined
   }
   models?: {
     [key: string]: {
@@ -1448,6 +1488,20 @@ export type ProviderConfig = {
       release_date?: string
       attachment?: boolean
       reasoning?: boolean
+      reasoning_options?: Array<
+        | {
+            type: "toggle"
+          }
+        | {
+            type: "effort"
+            values: Array<string>
+          }
+        | {
+            type: "budget_tokens"
+            min: number
+            max?: number
+          }
+      >
       temperature?: boolean
       tool_call?: boolean
       interleaved?:
@@ -2160,7 +2214,7 @@ export type Config = {
      */
     goal_system?: boolean
     /**
-     * Enable git worktree isolation for parallel subagents
+     * Enable worktree isolation for subagent tasks
      */
     worktree_isolation?: boolean
     /**
@@ -2171,6 +2225,18 @@ export type Config = {
      * Enable cross-session persistent memory
      */
     persistent_memory?: boolean
+    /**
+     * Enable swarm mode tool and /swarm command
+     */
+    swarm?: boolean
+    /**
+     * Hard cap on items per swarm invocation (default: 128)
+     */
+    swarm_max_items?: number
+    /**
+     * Default per-swarm parallelism cap (default: 5)
+     */
+    swarm_concurrency?: number
     /**
      * Enable multi-step streamText for safe tool chains (default: true)
      */
@@ -2264,6 +2330,21 @@ export type Model = {
       | {
           field: "reasoning_content" | "reasoning_details"
         }
+    reasoning_options?: Array<
+      | {
+          type: "toggle"
+        }
+      | {
+          type: "effort"
+          values: Array<string>
+        }
+      | {
+          type: "budget_tokens"
+          min: number
+          max?: number
+        }
+    >
+    schema_compat?: "standard" | "strict"
   }
   cost: {
     input: number

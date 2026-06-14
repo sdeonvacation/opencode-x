@@ -49,6 +49,7 @@ export namespace LLM {
     toolChoice?: "auto" | "required" | "none"
     maxSteps?: number
     onModelResolved?: (model: Provider.Model) => void
+    lastResponseId?: string
   }
 
   export type StreamRequest = StreamInput & {
@@ -198,6 +199,7 @@ export namespace LLM {
           model,
           sessionID: input.sessionID,
           providerOptions: provider.options,
+          lastResponseId: input.lastResponseId,
         })
     const options: Record<string, any> = mergeOptions(
       mergeOptions(mergeOptions(base, model.options), input.agent.options),

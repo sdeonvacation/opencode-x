@@ -648,6 +648,7 @@ export namespace SessionProcessor {
               ctx.assistantMessage.finish = value.finishReason
               ctx.assistantMessage.cost += usage.cost
               ctx.assistantMessage.tokens = usage.tokens
+              const rid = value.providerMetadata?.openai?.responseId as string | undefined
               yield* session.updatePart({
                 id: PartID.ascending(),
                 reason: value.finishReason,
@@ -658,6 +659,7 @@ export namespace SessionProcessor {
                 type: "step-finish",
                 tokens: usage.tokens,
                 cost: usage.cost,
+                ...(rid ? { response_id: rid } : {}),
               })
               yield* session.updateMessage(ctx.assistantMessage)
               if (ctx.snapshot) {
