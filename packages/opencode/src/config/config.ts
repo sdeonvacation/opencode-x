@@ -861,6 +861,15 @@ export namespace Config {
       release_date: z.string(),
       attachment: z.boolean(),
       reasoning: z.boolean(),
+      reasoning_options: z
+        .array(
+          z.discriminatedUnion("type", [
+            z.object({ type: z.literal("toggle") }),
+            z.object({ type: z.literal("effort"), values: z.array(z.string()) }),
+            z.object({ type: z.literal("budget_tokens"), min: z.number(), max: z.number().optional() }),
+          ]),
+        )
+        .optional(),
       temperature: z.boolean(),
       tool_call: z.boolean(),
       interleaved: z

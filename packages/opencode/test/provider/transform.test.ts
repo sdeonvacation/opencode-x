@@ -2588,11 +2588,29 @@ describe("ProviderTransform.variants", () => {
           url: "https://api.custom.com",
           npm: "@ai-sdk/openai-compatible",
         },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
+        },
       })
       const result = ProviderTransform.variants(model)
       expect(Object.keys(result)).toEqual(["low", "medium", "high"])
       expect(result.low).toEqual({ reasoningEffort: "low" })
       expect(result.high).toEqual({ reasoningEffort: "high" })
+    })
+
+    test("returns empty for untagged openai-compatible model", () => {
+      const model = createMockModel({
+        id: "custom-provider/custom-model",
+        providerID: "custom-provider",
+        api: {
+          id: "custom-model",
+          url: "https://api.custom.com",
+          npm: "@ai-sdk/openai-compatible",
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(result).toEqual({})
     })
   })
 
@@ -3254,6 +3272,268 @@ describe("ProviderTransform.variants", () => {
       expect(result).toEqual({})
     })
   })
+
+  describe("Tier 1: capability-based gating", () => {
+    test("reasoning_options: [] returns empty (no control)", () => {
+      const model = createMockModel({
+        id: "openai/o3",
+        api: { id: "o3", url: "https://api.openai.com", npm: "@ai-sdk/openai" },
+        capabilities: { reasoning: true, reasoning_options: [] },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(result).toEqual({})
+    })
+
+    test("reasoning_options: [toggle] returns empty", () => {
+      const model = createMockModel({
+        id: "deepseek/deepseek-r1",
+        api: { id: "deepseek-r1", url: "https://api.deepseek.com", npm: "@ai-sdk/openai-compatible" },
+        capabilities: { reasoning: true, reasoning_options: [{ type: "toggle" }] },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(result).toEqual({})
+    })
+
+    test("reasoning_options with effort values dispatches to SDK formatter", () => {
+      const model = createMockModel({
+        id: "openai/o3",
+        api: { id: "o3", url: "https://api.openai.com", npm: "@ai-sdk/openai" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high"])
+      expect(result.low).toEqual({
+        reasoningEffort: "low",
+        reasoningSummary: "auto",
+        include: ["reasoning.encrypted_content"],
+      })
+    })
+
+    test("mixed opts (effort + toggle) uses effort values", () => {
+      const model = createMockModel({
+        id: "test/model",
+        api: { id: "model", url: "https://api.test.com", npm: "@ai-sdk/groq" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "high"])
+      expect(result.high).toEqual({ reasoningEffort: "high" })
+    })
+
+    test("multiple toggle-only opts returns empty", () => {
+      const model = createMockModel({
+        id: "qwen/qwen3",
+        api: { id: "qwen3", url: "https://api.qwen.com", npm: "@ai-sdk/openai-compatible" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "toggle" }, { type: "toggle" }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(result).toEqual({})
+    })
+  })
+
+  describe("Tier 2: values-driven dispatch per SDK", () => {
+    test("openrouter uses reasoning wrapper with provided values", () => {
+      const model = createMockModel({
+        id: "openrouter/custom-model",
+        api: { id: "custom-model", url: "https://openrouter.ai", npm: "@openrouter/ai-sdk-provider" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "high"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "high"])
+      expect(result.low).toEqual({ reasoning: { effort: "low" } })
+    })
+
+    test("anthropic SDK uses adaptive thinking with provided values", () => {
+      const model = createMockModel({
+        id: "anthropic/claude-sonnet-4",
+        api: { id: "claude-sonnet-4", url: "https://api.anthropic.com", npm: "@ai-sdk/anthropic" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "medium", "high", "max"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high", "max"])
+      expect(result.medium).toEqual({ thinking: { type: "adaptive" }, effort: "medium" })
+    })
+
+    test("google SDK uses thinkingLevel with provided values", () => {
+      const model = createMockModel({
+        id: "google/gemini-3-pro",
+        api: { id: "gemini-3-pro", url: "https://api.google.com", npm: "@ai-sdk/google" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high"])
+      expect(result.medium).toEqual({
+        thinkingConfig: { includeThoughts: true, thinkingLevel: "medium" },
+      })
+    })
+
+    test("google SDK uses budget_tokens when present", () => {
+      const model = createMockModel({
+        id: "google/gemini-2.5-pro",
+        api: { id: "gemini-2.5-pro", url: "https://api.google.com", npm: "@ai-sdk/google" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "budget_tokens", min: 8000, max: 32000 }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["high", "max"])
+      expect(result.high).toEqual({ thinkingConfig: { includeThoughts: true, thinkingBudget: 8000 } })
+      expect(result.max).toEqual({ thinkingConfig: { includeThoughts: true, thinkingBudget: 32000 } })
+    })
+
+    test("bedrock uses reasoningConfig with provided values", () => {
+      const model = createMockModel({
+        id: "bedrock/claude-sonnet-4",
+        api: { id: "anthropic.claude-sonnet-4", url: "https://bedrock.aws", npm: "@ai-sdk/amazon-bedrock" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high"])
+      expect(result.medium).toEqual({
+        reasoningConfig: { type: "adaptive", maxReasoningEffort: "medium" },
+      })
+    })
+
+    test("azure uses reasoningEffort shape with provided values", () => {
+      const model = createMockModel({
+        id: "azure/o3",
+        api: { id: "o3", url: "https://azure.openai.com", npm: "@ai-sdk/azure" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "medium", "high", "xhigh"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high", "xhigh"])
+      expect(result.xhigh).toEqual({
+        reasoningEffort: "xhigh",
+        reasoningSummary: "auto",
+        include: ["reasoning.encrypted_content"],
+      })
+    })
+
+    test("mistral uses provided values over ID-based check", () => {
+      const model = createMockModel({
+        id: "mistral/mistral-large-latest",
+        api: { id: "mistral-large-latest", url: "https://api.mistral.com", npm: "@ai-sdk/mistral" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "high"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "high"])
+      expect(result.high).toEqual({ reasoningEffort: "high" })
+    })
+
+    test("openai-compatible with values returns variants (not empty)", () => {
+      const model = createMockModel({
+        id: "custom/model",
+        api: { id: "model", url: "https://custom.api.com", npm: "@ai-sdk/openai-compatible" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high"])
+      expect(result.low).toEqual({ reasoningEffort: "low" })
+    })
+
+    test("openai-compatible without opts returns empty", () => {
+      const model = createMockModel({
+        id: "custom/model",
+        api: { id: "model", url: "https://custom.api.com", npm: "@ai-sdk/openai-compatible" },
+        capabilities: { reasoning: true },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(result).toEqual({})
+    })
+
+    test("gateway anthropic with values uses adaptive format", () => {
+      const model = createMockModel({
+        id: "anthropic/claude-sonnet-5",
+        providerID: "gateway",
+        api: { id: "anthropic/claude-sonnet-5", url: "https://gateway.ai", npm: "@ai-sdk/gateway" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "medium", "high", "max"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high", "max"])
+      expect(result.high).toEqual({ thinking: { type: "adaptive" }, effort: "high" })
+    })
+
+    test("gateway google with values uses thinkingLevel format", () => {
+      const model = createMockModel({
+        id: "google/gemini-3-pro",
+        providerID: "gateway",
+        api: { id: "google/gemini-3-pro", url: "https://gateway.ai", npm: "@ai-sdk/gateway" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high"])
+      expect(result.low).toEqual({
+        thinkingConfig: { includeThoughts: true, thinkingLevel: "low" },
+      })
+    })
+
+    test("gateway non-anthropic non-google with values uses reasoningEffort", () => {
+      const model = createMockModel({
+        id: "openai/o3",
+        providerID: "gateway",
+        api: { id: "openai/o3", url: "https://gateway.ai", npm: "@ai-sdk/gateway" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high"])
+      expect(result.low).toEqual({ reasoningEffort: "low" })
+    })
+
+    test("sap provider anthropic with values uses adaptive format", () => {
+      const model = createMockModel({
+        id: "sap-ai-core/anthropic--claude-sonnet-4",
+        providerID: "sap-ai-core",
+        api: { id: "anthropic--claude-sonnet-4", url: "https://api.ai.sap", npm: "@jerome-benoit/sap-ai-provider-v2" },
+        capabilities: {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["low", "medium", "high"])
+      expect(result.medium).toEqual({ thinking: { type: "adaptive" }, effort: "medium" })
+    })
+  })
 })
 
 describe("ProviderTransform.message - opt-in caching via options.caching", () => {
@@ -3549,5 +3829,439 @@ describe("ProviderTransform.message - cache placement after thinking strip", () 
     expect(anchors).toContain(0) // system
     expect(anchors).toContain(r2.length - 1) // last assistant
     expect(anchors).toContain(r2.length - 2) // second-to-last (user)
+  })
+})
+
+describe("ProviderTransform.schema - strict sanitizer", () => {
+  const strictModel = {
+    providerID: "moonshot",
+    api: { id: "kimi-k2" },
+    capabilities: { schema_compat: "strict" },
+  } as any
+
+  const standardModel = {
+    providerID: "openai",
+    api: { id: "gpt-4o" },
+    capabilities: { schema_compat: "standard" },
+  } as any
+
+  const noCompatModel = {
+    providerID: "openai",
+    api: { id: "gpt-4o" },
+    capabilities: {},
+  } as any
+
+  test("strips sibling properties from $ref nodes", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        item: {
+          $ref: "#/$defs/Item",
+          description: "should be removed",
+          title: "also removed",
+        },
+      },
+      $defs: {
+        Item: { type: "object", properties: { name: { type: "string" } } },
+      },
+    } as any
+
+    const result = ProviderTransform.schema(strictModel, schema) as any
+    expect(result.properties.item).toEqual({ $ref: "#/$defs/Item" })
+    expect(result.$defs.Item.properties.name.type).toBe("string")
+  })
+
+  test("flattens tuple items array to single item", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        coords: {
+          type: "array",
+          items: [{ type: "number" }, { type: "string" }],
+        },
+      },
+    } as any
+
+    const result = ProviderTransform.schema(strictModel, schema) as any
+    expect(result.properties.coords.items).toEqual({ type: "number" })
+  })
+
+  test("uses empty object when tuple items array is empty", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        empty: { type: "array", items: [] },
+      },
+    } as any
+
+    const result = ProviderTransform.schema(strictModel, schema) as any
+    expect(result.properties.empty.items).toEqual({})
+  })
+
+  test("does not modify schema for standard compat", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        item: {
+          $ref: "#/$defs/Item",
+          description: "kept",
+        },
+      },
+    } as any
+
+    const result = ProviderTransform.schema(standardModel, schema) as any
+    expect(result.properties.item.description).toBe("kept")
+    expect(result.properties.item.$ref).toBe("#/$defs/Item")
+  })
+
+  test("does not modify schema when schema_compat is undefined", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        item: {
+          $ref: "#/$defs/Item",
+          description: "kept",
+        },
+      },
+    } as any
+
+    const result = ProviderTransform.schema(noCompatModel, schema) as any
+    expect(result.properties.item.description).toBe("kept")
+    expect(result.properties.item.$ref).toBe("#/$defs/Item")
+  })
+
+  test("recursively sanitizes nested schemas", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        outer: {
+          type: "object",
+          properties: {
+            inner: {
+              $ref: "#/$defs/Inner",
+              description: "nested ref",
+            },
+          },
+        },
+      },
+    } as any
+
+    const result = ProviderTransform.schema(strictModel, schema) as any
+    expect(result.properties.outer.properties.inner).toEqual({ $ref: "#/$defs/Inner" })
+  })
+
+  test("handles arrays in schema values", () => {
+    const schema = {
+      type: "object",
+      anyOf: [{ $ref: "#/$defs/A", title: "removed" }, { type: "string" }],
+    } as any
+
+    const result = ProviderTransform.schema(strictModel, schema) as any
+    expect(result.anyOf[0]).toEqual({ $ref: "#/$defs/A" })
+    expect(result.anyOf[1]).toEqual({ type: "string" })
+  })
+
+  test("preserves non-$ref nodes fully", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "a name", minLength: 1 },
+      },
+      required: ["name"],
+    } as any
+
+    const result = ProviderTransform.schema(strictModel, schema) as any
+    expect(result.properties.name.type).toBe("string")
+    expect(result.properties.name.description).toBe("a name")
+    expect(result.properties.name.minLength).toBe(1)
+    expect(result.required).toEqual(["name"])
+  })
+})
+
+describe("ProviderTransform.options - capability-based thinking enablement", () => {
+  const sessionID = "test-session"
+
+  const base = {
+    id: "test/model",
+    name: "Test Model",
+    status: "active",
+    options: {},
+    headers: {},
+    cost: { input: 0.001, output: 0.002 },
+    limit: { context: 128000, output: 32000 },
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: false,
+      toolcall: true,
+      input: { text: true, audio: false, image: false, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+  } as any
+
+  describe("block 1 - chat_template_args for baseten/opencode", () => {
+    test("sets chat_template_args when baseten + reasoning + interleaved object", () => {
+      const model = {
+        ...base,
+        providerID: "baseten",
+        api: { id: "kimi-k2", npm: "@ai-sdk/openai-compatible" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          interleaved: { field: "reasoning_content" },
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["chat_template_args"]).toEqual({ enable_thinking: true })
+    })
+
+    test("sets chat_template_args when opencode + reasoning + interleaved object", () => {
+      const model = {
+        ...base,
+        providerID: "opencode",
+        api: { id: "glm-4.6", npm: "@ai-sdk/openai-compatible" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          interleaved: { field: "reasoning_content" },
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["chat_template_args"]).toEqual({ enable_thinking: true })
+    })
+
+    test("does NOT set chat_template_args when interleaved is false", () => {
+      const model = {
+        ...base,
+        providerID: "baseten",
+        api: { id: "kimi-k2", npm: "@ai-sdk/openai-compatible" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          interleaved: false,
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["chat_template_args"]).toBeUndefined()
+    })
+
+    test("does NOT set chat_template_args when reasoning is false", () => {
+      const model = {
+        ...base,
+        providerID: "opencode",
+        api: { id: "glm-4.6", npm: "@ai-sdk/openai-compatible" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: false,
+          interleaved: { field: "reasoning_content" },
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["chat_template_args"]).toBeUndefined()
+    })
+
+    test("does NOT set chat_template_args for other providers", () => {
+      const model = {
+        ...base,
+        providerID: "anthropic",
+        api: { id: "kimi-k2", npm: "@ai-sdk/anthropic" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          interleaved: { field: "reasoning_content" },
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["chat_template_args"]).toBeUndefined()
+    })
+  })
+
+  describe("block 3 - anthropic SDK thinking for non-Claude models", () => {
+    test("sets thinking when anthropic SDK + toggle capability + not claude", () => {
+      const model = {
+        ...base,
+        providerID: "moonshot",
+        api: { id: "kimi-k2p", npm: "@ai-sdk/anthropic" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          reasoning_options: [{ type: "toggle" }],
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["thinking"]).toEqual({
+        type: "enabled",
+        budgetTokens: Math.min(16_000, Math.floor(32000 / 2 - 1)),
+      })
+    })
+
+    test("sets thinking when google-vertex/anthropic SDK + toggle", () => {
+      const model = {
+        ...base,
+        providerID: "moonshot",
+        api: { id: "kimi-k2p", npm: "@ai-sdk/google-vertex/anthropic" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          reasoning_options: [{ type: "toggle" }],
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["thinking"]).toEqual({
+        type: "enabled",
+        budgetTokens: Math.min(16_000, Math.floor(32000 / 2 - 1)),
+      })
+    })
+
+    test("does NOT set thinking for claude models on anthropic SDK", () => {
+      const model = {
+        ...base,
+        providerID: "anthropic",
+        api: { id: "claude-sonnet-4-20250514", npm: "@ai-sdk/anthropic" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          reasoning_options: [{ type: "toggle" }],
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["thinking"]).toBeUndefined()
+    })
+
+    test("does NOT set thinking when no toggle in reasoning_options", () => {
+      const model = {
+        ...base,
+        providerID: "moonshot",
+        api: { id: "kimi-k2p", npm: "@ai-sdk/anthropic" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["low", "high"] }],
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["thinking"]).toBeUndefined()
+    })
+
+    test("does NOT set thinking when reasoning_options undefined", () => {
+      const model = {
+        ...base,
+        providerID: "moonshot",
+        api: { id: "kimi-k2p", npm: "@ai-sdk/anthropic" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["thinking"]).toBeUndefined()
+    })
+
+    test("does NOT set thinking for non-anthropic SDK", () => {
+      const model = {
+        ...base,
+        providerID: "moonshot",
+        api: { id: "kimi-k2p", npm: "@ai-sdk/openai-compatible" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          reasoning_options: [{ type: "toggle" }],
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["thinking"]).toBeUndefined()
+    })
+  })
+
+  describe("block 4 - alibaba-cn enable_thinking", () => {
+    test("sets enable_thinking when alibaba-cn + reasoning + has options", () => {
+      const model = {
+        ...base,
+        providerID: "alibaba-cn",
+        api: { id: "qwen3-235b-a22b", npm: "@ai-sdk/openai-compatible" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          reasoning_options: [{ type: "toggle" }],
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["enable_thinking"]).toBe(true)
+    })
+
+    test("sets enable_thinking when reasoning_options undefined (no control)", () => {
+      const model = {
+        ...base,
+        providerID: "alibaba-cn",
+        api: { id: "qwen3-235b-a22b", npm: "@ai-sdk/openai-compatible" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["enable_thinking"]).toBe(true)
+    })
+
+    test("does NOT set enable_thinking when reasoning_options is empty array (always-on)", () => {
+      const model = {
+        ...base,
+        providerID: "alibaba-cn",
+        api: { id: "kimi-k2-thinking", npm: "@ai-sdk/openai-compatible" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          reasoning_options: [],
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["enable_thinking"]).toBeUndefined()
+    })
+
+    test("does NOT set enable_thinking when reasoning is false", () => {
+      const model = {
+        ...base,
+        providerID: "alibaba-cn",
+        api: { id: "qwen-turbo", npm: "@ai-sdk/openai-compatible" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: false,
+          reasoning_options: [{ type: "toggle" }],
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["enable_thinking"]).toBeUndefined()
+    })
+
+    test("does NOT set enable_thinking for non-alibaba-cn provider", () => {
+      const model = {
+        ...base,
+        providerID: "openai",
+        api: { id: "qwen3", npm: "@ai-sdk/openai-compatible" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          reasoning_options: [{ type: "toggle" }],
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["enable_thinking"]).toBeUndefined()
+    })
+
+    test("does NOT set enable_thinking for non openai-compatible SDK", () => {
+      const model = {
+        ...base,
+        providerID: "alibaba-cn",
+        api: { id: "qwen3", npm: "@ai-sdk/openai" },
+        capabilities: {
+          ...base.capabilities,
+          reasoning: true,
+          reasoning_options: [{ type: "toggle" }],
+        },
+      }
+      const result = ProviderTransform.options({ model, sessionID })
+      expect(result["enable_thinking"]).toBeUndefined()
+    })
   })
 })

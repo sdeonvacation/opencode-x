@@ -675,6 +675,7 @@ export namespace Provider {
                         pdf: false,
                       },
                       interleaved: false,
+                      schema_compat: "standard",
                     },
                     release_date: "",
                     variants: {},
@@ -875,6 +876,16 @@ export namespace Provider {
             field: z.enum(["reasoning_content", "reasoning_details"]),
           }),
         ]),
+        reasoning_options: z
+          .array(
+            z.discriminatedUnion("type", [
+              z.object({ type: z.literal("toggle") }),
+              z.object({ type: z.literal("effort"), values: z.array(z.string()) }),
+              z.object({ type: z.literal("budget_tokens"), min: z.number(), max: z.number().optional() }),
+            ]),
+          )
+          .optional(),
+        schema_compat: z.enum(["standard", "strict"]).optional(),
       }),
       cost: z.object({
         input: z.number(),
@@ -998,6 +1009,11 @@ export namespace Provider {
     return result
   }
 
+  function deriveSchemaCompat(providerID: string): "standard" | "strict" {
+    if (providerID.startsWith("moonshot") || providerID.includes("kimi")) return "strict"
+    return "standard"
+  }
+
   function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
     const m: Model = {
       id: ModelID.make(model.id),
@@ -1038,6 +1054,8 @@ export namespace Provider {
           pdf: model.modalities?.output?.includes("pdf") ?? false,
         },
         interleaved: model.interleaved ?? false,
+        reasoning_options: model.reasoning_options,
+        schema_compat: deriveSchemaCompat(provider.id),
       },
       release_date: model.release_date,
       variants: {},
@@ -1207,6 +1225,8 @@ export namespace Provider {
                     (model.id ?? modelID).includes("deepseek")
                       ? { field: "reasoning_content" }
                       : false),
+                  reasoning_options: model.reasoning_options ?? existingModel?.capabilities.reasoning_options,
+                  schema_compat: deriveSchemaCompat(providerID),
                 },
                 cost: {
                   input: model?.cost?.input ?? existingModel?.cost?.input ?? 0,
@@ -1352,6 +1372,10 @@ export namespace Provider {
                     ...model,
                     id: ModelID.make(id),
                     providerID,
+                    capabilities: {
+                      ...model.capabilities,
+                      schema_compat: (model.capabilities as any).schema_compat ?? "standard",
+                    },
                   },
                 ]),
               )

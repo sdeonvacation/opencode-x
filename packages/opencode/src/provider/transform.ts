@@ -545,103 +545,84 @@ export namespace ProviderTransform {
   export function variants(model: Provider.Model): Record<string, Record<string, any>> {
     if (!model.capabilities.reasoning) return {}
 
+    const opts = model.capabilities.reasoning_options
+
+    // === Tier 1: Capability-based gate ===
+
+    // Explicitly tagged "no control" → no variants
+    if (opts && opts.length === 0) return {}
+
+    // Toggle-only → no effort variants (thinking controlled via options() defaults)
+    if (opts && opts.every((o) => o.type === "toggle")) return {}
+
+    // Has explicit effort values → extract them
+    const effort = opts?.find((o): o is Extract<typeof o, { type: "effort" }> => o.type === "effort")
+    const values = effort?.values
+
+    // === Tier 2: Shape dispatch by SDK ===
+    return variantsBySDK(model, values)
+  }
+
+  function variantsBySDK(model: Provider.Model, values: string[] | undefined): Record<string, Record<string, any>> {
     const id = model.id.toLowerCase()
+    const opts = model.capabilities.reasoning_options
     const isOpus47 = anthropicOpus47OrLater(model.api.id)
     const isAnthropicAdaptive =
       isOpus47 || ["opus-4-6", "opus-4.6", "sonnet-4-6", "sonnet-4.6"].some((v) => model.api.id.includes(v))
     const adaptiveEfforts = isOpus47 ? ["low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high", "max"]
-    if (
-      id.includes("deepseek-chat") ||
-      id.includes("deepseek-reasoner") ||
-      id.includes("deepseek-r1") ||
-      id.includes("deepseek-v3") ||
-      id.includes("minimax") ||
-      id.includes("glm") ||
-      id.includes("kimi") ||
-      id.includes("k2p") ||
-      id.includes("qwen") ||
-      id.includes("big-pickle")
-    )
-      return {}
 
-    // see: https://docs.x.ai/docs/guides/reasoning#control-how-hard-the-model-thinks
-    if (id.includes("grok") && id.includes("grok-3-mini")) {
-      if (model.api.npm === "@openrouter/ai-sdk-provider") {
+    // Grok special case (fallback when opts undefined)
+    if (!opts && id.includes("grok")) {
+      if (id.includes("grok-3-mini")) {
+        if (model.api.npm === "@openrouter/ai-sdk-provider") {
+          return {
+            low: { reasoning: { effort: "low" } },
+            high: { reasoning: { effort: "high" } },
+          }
+        }
         return {
-          low: { reasoning: { effort: "low" } },
-          high: { reasoning: { effort: "high" } },
+          low: { reasoningEffort: "low" },
+          high: { reasoningEffort: "high" },
         }
       }
-      return {
-        low: { reasoningEffort: "low" },
-        high: { reasoningEffort: "high" },
-      }
+      return {}
     }
-    if (id.includes("grok")) return {}
 
     switch (model.api.npm) {
       case "@openrouter/ai-sdk-provider":
+        if (values) return Object.fromEntries(values.map((v) => [v, { reasoning: { effort: v } }]))
         if (!model.id.includes("gpt") && !model.id.includes("gemini-3") && !model.id.includes("claude")) return {}
-        return Object.fromEntries(OPENAI_EFFORTS.map((effort) => [effort, { reasoning: { effort } }]))
+        return Object.fromEntries(OPENAI_EFFORTS.map((v) => [v, { reasoning: { effort: v } }]))
 
       case "@ai-sdk/gateway":
         if (model.id.includes("anthropic")) {
+          if (values) {
+            return Object.fromEntries(values.map((v) => [v, { thinking: { type: "adaptive" }, effort: v }]))
+          }
           if (isAnthropicAdaptive) {
-            return Object.fromEntries(
-              adaptiveEfforts.map((effort) => [
-                effort,
-                {
-                  thinking: {
-                    type: "adaptive",
-                  },
-                  effort,
-                },
-              ]),
-            )
+            return Object.fromEntries(adaptiveEfforts.map((v) => [v, { thinking: { type: "adaptive" }, effort: v }]))
           }
           return {
-            high: {
-              thinking: {
-                type: "enabled",
-                budgetTokens: 16000,
-              },
-            },
-            max: {
-              thinking: {
-                type: "enabled",
-                budgetTokens: 31999,
-              },
-            },
+            high: { thinking: { type: "enabled", budgetTokens: 16000 } },
+            max: { thinking: { type: "enabled", budgetTokens: 31999 } },
           }
         }
         if (model.id.includes("google")) {
+          if (values) {
+            return Object.fromEntries(
+              values.map((v) => [v, { thinkingConfig: { includeThoughts: true, thinkingLevel: v } }]),
+            )
+          }
           if (id.includes("2.5")) {
             return {
-              high: {
-                thinkingConfig: {
-                  includeThoughts: true,
-                  thinkingBudget: 16000,
-                },
-              },
-              max: {
-                thinkingConfig: {
-                  includeThoughts: true,
-                  thinkingBudget: 24576,
-                },
-              },
+              high: { thinkingConfig: { includeThoughts: true, thinkingBudget: 16000 } },
+              max: { thinkingConfig: { includeThoughts: true, thinkingBudget: 24576 } },
             }
           }
-          return Object.fromEntries(
-            ["low", "high"].map((effort) => [
-              effort,
-              {
-                includeThoughts: true,
-                thinkingLevel: effort,
-              },
-            ]),
-          )
+          return Object.fromEntries(["low", "high"].map((v) => [v, { includeThoughts: true, thinkingLevel: v }]))
         }
-        return Object.fromEntries(OPENAI_EFFORTS.map((effort) => [effort, { reasoningEffort: effort }]))
+        if (values) return Object.fromEntries(values.map((v) => [v, { reasoningEffort: v }]))
+        return Object.fromEntries(OPENAI_EFFORTS.map((v) => [v, { reasoningEffort: v }]))
 
       case "@ai-sdk/github-copilot":
         if (model.id.includes("gemini")) {
@@ -650,27 +631,29 @@ export namespace ProviderTransform {
         }
         if (model.id.includes("claude")) {
           if (anthropicOpus47OrLater(model.api.id)) {
-            return Object.fromEntries(["medium"].map((effort) => [effort, { reasoningEffort: effort }]))
+            return Object.fromEntries(["medium"].map((v) => [v, { reasoningEffort: v }]))
           }
-          return Object.fromEntries(WIDELY_SUPPORTED_EFFORTS.map((effort) => [effort, { reasoningEffort: effort }]))
+          return Object.fromEntries(WIDELY_SUPPORTED_EFFORTS.map((v) => [v, { reasoningEffort: v }]))
         }
-        const copilotEfforts = iife(() => {
-          if (id.includes("5.1-codex-max") || id.includes("5.2") || id.includes("5.3"))
-            return [...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
-          const arr = [...WIDELY_SUPPORTED_EFFORTS]
-          if (id.includes("gpt-5") && model.release_date >= "2025-12-04") arr.push("xhigh")
-          return arr
-        })
-        return Object.fromEntries(
-          copilotEfforts.map((effort) => [
-            effort,
-            {
-              reasoningEffort: effort,
-              reasoningSummary: "auto",
-              include: ["reasoning.encrypted_content"],
-            },
-          ]),
-        )
+        {
+          const copilotEfforts = iife(() => {
+            if (id.includes("5.1-codex-max") || id.includes("5.2") || id.includes("5.3"))
+              return [...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
+            const arr = [...WIDELY_SUPPORTED_EFFORTS]
+            if (id.includes("gpt-5") && model.release_date >= "2025-12-04") arr.push("xhigh")
+            return arr
+          })
+          return Object.fromEntries(
+            copilotEfforts.map((v) => [
+              v,
+              {
+                reasoningEffort: v,
+                reasoningSummary: "auto",
+                include: ["reasoning.encrypted_content"],
+              },
+            ]),
+          )
+        }
 
       case "@ai-sdk/cerebras":
       // https://v5.ai-sdk.dev/providers/ai-sdk-providers/cerebras
@@ -683,64 +666,85 @@ export namespace ProviderTransform {
       case "venice-ai-sdk-provider":
       // https://docs.venice.ai/overview/guides/reasoning-models#reasoning-effort
       case "@ai-sdk/openai-compatible":
-        const efforts = [...WIDELY_SUPPORTED_EFFORTS]
-        if (model.api.id.toLowerCase().includes("deepseek-v4")) {
-          efforts.push("max")
+        if (values) return Object.fromEntries(values.map((v) => [v, { reasoningEffort: v }]))
+        if (model.api.npm === "@ai-sdk/openai-compatible" && !opts) return {}
+        {
+          const efforts = [...WIDELY_SUPPORTED_EFFORTS]
+          if (model.api.id.toLowerCase().includes("deepseek-v4")) {
+            efforts.push("max")
+          }
+          return Object.fromEntries(efforts.map((v) => [v, { reasoningEffort: v }]))
         }
-        return Object.fromEntries(efforts.map((effort) => [effort, { reasoningEffort: effort }]))
 
       case "@ai-sdk/azure":
         // https://v5.ai-sdk.dev/providers/ai-sdk-providers/azure
-        if (id === "o1-mini") return {}
-        const azureEfforts = ["low", "medium", "high"]
-        if (id.includes("gpt-5-") || id === "gpt-5") {
-          azureEfforts.unshift("minimal")
+        if (values) {
+          return Object.fromEntries(
+            values.map((v) => [
+              v,
+              { reasoningEffort: v, reasoningSummary: "auto", include: ["reasoning.encrypted_content"] },
+            ]),
+          )
         }
-        return Object.fromEntries(
-          azureEfforts.map((effort) => [
-            effort,
-            {
-              reasoningEffort: effort,
-              reasoningSummary: "auto",
-              include: ["reasoning.encrypted_content"],
-            },
-          ]),
-        )
+        if (id === "o1-mini") return {}
+        {
+          const azureEfforts = ["low", "medium", "high"]
+          if (id.includes("gpt-5-") || id === "gpt-5") {
+            azureEfforts.unshift("minimal")
+          }
+          return Object.fromEntries(
+            azureEfforts.map((v) => [
+              v,
+              { reasoningEffort: v, reasoningSummary: "auto", include: ["reasoning.encrypted_content"] },
+            ]),
+          )
+        }
+
       case "@ai-sdk/openai":
         // https://v5.ai-sdk.dev/providers/ai-sdk-providers/openai
+        if (values) {
+          return Object.fromEntries(
+            values.map((v) => [
+              v,
+              { reasoningEffort: v, reasoningSummary: "auto", include: ["reasoning.encrypted_content"] },
+            ]),
+          )
+        }
         if (id === "gpt-5-pro") return {}
-        const openaiEfforts = iife(() => {
-          if (id.includes("codex")) {
-            if (id.includes("5.2") || id.includes("5.3")) return [...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
-            return WIDELY_SUPPORTED_EFFORTS
-          }
-          const arr = [...WIDELY_SUPPORTED_EFFORTS]
-          if (id.includes("gpt-5-") || id === "gpt-5") {
-            arr.unshift("minimal")
-          }
-          if (model.release_date >= "2025-11-13") {
-            arr.unshift("none")
-          }
-          if (model.release_date >= "2025-12-04") {
-            arr.push("xhigh")
-          }
-          return arr
-        })
-        return Object.fromEntries(
-          openaiEfforts.map((effort) => [
-            effort,
-            {
-              reasoningEffort: effort,
-              reasoningSummary: "auto",
-              include: ["reasoning.encrypted_content"],
-            },
-          ]),
-        )
+        {
+          const openaiEfforts = iife(() => {
+            if (id.includes("codex")) {
+              if (id.includes("5.2") || id.includes("5.3")) return [...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
+              return WIDELY_SUPPORTED_EFFORTS
+            }
+            const arr = [...WIDELY_SUPPORTED_EFFORTS]
+            if (id.includes("gpt-5-") || id === "gpt-5") {
+              arr.unshift("minimal")
+            }
+            if (model.release_date >= "2025-11-13") {
+              arr.unshift("none")
+            }
+            if (model.release_date >= "2025-12-04") {
+              arr.push("xhigh")
+            }
+            return arr
+          })
+          return Object.fromEntries(
+            openaiEfforts.map((v) => [
+              v,
+              { reasoningEffort: v, reasoningSummary: "auto", include: ["reasoning.encrypted_content"] },
+            ]),
+          )
+        }
 
       case "@ai-sdk/anthropic":
       // https://v5.ai-sdk.dev/providers/ai-sdk-providers/anthropic
       case "@ai-sdk/google-vertex/anthropic":
         // https://v5.ai-sdk.dev/providers/ai-sdk-providers/google-vertex#anthropic-provider
+
+        if (values) {
+          return Object.fromEntries(values.map((v) => [v, { thinking: { type: "adaptive" }, effort: v }]))
+        }
 
         if (isAnthropicAdaptive) {
           let efforts = [...adaptiveEfforts]
@@ -751,14 +755,14 @@ export namespace ProviderTransform {
             efforts = efforts.filter((v) => v !== "max" && v !== "xhigh")
           }
           return Object.fromEntries(
-            efforts.map((effort) => [
-              effort,
+            efforts.map((v) => [
+              v,
               {
                 thinking: {
                   type: "adaptive",
                   ...(isOpus47 ? { display: "summarized" } : {}),
                 },
-                effort,
+                effort: v,
               },
             ]),
           )
@@ -781,14 +785,19 @@ export namespace ProviderTransform {
 
       case "@ai-sdk/amazon-bedrock":
         // https://v5.ai-sdk.dev/providers/ai-sdk-providers/amazon-bedrock
+        if (values) {
+          return Object.fromEntries(
+            values.map((v) => [v, { reasoningConfig: { type: "adaptive", maxReasoningEffort: v } }]),
+          )
+        }
         if (isAnthropicAdaptive) {
           return Object.fromEntries(
-            adaptiveEfforts.map((effort) => [
-              effort,
+            adaptiveEfforts.map((v) => [
+              v,
               {
                 reasoningConfig: {
                   type: "adaptive",
-                  maxReasoningEffort: effort,
+                  maxReasoningEffort: v,
                   ...(isOpus47 ? { display: "summarized" } : {}),
                 },
               },
@@ -798,81 +807,58 @@ export namespace ProviderTransform {
         // For Anthropic models on Bedrock, use reasoningConfig with budgetTokens
         if (model.api.id.includes("anthropic")) {
           return {
-            high: {
-              reasoningConfig: {
-                type: "enabled",
-                budgetTokens: 16000,
-              },
-            },
-            max: {
-              reasoningConfig: {
-                type: "enabled",
-                budgetTokens: 31999,
-              },
-            },
+            high: { reasoningConfig: { type: "enabled", budgetTokens: 16000 } },
+            max: { reasoningConfig: { type: "enabled", budgetTokens: 31999 } },
           }
         }
 
         // For Amazon Nova models, use reasoningConfig with maxReasoningEffort
         return Object.fromEntries(
-          WIDELY_SUPPORTED_EFFORTS.map((effort) => [
-            effort,
-            {
-              reasoningConfig: {
-                type: "enabled",
-                maxReasoningEffort: effort,
-              },
-            },
-          ]),
+          WIDELY_SUPPORTED_EFFORTS.map((v) => [v, { reasoningConfig: { type: "enabled", maxReasoningEffort: v } }]),
         )
 
       case "@ai-sdk/google-vertex":
       // https://v5.ai-sdk.dev/providers/ai-sdk-providers/google-vertex
-      case "@ai-sdk/google":
+      case "@ai-sdk/google": {
         // https://v5.ai-sdk.dev/providers/ai-sdk-providers/google-generative-ai
+        const budget = opts?.find((o): o is Extract<typeof o, { type: "budget_tokens" }> => o.type === "budget_tokens")
+        if (values) {
+          return Object.fromEntries(
+            values.map((v) => [v, { thinkingConfig: { includeThoughts: true, thinkingLevel: v } }]),
+          )
+        }
+        if (budget) {
+          return {
+            high: { thinkingConfig: { includeThoughts: true, thinkingBudget: budget.min } },
+            max: { thinkingConfig: { includeThoughts: true, thinkingBudget: budget.max ?? budget.min } },
+          }
+        }
+        // Fallback: existing id-based logic
         if (id.includes("2.5")) {
           return {
-            high: {
-              thinkingConfig: {
-                includeThoughts: true,
-                thinkingBudget: 16000,
-              },
-            },
-            max: {
-              thinkingConfig: {
-                includeThoughts: true,
-                thinkingBudget: 24576,
-              },
-            },
+            high: { thinkingConfig: { includeThoughts: true, thinkingBudget: 16000 } },
+            max: { thinkingConfig: { includeThoughts: true, thinkingBudget: 24576 } },
           }
         }
         let levels = ["low", "high"]
         if (id.includes("3.1")) {
           levels = ["low", "medium", "high"]
         }
-
         return Object.fromEntries(
-          levels.map((effort) => [
-            effort,
-            {
-              thinkingConfig: {
-                includeThoughts: true,
-                thinkingLevel: effort,
-              },
-            },
-          ]),
+          levels.map((v) => [v, { thinkingConfig: { includeThoughts: true, thinkingLevel: v } }]),
         )
+      }
 
       case "@ai-sdk/mistral":
         // https://v5.ai-sdk.dev/providers/ai-sdk-providers/mistral
         // https://docs.mistral.ai/capabilities/reasoning/adjustable
+        if (values) return Object.fromEntries(values.map((v) => [v, { reasoningEffort: v }]))
         if (!model.capabilities.reasoning) return {}
-        // Only Mistral Small 4 and Medium 3.5 support reasoning
-        const mistralIds = ["mistral-small-2603", "mistral-small-latest", "mistral-medium-3.5"]
-        const mistralId = model.api.id.toLowerCase()
-        if (!mistralIds.some((item) => mistralId.includes(item))) return {}
-        return {
-          high: { reasoningEffort: "high" },
+        {
+          const mistralIds = ["mistral-small-2603", "mistral-small-latest", "mistral-medium-3.5"]
+          const mid = model.api.id.toLowerCase()
+          if (!mistralIds.some((item) => mid.includes(item))) return {}
+          return { high: { reasoningEffort: "high" } }
         }
 
       case "@ai-sdk/cohere":
@@ -881,15 +867,11 @@ export namespace ProviderTransform {
 
       case "@ai-sdk/groq":
         // https://v5.ai-sdk.dev/providers/ai-sdk-providers/groq
-        const groqEffort = ["none", ...WIDELY_SUPPORTED_EFFORTS]
-        return Object.fromEntries(
-          groqEffort.map((effort) => [
-            effort,
-            {
-              reasoningEffort: effort,
-            },
-          ]),
-        )
+        if (values) return Object.fromEntries(values.map((v) => [v, { reasoningEffort: v }]))
+        {
+          const groqEffort = ["none", ...WIDELY_SUPPORTED_EFFORTS]
+          return Object.fromEntries(groqEffort.map((v) => [v, { reasoningEffort: v }]))
+        }
 
       case "@ai-sdk/perplexity":
         // https://v5.ai-sdk.dev/providers/ai-sdk-providers/perplexity
@@ -897,52 +879,26 @@ export namespace ProviderTransform {
 
       case "@jerome-benoit/sap-ai-provider-v2":
         if (model.api.id.includes("anthropic")) {
+          if (values) {
+            return Object.fromEntries(values.map((v) => [v, { thinking: { type: "adaptive" }, effort: v }]))
+          }
           if (isAnthropicAdaptive) {
-            return Object.fromEntries(
-              adaptiveEfforts.map((effort) => [
-                effort,
-                {
-                  thinking: {
-                    type: "adaptive",
-                  },
-                  effort,
-                },
-              ]),
-            )
+            return Object.fromEntries(adaptiveEfforts.map((v) => [v, { thinking: { type: "adaptive" }, effort: v }]))
           }
           return {
-            high: {
-              thinking: {
-                type: "enabled",
-                budgetTokens: 16000,
-              },
-            },
-            max: {
-              thinking: {
-                type: "enabled",
-                budgetTokens: 31999,
-              },
-            },
+            high: { thinking: { type: "enabled", budgetTokens: 16000 } },
+            max: { thinking: { type: "enabled", budgetTokens: 31999 } },
           }
         }
         if (model.api.id.includes("gemini") && id.includes("2.5")) {
           return {
-            high: {
-              thinkingConfig: {
-                includeThoughts: true,
-                thinkingBudget: 16000,
-              },
-            },
-            max: {
-              thinkingConfig: {
-                includeThoughts: true,
-                thinkingBudget: 24576,
-              },
-            },
+            high: { thinkingConfig: { includeThoughts: true, thinkingBudget: 16000 } },
+            max: { thinkingConfig: { includeThoughts: true, thinkingBudget: 24576 } },
           }
         }
         if (model.api.id.includes("gpt") || /\bo[1-9]/.test(model.api.id)) {
-          return Object.fromEntries(WIDELY_SUPPORTED_EFFORTS.map((effort) => [effort, { reasoningEffort: effort }]))
+          if (values) return Object.fromEntries(values.map((v) => [v, { reasoningEffort: v }]))
+          return Object.fromEntries(WIDELY_SUPPORTED_EFFORTS.map((v) => [v, { reasoningEffort: v }]))
         }
         return {}
     }
@@ -982,8 +938,9 @@ export namespace ProviderTransform {
     }
 
     if (
-      input.model.providerID === "baseten" ||
-      (input.model.providerID === "opencode" && ["kimi-k2-thinking", "glm-4.6"].includes(input.model.api.id))
+      (input.model.providerID === "baseten" || input.model.providerID === "opencode") &&
+      input.model.capabilities.reasoning &&
+      typeof input.model.capabilities.interleaved === "object"
     ) {
       result["chat_template_args"] = { enable_thinking: true }
     }
@@ -1010,11 +967,12 @@ export namespace ProviderTransform {
       }
     }
 
-    // Enable thinking by default for kimi models using anthropic SDK
-    const modelId = input.model.api.id.toLowerCase()
+    // Enable thinking by default for non-Claude models using anthropic SDK
+    const opts = input.model.capabilities.reasoning_options
     if (
       (input.model.api.npm === "@ai-sdk/anthropic" || input.model.api.npm === "@ai-sdk/google-vertex/anthropic") &&
-      (modelId.includes("k2p") || modelId.includes("kimi-k2.") || modelId.includes("kimi-k2p"))
+      opts?.some((o) => o.type === "toggle") &&
+      !input.model.api.id.includes("claude")
     ) {
       result["thinking"] = {
         type: "enabled",
@@ -1026,12 +984,12 @@ export namespace ProviderTransform {
     // DashScope's OpenAI-compatible API requires `enable_thinking: true` in the request body
     // to return reasoning_content. Without it, models like kimi-k2.5, qwen-plus, qwen3, qwq,
     // deepseek-r1, etc. never output thinking/reasoning tokens.
-    // Note: kimi-k2-thinking is excluded as it returns reasoning_content by default.
+    // Note: models with reasoning_options: [] have always-on reasoning and need no flag.
     if (
       input.model.providerID === "alibaba-cn" &&
       input.model.capabilities.reasoning &&
       input.model.api.npm === "@ai-sdk/openai-compatible" &&
-      !modelId.includes("kimi-k2-thinking")
+      !(opts && opts.length === 0)
     ) {
       result["enable_thinking"] = true
     }
@@ -1204,6 +1162,23 @@ export namespace ProviderTransform {
       }
     }
     */
+
+    // Strict schema sanitizer for providers that reject extra keywords alongside $ref
+    // and don't support tuple items (e.g., Moonshot/Kimi APIs)
+    if (model.capabilities?.schema_compat === "strict") {
+      const sanitize = (obj: unknown): unknown => {
+        if (obj === null || typeof obj !== "object") return obj
+        if (Array.isArray(obj)) return obj.map(sanitize)
+        if ("$ref" in (obj as object) && typeof (obj as any).$ref === "string") return { $ref: (obj as any).$ref }
+        const result = Object.fromEntries(Object.entries(obj as object).map(([k, v]) => [k, sanitize(v)]))
+        if (Array.isArray(result.items)) result.items = result.items[0] ?? {}
+        return result
+      }
+      const sanitized = sanitize(schema)
+      if (typeof sanitized === "object" && sanitized !== null && !Array.isArray(sanitized)) {
+        schema = sanitized as typeof schema
+      }
+    }
 
     // Convert integer enums to string enums for Google/Gemini
     if (model.providerID === "google" || model.api.id.includes("gemini")) {
