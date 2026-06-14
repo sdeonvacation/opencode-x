@@ -205,6 +205,8 @@ export namespace LLM {
       mergeOptions(mergeOptions(base, model.options), input.agent.options),
       variant,
     )
+    // Pass effective baseURL so transform can check proxy URLs for native Anthropic detection
+    if (provider.options?.baseURL) options.baseURL = provider.options.baseURL
     // [fork-perf] Variants must not override toolStreaming for anthropic — breaks streaming stability
     if (
       (model.api.npm === "@ai-sdk/google-vertex/anthropic" || model.api.npm === "@ai-sdk/anthropic") &&
@@ -214,6 +216,10 @@ export namespace LLM {
     }
     if (isOpenaiOauth) {
       options.instructions = system.join("\n")
+      options.store = false
+      delete options.truncation
+      delete options.promptCacheRetention
+      delete options.previousResponseId
     }
 
     const isWorkflow = language instanceof GitLabWorkflowLanguageModel
@@ -365,7 +371,13 @@ export namespace LLM {
       topK: params.topK,
       providerOptions,
       activeTools: Object.keys(visible).filter((x) => x !== "invalid"),
-      tools: ProviderTransform.toolCaching(visible, model, input.sessionID) as typeof visible,
+      tools: ProviderTransform.toolCaching(
+        visible,
+        model,
+        input.sessionID,
+        undefined,
+        provider.options?.baseURL,
+      ) as typeof visible,
       toolChoice: input.toolChoice,
       maxOutputTokens: params.maxOutputTokens,
       abortSignal: input.abort,

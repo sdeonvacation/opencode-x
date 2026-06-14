@@ -95,7 +95,13 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     delete options.reasoningSummary
     delete options.include
   }
-  if (isOpenaiOauth) options.instructions = system.join("\n")
+  if (isOpenaiOauth) {
+    options.instructions = system.join("\n")
+    options.store = false
+    delete options.truncation
+    delete options.promptCacheRetention
+    delete options.previousResponseId
+  }
 
   const messages =
     isOpenaiOauth || input.isWorkflow

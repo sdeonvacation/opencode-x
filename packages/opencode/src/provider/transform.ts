@@ -21,6 +21,29 @@ function mimeToModality(mime: string): Modality | undefined {
 export namespace ProviderTransform {
   export const OUTPUT_TOKEN_MAX = Flag.OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
 
+  // Whether the effective URL points to a native Anthropic endpoint (supports scope: "global" beta)
+  // When baseURL override is provided (e.g. from provider.options.baseURL), check it instead of model.api.url.
+  function isAnthropicNativeUrl(model: Provider.Model, base?: string): boolean {
+    try {
+      const url = base || model.api.url
+      if (!url) return true // SDK default targets api.anthropic.com
+      const hostname = new URL(url).hostname.toLowerCase()
+      return hostname === "api.anthropic.com" || hostname.endsWith(".anthropic.com")
+    } catch {
+      return false
+    }
+  }
+
+  // Whether the URL points to native OpenAI (not a proxy)
+  function isOpenaiNativeUrl(url: string): boolean {
+    try {
+      const hostname = new URL(url).hostname.toLowerCase()
+      return hostname === "api.openai.com" || hostname.endsWith(".openai.com")
+    } catch {
+      return false
+    }
+  }
+
   // Maps npm package to the key the AI SDK expects for providerOptions
   function sdkKey(npm: string): string | undefined {
     switch (npm) {
@@ -279,8 +302,9 @@ export namespace ProviderTransform {
     const cacheTtl = cachingDisabled ? undefined : "1h"
     const ttl = cacheTtl ? { ttl: cacheTtl } : {}
     // Global scope enables cross-session caching for stable content (system prompts).
-    // Only native Anthropic APIs support scope; proxies/routers ignore it safely.
-    const globalScope = isAnthropicNative ? { scope: "global" } : {}
+    // Only native Anthropic endpoints support it (requires prompt-caching-scope beta header).
+    const base = typeof options.baseURL === "string" ? options.baseURL : undefined
+    const globalScope = isAnthropicNative && isAnthropicNativeUrl(model, base) ? { scope: "global" } : {}
     const providerOptions: Record<string, unknown> = {
       anthropic: { cacheControl: { type: "ephemeral", ...ttl, ...globalScope } },
       openrouter: { cacheControl: { type: "ephemeral", ...ttl } },
@@ -393,15 +417,17 @@ export namespace ProviderTransform {
     model: Provider.Model,
     sessionID?: string,
     cacheKey?: TransformCache.Key, // [fork-perf] when provided, result is memoized
+    baseURL?: string,
   ) {
-    if (cacheKey) return TransformCache.memo(cacheKey, () => _toolCachingImpl(tools, model, sessionID)) // [fork-perf]
-    return _toolCachingImpl(tools, model, sessionID)
+    if (cacheKey) return TransformCache.memo(cacheKey, () => _toolCachingImpl(tools, model, sessionID, baseURL)) // [fork-perf]
+    return _toolCachingImpl(tools, model, sessionID, baseURL)
   }
 
   function _toolCachingImpl(
     tools: Record<string, { providerOptions?: Record<string, any> }>,
     model: Provider.Model,
     sessionID?: string,
+    baseURL?: string,
   ) {
     const isAnthropicLike =
       model.providerID === "anthropic" ||
@@ -437,13 +463,14 @@ export namespace ProviderTransform {
       String(process.env.ENABLE_PROMPT_CACHING_1H ?? "").toLowerCase(),
     )
     const cacheTtl = cachingDisabled ? {} : { ttl: "1h" }
+    const scope = isAnthropicNativeUrl(model, baseURL) ? { scope: "global" } : {}
     return {
       ...tools,
       [target]: {
         ...tools[target],
         providerOptions: mergeDeep(tools[target].providerOptions ?? {}, {
           anthropic: {
-            cacheControl: { type: "ephemeral", scope: "global", ...cacheTtl },
+            cacheControl: { type: "ephemeral", ...scope, ...cacheTtl },
           },
           bedrock: { cachePoint: { type: "default" } },
         }),
@@ -941,11 +968,18 @@ export namespace ProviderTransform {
     }
 
     // openai and providers using openai package should set store to false by default.
-    // Native openai: store: true (enables response chaining via previousResponseId)
+    // Native openai (api.openai.com): omit store (API defaults true, enables response chaining)
+    // Proxied openai or codex models: explicit store: false
     if (input.model.providerID === "openai" && input.model.api.npm === "@ai-sdk/openai") {
-      result["store"] = true
-      result["truncation"] = "auto"
-      if (input.lastResponseId) {
+      const base = input.providerOptions?.baseURL
+      const native = !base || isOpenaiNativeUrl(base)
+      const codex = input.model.api.id.includes("codex")
+      if (!native || codex) {
+        result["store"] = false
+      } else {
+        result["truncation"] = "auto"
+      }
+      if (native && !codex && input.lastResponseId) {
         result["previousResponseId"] = input.lastResponseId
       }
     }
@@ -956,7 +990,6 @@ export namespace ProviderTransform {
       (input.model.api.npm === "@ai-sdk/openai" && input.model.providerID !== "openai")
     ) {
       result["store"] = false
-      result["truncation"] = "auto"
     }
 
     if (input.model.api.npm === "@openrouter/ai-sdk-provider") {
@@ -985,7 +1018,11 @@ export namespace ProviderTransform {
 
     if (input.model.providerID === "openai" || input.providerOptions?.setCacheKey) {
       result["promptCacheKey"] = input.sessionID
-      result["promptCacheRetention"] = "24h"
+      const openaiNative =
+        input.model.providerID === "openai" && isOpenaiNativeUrl(input.providerOptions?.baseURL || "")
+      if (openaiNative || input.providerOptions?.setCacheKey) {
+        result["promptCacheRetention"] = "24h"
+      }
     }
 
     if (input.model.api.npm === "@ai-sdk/google" || input.model.api.npm === "@ai-sdk/google-vertex") {

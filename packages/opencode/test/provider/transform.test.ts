@@ -87,7 +87,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.promptCacheKey).toBe(sessionID)
   })
 
-  test("should set store=true for native openai provider (response chaining)", () => {
+  test("should not explicitly set store for native openai provider (API defaults to true)", () => {
     const openaiModel = {
       ...mockModel,
       providerID: "openai",
@@ -102,7 +102,25 @@ describe("ProviderTransform.options - setCacheKey", () => {
       sessionID,
       providerOptions: {},
     })
-    expect(result.store).toBe(true)
+    expect(result.store).toBeUndefined()
+  })
+
+  test("should set store=false for openai provider routed through proxy", () => {
+    const openaiModel = {
+      ...mockModel,
+      providerID: "openai",
+      api: {
+        id: "gpt-4",
+        url: "https://api.openai.com",
+        npm: "@ai-sdk/openai",
+      },
+    }
+    const result = ProviderTransform.options({
+      model: openaiModel,
+      sessionID,
+      providerOptions: { baseURL: "http://localhost:6655/openai/v1" },
+    })
+    expect(result.store).toBe(false)
   })
 })
 
@@ -1932,7 +1950,6 @@ describe("ProviderTransform.message - cache control on gateway", () => {
       anthropic: {
         cacheControl: {
           type: "ephemeral",
-          scope: "global",
           ...ttl,
         },
       },
@@ -3729,6 +3746,76 @@ describe("ProviderTransform.toolCaching - session-stable", () => {
     ProviderTransform.toolCaching(t2, bedrock, sid)
     const r2 = ProviderTransform.toolCaching(t2, bedrock, sid)
     expect(r2.extra.providerOptions?.bedrock?.cachePoint).toEqual({ type: "default" })
+  })
+
+  test("native anthropic URL includes scope: global", () => {
+    const sid = "native-scope-" + Date.now()
+    const t = tools(["read", "write"])
+    const result = ProviderTransform.toolCaching(t, anthropic, sid)
+    expect(result.write.providerOptions?.anthropic?.cacheControl?.scope).toBe("global")
+  })
+
+  test("proxy baseURL omits scope: global", () => {
+    const sid = "proxy-scope-" + Date.now()
+    const t = tools(["read", "write"])
+    const result = ProviderTransform.toolCaching(t, anthropic, sid, undefined, "http://localhost:6655/anthropic/v1")
+    expect(result.write.providerOptions?.anthropic?.cacheControl?.scope).toBeUndefined()
+  })
+
+  test("baseURL override pointing to anthropic.com keeps scope: global", () => {
+    const sid = "override-native-" + Date.now()
+    const t = tools(["read", "write"])
+    const result = ProviderTransform.toolCaching(t, anthropic, sid, undefined, "https://api.anthropic.com/v1")
+    expect(result.write.providerOptions?.anthropic?.cacheControl?.scope).toBe("global")
+  })
+})
+
+describe("ProviderTransform.message - baseURL override for scope: global", () => {
+  const model = {
+    id: "anthropic/claude-sonnet-4",
+    providerID: "anthropic",
+    api: { id: "claude-sonnet-4", url: "https://api.anthropic.com", npm: "@ai-sdk/anthropic" },
+    name: "Claude Sonnet 4",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.003, output: 0.015, cache: { read: 0.0003, write: 0.00375 } },
+    limit: { context: 200000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  const msgs = [
+    { role: "system", content: "You are helpful" },
+    { role: "user", content: "Hello" },
+  ] as any[]
+
+  test("proxy baseURL in options removes scope: global from system message", () => {
+    const result = ProviderTransform.message(msgs, model, { baseURL: "http://localhost:6655/anthropic/v1" }) as any[]
+    expect(result[0].providerOptions?.anthropic?.cacheControl?.scope).toBeUndefined()
+  })
+
+  test("native baseURL in options keeps scope: global on system message", () => {
+    const result = ProviderTransform.message(msgs, model, { baseURL: "https://api.anthropic.com/v1" }) as any[]
+    expect(result[0].providerOptions?.anthropic?.cacheControl?.scope).toBe("global")
+  })
+
+  test("no baseURL in options uses model.api.url (native, has scope: global)", () => {
+    const result = ProviderTransform.message(msgs, model, {}) as any[]
+    expect(result[0].providerOptions?.anthropic?.cacheControl?.scope).toBe("global")
+  })
+
+  test("model with proxy url and no baseURL override omits scope: global", () => {
+    const proxy = { ...model, api: { ...model.api, url: "http://localhost:9999/v1" } }
+    const result = ProviderTransform.message(msgs, proxy, {}) as any[]
+    expect(result[0].providerOptions?.anthropic?.cacheControl?.scope).toBeUndefined()
   })
 })
 
