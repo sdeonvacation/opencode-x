@@ -1,7 +1,6 @@
 # OpenCode X
 
 [![npm version](https://img.shields.io/npm/v/@sdeonvacation/opencode-x?color=blue)](https://www.npmjs.com/package/@sdeonvacation/opencode-x)
-[![GitHub release](https://img.shields.io/github/v/release/sdeonvacation/opencode-x)](https://github.com/sdeonvacation/opencode-x/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub stars](https://img.shields.io/github/stars/sdeonvacation/opencode-x)](https://github.com/sdeonvacation/opencode-x/stargazers)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
