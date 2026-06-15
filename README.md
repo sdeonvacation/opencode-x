@@ -7,37 +7,96 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Built with Effect](https://img.shields.io/badge/Built%20with-Effect--TS-purple)](https://effect.website/)
 
-A terminal-based AI coding agent that works with **any LLM provider**. Built on [opencode](https://github.com/anomalyco/opencode), adding production-grade features: swarm execution, global LSP sharing, persistent memory, autonomous goals, and native support for claude code plugins/hooks.
+**Everything Claude Code does and more. Any model. Zero subscription. Smarter with your tokens.**
 
-Think Claude Code, but open source, provider-agnostic, and free.
+OpenCode X is a terminal AI coding agent forked from [opencode](https://github.com/anomalyco/opencode) with 280+ commits. It matches Claude Code's headline features (autonomous goals, background execution, parallel subagents, hooks) while adding what Claude Code can't offer: provider freedom, intelligent token compression, 3-tier context safety, configurable orchestration guardrails, and an open-source MIT codebase you actually own.
 
-## Demo
+Your existing claude code hooks, plugins, agents and skills work immediately. Zero migration.
 
 <p align="center">
   <img src="./assets/opencode-x-demo.gif" alt="OpenCode X — terminal AI agent with swarm execution and multi-provider support" width="800">
   <br>
-  <em>Autonomous multi-turn task execution with real-time cost tracking</em>
+  <em>Autonomous multi-turn execution with real-time cost tracking</em>
 </p>
 
 ---
 
-## Why OpenCode X?
+## Why Switch?
 
-Native support for claude code plugins and hooks. Bundles several claude code features like /btw, /goal, push-to-background subagents, memory and detailed usage tracking. All of this, while giving you the provider-agnostic flavour of opencode. Best of both worlds.
+### Coming from Claude Code?
 
-|                         | OpenCode X                                           | Claude Code                                 |
-| ----------------------- | ---------------------------------------------------- | ------------------------------------------- |
-| **Cost**                | Free + bring your own API keys                       | $200/mo subscription                        |
-| **Models**              | Any provider (Claude, GPT, Gemini, Mistral, local)   | Anthropic only                              |
-| **Swarm execution**     | Batch-parallel subagents with bounded concurrency    | Native                                      |
-| **Worktree management** | `/worktree` command for user-initiated isolation     | `--worktree` CLI flag                       |
-| **Global LSP**          | Single instance shared across all agents + worktrees | Unknown                                     |
-| **Autonomous goals**    | `/goal` with 200-turn auto-continuation              | /goal but no configurable turn/token limits |
-| **Token savings**       | LLM compression saves 30-60% on tool output          | Raw output to model                         |
-| **Claude Code hooks**   | Native compatibility (same config, same env vars)    | Native                                      |
-| **Open source**         | MIT, no telemetry, no account                        | Proprietary                                 |
+You're paying $200+/month per developer for a single-provider tool. OpenCode X gives you the same workflow with genuine advantages:
 
-vs. **upstream opencode**: OpenCode X adds 280+ fork-only commits — swarm, persistent memory, goal system, session memory, context safety net, push-to-background, tool compression, cache optimization, global LSP sharing, `/worktree` command, and more. Full comparison below.
+- **$0/month** — bring your own API keys, pay only for tokens you use
+- **Any model** — Claude, GPT, Gemini, Mistral, Llama, DeepSeek, or any of 75+ providers
+- **30-60% token savings** — LLM compression on tool outputs before they reach your model (Claude Code sends raw output)
+- **Never lose context** — 3-tier safety net auto-recovers at 75%, 97%, and 413 overflow (Claude Code only has auto-compact)
+- **Your hooks already work** — same config, same env vars, same lifecycle events
+- **Configurable guardrails** — doom loop detection, spawn limits, per-model concurrency (Claude Code doesn't expose these)
+- **Hybrid routing** — automatically route compression/titles to cheap models, reasoning to premium ones
+- **Open source** — MIT, no telemetry, no account, fork and extend freely
+
+### Coming from opencode?
+
+Same foundation you love. 280 commits of production-grade additions:
+
+- **Swarm execution** — batch-parallel subagents with bounded concurrency using `/swarm`
+- **Autonomous goals** — `/goal` with judge validation and 200-turn auto-continuation
+- **Persistent + session memory** — agent learns across sessions, remembers across `/clear`
+- **Push to background** — `Leader+D` detaches running session, keeps working
+- **Token intelligence** — LLM compression, improved cache stability
+- **Context safety net** — 3-layer auto-recovery, sessions never crash from overflow
+- **Doom loop detection** — catches infinite tool loops before they burn tokens
+- **Parallel tool calls** — concurrent read/grep/glob within single LLM round-trip
+- **Hybrid model routing** — cheap model for lightweight work, premium for reasoning
+- **Claude Code compatibility** — hooks, plugins, agents, skills, CLAUDE.md all work out of the box
+- **Orchestration guardrails** — spawn depth limits, descendant caps, concurrency controls
+
+---
+
+## Honest Comparison
+
+OpenCode X doesn't pretend to replace everything Claude Code offers. Here's what's the same, what's better, and what's different:
+
+### What OpenCode X matches
+
+| Capability               | Claude Code                                       | OpenCode X                                         |
+| ------------------------ | ------------------------------------------------- | -------------------------------------------------- |
+| **Autonomous goals**     | `/goal` + Haiku evaluator, `--tokens` budget      | `/goal` + judge model, 200-turn cap + token budget |
+| **Background execution** | `Ctrl+B`, `/background`, `claude agents` daemon   | `Leader+D` push-to-background, toast on completion |
+| **Parallel subagents**   | Task tool, subagent spawning, worktree isolation  | Task tool, swarm mode, worktree isolation          |
+| **Hooks system**         | PreToolUse, PostToolUse, SessionStart, Stop, etc. | Same events + same env vars (native compatible)    |
+| **Persistent memory**    | CLAUDE.md + auto-memory (MEMORY.md)               | AGENTS.md + persistent memory + session memory     |
+| **Worktree isolation**   | `--worktree`, per-session isolation               | `isolation: true` on tasks + `/worktree` command   |
+| **Skills system**        | On-demand skill loading                           | Same (compatible with `~/.claude/skills/`)         |
+
+### Where OpenCode X is genuinely better
+
+| Advantage                     | Detail                                                                                                                                                   |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Cost**                      | $0 subscription. You pay only API tokens at provider rates. Claude Code averages $150-250/mo per developer.                                              |
+| **Provider freedom**          | 75+ providers via Vercel AI SDK. Switch models mid-session. No lock-in.                                                                                  |
+| **Token compression**         | LLM-powered compression (EXTRACT/SUMMARIZE/FILTER) reduces tool output 30-60% before it hits your model. Claude Code passes raw output.                  |
+| **Context safety**            | 3-tier auto-recovery: Tool Result Budget (always) → MicroCompact (75%) → Context Collapse (97%) + reactive 413 retry. Claude Code has auto-compact only. |                                   |
+| **Cache stability**           | System prompt split into stable prefix (cached) + dynamic suffix. Memory/goals change without cache invalidation.                                        |
+| **Doom loop detection**       | Ring-buffer catches repeated identical tool calls. Configurable threshold. Claude Code doesn't expose this.                                              |
+| **Orchestration guardrails**  | Spawn depth (3), descendant caps (50), per-model concurrency semaphore, configurable loop threshold. All tunable.                                        |
+| **Hybrid routing**            | Automatic cloud/local model split. Compression, titles, compaction routed to cheap model. Reasoning stays on premium.                                    |
+| **Global LSP sharing**        | Single LSP instance across all agents + worktrees. Path translation, idle shutdown. No redundant spawns.                                                 |
+| **Snapshot gate**             | Skips git diff tracking on read-only turns. Zero overhead for non-edit steps.                                                                            |
+| **Part coalescer**            | Batches rapid streaming updates (300ms). Eliminates per-token DB writes.                                                                                 |
+| **Open source**               | MIT license. No telemetry. No account. Full source. Fork, modify, self-host.                                                                             |
+
+### What Claude Code has that OpenCode X doesn't - yet :)
+
+| Claude Code exclusive      | What it is                                                              |
+| -------------------------- | ----------------------------------------------------------------------- |
+| **Agent teams**            | Multiple sessions with peer-to-peer communication and shared task lists |
+| **Dynamic workflows**      | JS orchestration scripts, up to 1000 agents per run, 16 concurrent      |
+| **`/batch`**               | Auto-splits codebase changes into worktree-isolated PRs                 |
+| **Multi-surface**          | Desktop app, VS Code, JetBrains, web interface                          |
+| **Agent view dashboard**   | Visual monitoring and dispatch for background sessions                  |
+| **Managed infrastructure** | Background daemon, `claude agents`                                      |
 
 ---
 
@@ -52,7 +111,7 @@ opencode-x
 
 ### Download Binary
 
-Download from [Releases](https://github.com/sdeonvacation/opencode-x/releases/latest):
+Grab from [Releases](https://github.com/sdeonvacation/opencode-x/releases/latest):
 
 | Asset                          | Platform                  |
 | ------------------------------ | ------------------------- |
@@ -97,130 +156,217 @@ opencode-x
 # 3. Type a prompt. That's it.
 ```
 
-Switch models anytime — no config migration, no lock-in.
+Already have Claude Code hooks in `~/.claude/settings.json`? They work automatically.
 
 ---
 
-## Configuration
+## Feature Deep Dive
 
-For full configuration, agent setup, skills, hooks, and plugin details, see the **[OpenCode-X Guide](./OPENCODE-X_GUIDE.md)**.
+### Token Intelligence
 
----
+Multiple systems work together to minimize cost — the single biggest advantage over Claude Code's raw-output approach:
 
-## Feature Highlights
+**LLM Compression** — Large tool outputs are pre-processed by a fast model before reaching your main model. Three strategies selected automatically:
+
+| Strategy  | Used for          | Result                             |
+| --------- | ----------------- | ---------------------------------- |
+| EXTRACT   | grep, glob, bash  | Key lines, bullets, file/line refs |
+| SUMMARIZE | read, large prose | 3-6 bullet summary of key facts    |
+| FILTER    | logs, diffs       | Matching items only, noise dropped |
+
+Falls back silently to raw output on error. Never corrupts results.
+
+**Cache Stability** — System prompt split into stable prefix (cached across turns) and dynamic suffix (memory, goals, env). Dynamic content changes without invalidating the cached prefix.
+
+**Snapshot Gate** — Skips expensive git diff tracking on read-only turns (grep, read, search).
+
+**Part Coalescer** — Batches rapid streaming DB writes (300ms debounce window).
+
+### 3-Tier Context Safety Net
+
+Sessions never crash from token overflow. Three layers trigger automatically:
+
+| Tier                   | Trigger          | Action                                            |
+| ---------------------- | ---------------- | ------------------------------------------------- |
+| **Tool Result Budget** | Always active    | Oldest tool outputs truncated (50K char cap)      |
+| **MicroCompact**       | 75% context used | Summarize older messages, keep 10 recent verbatim |
+| **Context Collapse**   | 97% context used | Emergency backup to disk + structured summary     |
+
+Plus: reactive 413 recovery retries the same turn inline after emergency compaction. No user intervention needed.
+
+### Autonomous Goals
+
+```
+/goal Implement authentication middleware with all tests passing
+```
+
+Agent works autonomously. After each turn, a separate judge model evaluates whether the condition is met. On "no," the agent keeps working with the judge's reasoning as guidance. Guards prevent runaway:
+
+- 200-turn hard limit (configurable)
+- Optional token budget
+- Independent judge validation (prevents premature self-reported success)
 
 ### Swarm Execution
 
-Dispatch the same prompt template across N items in parallel. Review 10 files, lint 5 modules, translate 3 documents — all at once.
+One tool call spawns N parallel subagents with the same prompt template:
 
 ```json
 { "experimental": { "swarm": true, "swarm_concurrency": 5 } }
 ```
 
-- Bounded concurrency (default 5, max 20)
-- Per-item failure isolation (one failure doesn't abort the rest)
-- Background mode: dispatch and continue working
+- Items up to 128, concurrency 1-20
+- Per-item failure isolation (one crash doesn't abort others)
+- Background mode: dispatch and keep working, results auto-injected on completion
+- Structured XML results with per-item status and timing
 
-### Global LSP/MCP Sharing
+### Push to Background (`Leader+D`)
 
-Single LSP/MCP server per project, shared across all agent types — primary, subagents, background sessions, isolated worktrees, swarms. No redundant spawns. Path translation maps worktree paths to parent-equivalent. Idle shutdown after 30 minutes.
+Mid-execution, press `Leader+D`. Running agent detaches to background. TUI immediately accepts new input. Toast notification fires on completion. Session remains in session list.
 
-### Worktree Isolation + `/worktree` Command
+### Hybrid Model Routing
 
-Upstream opencode isolates subagents in worktrees automatically. OpenCode X adds the `/worktree` (or `/wt`) slash command for **user-initiated** worktree management: create, list, remove, switch directory. Useful when you want to manually manage parallel workstreams.
+Route work to the right model automatically:
 
-### Autonomous Goals
-
+```json
+{
+  "hybrid": {
+    "enabled": true,
+    "cheap_model": { "providerID": "anthropic", "modelID": "claude-haiku-4-5" }
+  },
+  "experimental": {
+    "task_categories": { "review": { "providerID": "anthropic", "modelID": "claude-sonnet-4-6" } },
+    "ultrawork_model": { "providerID": "anthropic", "modelID": "claude-sonnet-4-6" }
+  }
+}
 ```
-/goal Implement feature X with tests passing
-```
 
-Agent works autonomously toward the objective. Auto-continuation between turns, 200-turn hard limit, optional token budget. `goal_complete` tool called with evidence when done.
+- **Compression routing** — cheap model handles tool output compression, titles, compaction
+- **Category routing** — tasks routed by type (review → sonnet, exploration → haiku)
+- **Ultrawork routing** — `use_ultrawork: true` triggers premium reasoning model
+- **Concurrency limiter** — per-model semaphore prevents API throttling
 
-### Tool Output Compression
+### Orchestration Guardrails
 
-LLM-powered compression before tool outputs reach the main model. Three strategies (EXTRACT, SUMMARIZE, FILTER) selected per tool type. Saves 30-60% tokens on large outputs.
+Configurable protections that Claude Code doesn't expose:
+
+- **Doom loop detection** — ring-buffer hash catches repeated identical tool calls (default threshold: 5)
+- **Spawn depth limit** — max 3 levels of nested subagents
+- **Descendant cap** — max 50 total subagents per root session
+- **Per-model concurrency** — semaphore prevents API rate limiting across parallel subagents
+- **Stream idle timeout** — abort + retry stalled provider streams (default: 60s)
 
 ### Persistent + Session Memory
 
-- **Persistent**: cross-session facts in `~/.local/share/opencode/memory/` — preferences, project conventions, corrections
-- **Session**: SQLite-backed entries that survive `/clear` and compaction
+**Persistent memory** — cross-session facts in `~/.local/share/opencode/memory/`. Three types: user preferences, project conventions, corrections. Injected into every session's system prompt. Agent learns from your corrections over time.
 
-### Push to Background (Leader+D)
+**Session memory** — SQLite-backed entries that survive `/clear` and compaction. Managed via `/memory_add`, `/memory_edit`, `/memory_delete`. Scoped to current session only.
 
-Detach any running session to background without killing it. TUI immediately accepts new input. Toast notification on completion.
+### Global LSP/MCP Sharing
 
-### Context Safety Net (3-Tier)
+Single LSP server per project, shared across all agent types — primary, subagents, background sessions, swarm workers, isolated worktrees. Path translation maps worktree paths to parent directory. 30-minute idle shutdown + auto-respawn.
 
-1. **Tool Result Budget** (50K cap) — oldest outputs truncated first
-2. **MicroCompact** (75% context) — summarize old messages, keep 10 recent
-3. **Context Collapse** (97% context) — emergency backup + structured summary
+No redundant server spawns. Consistent diagnostics everywhere. Zero LSP overhead multiplication.
 
-### Cache Stability
+### Claude Code Compatibility
 
-System prompt split into stable prefix (cached) + dynamic suffix (changes freely). Saves cache invalidation costs on every turn.
+Your existing setup works immediately with no migration:
 
----
+| Source                                                        | Auto-loaded                  |
+| ------------------------------------------------------------- | ---------------------------- |
+| `~/.claude/settings.json` hooks                               | Yes                          |
+| `~/.claude/hooks/commands.json`                               | Yes (as slash commands)      |
+| `~/.claude/plugins/installed_plugins.json`                    | Yes (skills auto-discovered) |
+| `CLAUDE.md` / `AGENTS.md`                                     | Yes                          |
+| Same env vars (`CLAUDE_TOOL_NAME`, `CLAUDE_SESSION_ID`, etc.) | Yes                          |
 
-## Full Comparison (vs. Upstream + Claude Code)
+Supported hook events: `PreToolUse`, `PostToolUse`, `SessionStart`, `UserPromptSubmit`, `Stop`
 
-<details>
-<summary><strong>Click to expand full feature matrix</strong></summary>
+### Parallel Tool Calls
 
-| Feature                                      | **OpenCode X**                                                                                                                                          | **Upstream OpenCode**                          | **Claude Code**                                     |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------------- |
-| **Claude Code hooks + plugins**              | Native — reads `~/.claude/settings.json` hooks, `~/.claude/plugins/installed_plugins.json`, `~/.claude/hooks/commands.json`; same events, same env vars | Plugin system only (no hook lifecycle events)  | Native                                              |
-| **Push agent to background**                 | `Leader+D` chord detaches running session to background; TUI unblocks for new prompts, toast on completion                                              | Background subagents (spawn only)              | Native                                              |
-| **Cache stability (prompt split)**           | System prompt split into stable prefix + dynamic suffix; sub-part `cacheControl` on Anthropic/Bedrock/Alibaba; stable ordering for OpenAI auto-cache    | No optimization                                | Unknown                                             |
-| **Tool output compression**                  | LLM-powered compression (3 templates: EXTRACT, SUMMARIZE, FILTER) before outputs hit cloud model; anti-hallucination + fallback                         | None                                           | Unknown                                             |
-| **MCP tool filtering**                       | Native per-provider/model tool filtering; ApplyPatch swap for GPT-4.1; WebSearch gating; route-based filtering (cloud vs local)                         | None                                           | Tool allowlists per agent                           |
-| **Persistent memory**                        | Cross-session file-based memory (`~/.local/share/opencode/memory/`); `memory_persist` tool; types: user/project/feedback; injected into system prompt   | None                                           | Native                                              |
-| **Session memory**                           | SQLite-backed per-session entries; survive `/clear` and `/clear-compact`; `/memory_add`, `/memory_edit`, `/memory_delete`                               | None                                           | Session memory (markdown file, subagent extraction) |
-| **Goal tracking**                            | `/goal` command sets autonomous objective; `goal_complete` tool; auto-continuation loop (200-turn cap + token budget); status in prompt                 | None                                           | Native                                              |
-| **Context safety net**                       | 3-tier: tool result budget (50K cap) → MicroCompact (75% threshold) → Context Collapse (97% emergency)                                                  | Basic overflow handling                        | Auto-compact + micro-compact                        |
-| **Sliding window compaction**                | Rolling head summary + verbatim tail; cached per boundary; inflight dedup; configurable threshold/ratio                                                 | Hard truncation                                | Forked subagent compaction                          |
-| **Doom loop detection**                      | Ring-buffer hash detector (configurable threshold); aborts repeated identical tool calls                                                                | None                                           | Unknown                                             |
-| **Snapshot gate**                            | Skips git snapshot track/patch when no FS-mutating tool fired; saves IO per non-edit turn                                                               | None                                           | Unknown                                             |
-| **Part coalescer**                           | Batches rapid streaming part updates (300ms window); flushes terminal states immediately; reduces DB writes                                             | None                                           | Unknown                                             |
-| **Parallel tool execution**                  | Safe concurrent read/glob/grep within single LLM round-trip                                                                                             | None                                           | Native                                              |
-| **Swarm (batch parallel subagents)**         | `SwarmTool` — same prompt template dispatched across N items in parallel; foreground or background; bounded concurrency; per-item failure isolation     | None                                           | Native                                              |
-| **Worktree isolation + `/worktree` command** | `isolation: true` on Task tool + `/worktree` slash command for user-initiated management (create, list, remove, switch)                                 | Subagent-only (automatic, no user command)     | `--worktree` flag + `isolation: worktree`           |
-| **Global LSP/MCP sharing**                   | Single LSP/MCP instance shared across all agent types; path translation for worktree paths; idle shutdown after 30min                                   | Per-subagent spawn (not shared with worktrees) | Unknown                                             |
-| **Hybrid model routing**                     | Per-task-category model routing + ultrawork override; configurable per provider/model                                                                   | None                                           | Fast mode (single toggle)                           |
-| **Configurable subagent timeout**            | `experimental.subagent_timeout` in config                                                                                                               | Hardcoded                                      | Hardcoded                                           |
-| **Orchestration guardrails**                 | Configurable spawn depth limits, descendant caps, per-model concurrency limiter, doom loop + hard cap                                                   | Basic                                          | Coordinator mode (feature-gated)                    |
-| **`/clear`**                                 | Clear session messages (keeps session alive)                                                                                                            | None                                           | `/clear` equivalent                                 |
-| **`/clear-compact`**                         | Clear + trigger compaction of history                                                                                                                   | None                                           | Native - /compact                                   |
-| **`/btw`**                                   | Inject context without starting new turn (no LLM call)                                                                                                  | None                                           | Native                                              |
-| **`/status` (improved)**                     | Shows session ID, model, provider, token counts, cost; copyable session ID for debugging                                                                | Basic status                                   | Native                                              |
-| **Per-tool token usage**                     | Streaming token count displayed per tool call during execution                                                                                          | None                                           | None                                                |
-| **`/config`**                                | Shows all merged config key-values in a toast                                                                                                           | None                                           | Part of `/status`                                   |
-| **`/usage`**                                 | Per-model cost/tokens/duration breakdown + subagent costs                                                                                               | None                                           | Part of `/status`                                   |
-| **Read tool safe default**                   | 300-line limit with head+tail summary; prevents context floods                                                                                          | Unbounded                                      | Bounded (configurable)                              |
-| **Session cost tracking**                    | Per-session totals, tiered pricing, streaming token count during execution, cache-aware (no double-count)                                               | Basic                                          | Full cost tracker                                   |
-| **LSP efficiency**                           | Orphan prevention, stale diagnostics cleanup, idle shutdown, nearest-package resolution                                                                 | Accumulates servers                            | LSP with diagnostic registry                        |
-| **Provider lock-in**                         | None — 75+ providers via Vercel AI SDK                                                                                                                  | None (same)                                    | Anthropic-only                                      |
-| **Pricing**                                  | Free/OSS, bring your own keys                                                                                                                           | Free/OSS, bring your own keys                  | $200/mo subscription or API usage                   |
-
-</details>
+Safe concurrent execution of read-only tools within a single LLM round-trip. Permission-aware gate ensures only pre-approved, parallel-safe tools run concurrently:
 
 ---
 
 ## Featured Slash Commands
 
-| Command          | Description                                                |
-| ---------------- | ---------------------------------------------------------- |
-| `/btw`           | Inject context without starting a new turn (no LLM call)   |
-| `/clear`         | Clear session messages                                     |
-| `/clear-compact` | Clear messages and compact history                         |
-| `/config`        | Show all merged config key-values in toast                 |
-| `/goal`          | Set autonomous objective                                   |
-| `/memory_add`    | Add session memory entry                                   |
-| `/memory_edit`   | Edit existing memory entry                                 |
-| `/memory_delete` | Remove memory entry                                        |
-| `/status`        | Session info with copyable session ID, model, cost, tokens |
-| `/usage`         | Per-model cost/tokens/duration + subagent costs            |
-| `/worktree`      | Manage git worktrees (create, list, remove, switch)        |
+| Command          | Description                                              |
+| ---------------- | -------------------------------------------------------- |
+| `/goal`          | Set autonomous objective with judge validation           |
+| `/btw`           | Inject context without starting a new turn (no LLM call) |
+| `/swarm`         | Swarm concurrent agents to solve a task quickly.         |
+| `/config`        | Show all merged config in toast                          |
+| `/usage`         | Per-model cost/tokens/duration + subagent costs          |
+| `/status`        | Session info with copyable ID, model, cost, tokens       |
+| `/memory_add`    | Add session memory entry                                 |
+| `/memory_edit`   | Edit existing memory entry                               |
+| `/memory_delete` | Remove memory entry                                      |
+| `/worktree`      | Manage git worktrees (create, list, remove, switch)      |
+
+---
+
+## Performance Numbers
+
+Measured improvements over baseline opencode and raw LLM interaction:
+
+| Metric                         | Improvement                                    |
+| ------------------------------ | ---------------------------------------------- |
+| Sliding window compaction      | **47% fewer input tokens** at 50-67K context   |
+| LLM tool compression           | **30-60% token savings** on large tool outputs |
+| Agent loop optimization        | **30%+ wall-clock reduction** per turn         |
+| Turn reduction (simple tasks)  | 10-12 turns → **5-7 turns**                    |
+| Turn reduction (complex tasks) | 18-22 turns → **9-13 turns**                   |
+| SQLite transactions            | **50%+ reduction** via part coalescing         |
+| Read-only turns                | **Zero git overhead** via snapshot gate        |
+
+---
+
+## Configuration
+
+Full reference in **[OPENCODE-X_GUIDE.md](./OPENCODE-X_GUIDE.md)**.
+
+Key experimental features:
+
+```json
+{
+  "experimental": {
+    "swarm": true,
+    "swarm_concurrency": 5,
+    "goal_system": true,
+    "parallel_tool_calls": true,
+    "microcompact": true,
+    "context_collapse": true,
+    "tool_result_budget": 50000,
+    "prompt_split_caching": true,
+    "worktree_isolation": true,
+    "background_subagents": true,
+    "loop_detector_threshold": 5,
+    "max_subagent_depth": 3,
+    "max_subagent_descendants": 50,
+    "ultrawork_model": { "providerID": "anthropic", "modelID": "claude-sonnet-4-6" }
+  },
+  "hybrid": {
+    "enabled": true,
+    "cheap_model": { "providerID": "anthropic", "modelID": "claude-haiku-4-5" }
+  }
+}
+```
+
+---
+
+## What's Coming
+
+Active development pushing further ahead:
+
+| Feature               | What it does                                                          |
+| --------------------- | --------------------------------------------------------------------- |
+| **Response Chaining** | OpenAI `previousResponseId` — near-zero input tokens on chained turns |
+| **Goal Judge**        | Independent model validates goal completion with retry logic          |
+| **Budgeted Reading**  | Token-budgeted file injection preserving section structure            |
+| **Max Mode**          | Best-of-N parallel candidates with judge arbitration                  |
+| **Deep Research**     | Adversarial jury-validated multi-source reports                       |
+| **Checkpoint System** | Multi-hour session persistence via structured snapshots               |
+| **Workflow Sandbox**  | Deterministic QuickJS-based multi-agent orchestration                 |
+| **Dream & Distill**   | Self-improving knowledge + automatic skill extraction                 |
 
 ---
 
@@ -252,12 +398,13 @@ Requires Bun 1.3.11+.
 
 ## Resources
 
+- **Repository**: https://github.com/sdeonvacation/opencode-x
+- **Full Guide**: [OPENCODE-X_GUIDE.md](./OPENCODE-X_GUIDE.md)
 - **Upstream**: https://github.com/anomalyco/opencode
 - **Docs**: https://opencode.ai/docs
-- **Repository**: https://github.com/sdeonvacation/opencode-x
 
 ---
 
 ## License
 
-See [LICENSE](./LICENSE).
+MIT — See [LICENSE](./LICENSE).
