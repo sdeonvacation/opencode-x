@@ -168,6 +168,7 @@ export namespace LSPClient {
     connection.onNotification("textDocument/publishDiagnostics", (params) => {
       const filePath = getFilePath(params.uri)
       if (!filePath) return
+      if (!opened.has(filePath)) return
       logger.info("textDocument/publishDiagnostics", {
         path: filePath,
         count: params.diagnostics.length,
@@ -211,12 +212,9 @@ export namespace LSPClient {
       }
       if (changed) emitRegistrationChange()
     })
-    connection.onRequest("workspace/workspaceFolders", async () => [
-      {
-        name: "workspace",
-        uri: pathToFileURL(input.root).href,
-      },
-    ])
+    connection.onRequest("workspace/workspaceFolders", async () =>
+      [...folders].map((f) => ({ name: path.basename(f), uri: pathToFileURL(f).href })),
+    )
     connection.onRequest("workspace/diagnostic/refresh", async () => null)
     connection.listen()
 
@@ -240,6 +238,7 @@ export namespace LSPClient {
           },
           workspace: {
             configuration: true,
+            workspaceFolders: true,
             didChangeWatchedFiles: {
               dynamicRegistration: true,
             },
@@ -275,6 +274,9 @@ export namespace LSPClient {
 
     const syncKind = getSyncKind(initialized.capabilities)
     const hasStaticPullDiagnostics = Boolean(initialized.capabilities?.diagnosticProvider)
+    const multiRoot = Boolean((initialized.capabilities as any)?.workspace?.workspaceFolders?.supported)
+    const folders = new Set<string>([input.root])
+    const opened = new Set<string>()
 
     await connection.sendNotification("initialized", {})
 
@@ -559,11 +561,44 @@ export namespace LSPClient {
       get connection() {
         return connection
       },
+      get folders() {
+        return folders
+      },
+      get opened() {
+        return opened
+      },
+      get multiRoot() {
+        return multiRoot
+      },
+      async addFolder(root: string) {
+        if (!multiRoot) return
+        if (folders.has(root)) return
+        folders.add(root)
+        await connection.sendNotification("workspace/didChangeWorkspaceFolders", {
+          event: {
+            added: [{ uri: pathToFileURL(root).href, name: path.basename(root) }],
+            removed: [],
+          },
+        })
+      },
+      async removeFolder(root: string) {
+        if (!multiRoot) return
+        if (root === input.root) return
+        if (!folders.has(root)) return
+        folders.delete(root)
+        await connection.sendNotification("workspace/didChangeWorkspaceFolders", {
+          event: {
+            added: [],
+            removed: [{ uri: pathToFileURL(root).href, name: path.basename(root) }],
+          },
+        })
+      },
       notify: {
         async open(request: { path: string }) {
           request.path = Filesystem.normalizePath(
             path.isAbsolute(request.path) ? request.path : path.resolve(input.directory, request.path),
           )
+          opened.add(request.path)
           const text = await Filesystem.readText(request.path)
           const extension = path.extname(request.path)
           const languageId = LANGUAGE_EXTENSIONS[extension] ?? "plaintext"

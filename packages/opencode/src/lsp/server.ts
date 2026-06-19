@@ -37,6 +37,30 @@ export namespace LSPServer {
     return path.dirname(first.value)
   }
 
+  const rootCache = new Map<string, string | undefined>()
+
+  const resolveExternal = async (file: string, targets: string[]) => {
+    const key = file + "\0" + targets.join(",")
+    if (rootCache.has(key)) return rootCache.get(key)
+    const files = Filesystem.up({
+      targets,
+      start: path.dirname(file),
+    })
+    const first = await files.next()
+    await files.return()
+    const result = first.value ? path.dirname(first.value) : undefined
+    rootCache.set(key, result)
+    return result
+  }
+
+  const NearestExternalRoot = (targets: string[]): RootFunction => {
+    return async (file) => {
+      const result = await resolveExternal(file, targets)
+      if (result) return result
+      return resolveExternal(file, [".git"])
+    }
+  }
+
   export interface Handle {
     process: ChildProcessWithoutNullStreams
     initialization?: Record<string, any>
@@ -64,6 +88,7 @@ export namespace LSPServer {
     extensions: string[]
     global?: boolean
     root: RootFunction
+    resolveRoot?: RootFunction
     spawn(root: string): Promise<Handle | undefined>
   }
 
@@ -80,6 +105,7 @@ export namespace LSPServer {
       if (!first.value) return undefined
       return path.dirname(first.value)
     },
+    resolveRoot: NearestExternalRoot(["deno.json", "deno.jsonc"]),
     extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs"],
     async spawn(root) {
       const deno = which("deno")
@@ -100,6 +126,14 @@ export namespace LSPServer {
     root: async (file) => {
       if (await nearest(file, ["deno.json", "deno.jsonc"])) return
       return projectRoot()
+    },
+    resolveRoot: async (file) => {
+      if (await resolveExternal(file, ["deno.json", "deno.jsonc"])) return
+      return (
+        (await resolveExternal(file, ["tsconfig.json", "tsconfig.base.json"])) ??
+        (await resolveExternal(file, ["package.json"])) ??
+        (await resolveExternal(file, [".git"]))
+      )
     },
     extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"],
     async spawn(root) {
@@ -353,6 +387,11 @@ export namespace LSPServer {
       if (work) return work
       return NearestRoot(["go.mod", "go.sum"])(file)
     },
+    resolveRoot: async (file) => {
+      const work = await resolveExternal(file, ["go.work"])
+      if (work) return work
+      return (await resolveExternal(file, ["go.mod", "go.sum"])) ?? (await resolveExternal(file, [".git"]))
+    },
     extensions: [".go"],
     async spawn(root) {
       let bin = which("gopls")
@@ -491,6 +530,7 @@ export namespace LSPServer {
     id: "pyright",
     extensions: [".py", ".pyi"],
     root: NearestRoot(["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile", "pyrightconfig.json"]),
+    resolveRoot: NearestExternalRoot(["pyproject.toml", "setup.py", "setup.cfg", "pyrightconfig.json"]),
     async spawn(root) {
       let binary = which("pyright-langserver")
       const args = []
@@ -843,6 +883,7 @@ export namespace LSPServer {
 
       return crateRoot
     },
+    resolveRoot: NearestExternalRoot(["Cargo.toml", "Cargo.lock"]),
     extensions: [".rs"],
     async spawn(root) {
       const bin = which("rust-analyzer")
@@ -861,6 +902,7 @@ export namespace LSPServer {
   export const Clangd: Info = {
     id: "clangd",
     root: NearestRoot(["compile_commands.json", "compile_flags.txt", ".clangd"]),
+    resolveRoot: NearestExternalRoot(["compile_commands.json", "compile_flags.txt", ".clangd"]),
     extensions: [".c", ".cpp", ".cc", ".cxx", ".c++", ".h", ".hpp", ".hh", ".hxx", ".h++"],
     async spawn(root) {
       const args = ["--background-index", "--clang-tidy"]

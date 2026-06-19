@@ -394,7 +394,7 @@ export namespace LSP {
       )
 
       const getClients = Effect.fnUntraced(function* (file: string) {
-        if (!Instance.containsPath(file)) return [] as LSPClient.Info[]
+        const internal = Instance.containsPath(file)
         const s = yield* InstanceState.get(state)
         if (s.disposing) return [] as LSPClient.Info[]
         return yield* Effect.promise(async () => {
@@ -459,10 +459,34 @@ export namespace LSP {
           for (const server of Object.values(s.servers)) {
             if (server.extensions.length && !server.extensions.includes(extension)) continue
 
-            const root = await server.root(lookup)
+            // Root resolution: internal uses existing path; external uses resolveRoot
+            let root: string | undefined
+            if (internal) {
+              root = await server.root(lookup)
+            } else {
+              root = server.resolveRoot ? await server.resolveRoot(file) : undefined
+            }
             if (!root) continue
             if (s.broken.has(root + server.id)) continue
 
+            // Check if any existing client already has this root in its folders
+            const folderMatch = s.clients.find((x) => x.serverID === server.id && x.folders.has(root!))
+            if (folderMatch) {
+              result.push(folderMatch)
+              continue
+            }
+
+            // Try to add folder to existing multi-root client (same server type)
+            if (!internal) {
+              const candidate = s.clients.find((x) => x.serverID === server.id && x.multiRoot)
+              if (candidate) {
+                await candidate.addFolder(root)
+                result.push(candidate)
+                continue
+              }
+            }
+
+            // Existing spawn path (for internal, or fallback for non-multi-root external)
             const match = s.clients.find((x) => x.root === root && x.serverID === server.id)
             if (match) {
               result.push(match)
