@@ -157,6 +157,8 @@ export namespace MCP {
           {
             resetTimeoutOnProgress: true,
             timeout: value,
+            // MCP SDK only sends progress token when this hook is present
+            onprogress: () => {},
           },
         )
       },
