@@ -17,6 +17,7 @@ import { TuiConfig } from "@/config/tui"
 import { Instance } from "@/project/instance"
 import { writeHeapSnapshot } from "v8"
 import { validateSession } from "./validate-session"
+import { gitDiff, gitApply } from "@/orchestration/patch"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -69,6 +70,90 @@ async function input(value?: string) {
   return piped + "\n" + value
 }
 
+export async function resolveWorktree(name: string, cwd: string) {
+  const slug =
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || Math.random().toString(36).slice(2, 8)
+
+  const check = Bun.spawn(["git", "rev-parse", "--show-toplevel"], { cwd, stdout: "pipe", stderr: "pipe" })
+  const root = (await new Response(check.stdout).text()).trim()
+  if ((await check.exited) !== 0) throw new Error("Worktrees require a git project")
+
+  const ref = `refs/heads/opencode/${slug}`
+  const list = Bun.spawn(["git", "worktree", "list", "--porcelain"], { cwd: root, stdout: "pipe", stderr: "pipe" })
+  const text = await new Response(list.stdout).text()
+  await list.exited
+
+  const entries = text.split("\n").reduce<{ path?: string; branch?: string }[]>((acc, line) => {
+    const trimmed = line.trim()
+    if (!trimmed) return acc
+    if (trimmed.startsWith("worktree ")) {
+      acc.push({ path: trimmed.slice("worktree ".length) })
+      return acc
+    }
+    const current = acc[acc.length - 1]
+    if (current && trimmed.startsWith("branch ")) {
+      current.branch = trimmed.slice("branch ".length)
+    }
+    return acc
+  }, [])
+
+  const match = entries.find((e) => e.branch === ref)
+  if (match?.path) {
+    const exists = await Bun.file(path.join(match.path, ".git"))
+      .exists()
+      .catch(() => false)
+    if (exists) return { name: slug, branch: `opencode/${slug}`, directory: match.path }
+    // Stale entry: prune worktree tracking and delete orphaned branch
+    const prune = Bun.spawn(["git", "worktree", "prune"], { cwd: root, stdout: "pipe", stderr: "pipe" })
+    await prune.exited
+    const del = Bun.spawn(["git", "branch", "-D", `opencode/${slug}`], { cwd: root, stdout: "pipe", stderr: "pipe" })
+    await del.exited
+  }
+
+  const dir = path.join(root, ".worktrees", slug)
+  const create = Bun.spawn(["git", "worktree", "add", "--no-checkout", "-b", `opencode/${slug}`, dir], {
+    cwd: root,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const stderr = await new Response(create.stderr).text()
+  if ((await create.exited) !== 0) throw new Error(stderr || "Failed to create worktree")
+
+  const reset = Bun.spawn(["git", "reset", "--hard"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
+  await reset.exited
+
+  return { name: slug, branch: `opencode/${slug}`, directory: dir }
+}
+
+export type PatchStatus = { status: "applied" } | { status: "empty" } | { status: "conflict"; branch: string }
+
+export async function ephemeralCleanup(
+  info: { name: string; branch: string; directory: string },
+  parent: string,
+): Promise<PatchStatus> {
+  const diff = await gitDiff(info.directory)
+  if (!diff.trim()) {
+    await worktreeRemove(info.directory, parent)
+    return { status: "empty" }
+  }
+  const result = await gitApply(diff, parent)
+  if (!result.success) return { status: "conflict", branch: info.branch }
+  await worktreeRemove(info.directory, parent)
+  return { status: "applied" }
+}
+
+async function worktreeRemove(directory: string, cwd: string) {
+  const proc = Bun.spawn(["git", "worktree", "remove", "--force", directory], { cwd, stdout: "pipe", stderr: "pipe" })
+  const code = await proc.exited
+  if (code !== 0) {
+    Log.Default.warn("worktree remove failed", { directory })
+  }
+}
+
 export const TuiThreadCommand = cmd({
   command: "$0 [project]",
   describe: "start opencode tui",
@@ -104,6 +189,14 @@ export const TuiThreadCommand = cmd({
       .option("agent", {
         type: "string",
         describe: "agent to use",
+      })
+      .option("worktree", {
+        type: "string",
+        describe: "create or reuse a named worktree",
+      })
+      .option("ephemeral", {
+        type: "boolean",
+        describe: "auto-cleanup worktree on exit (patch changes back)",
       }),
   handler: async (args) => {
     // Keep ENABLE_PROCESSED_INPUT cleared even if other code flips it.
@@ -127,10 +220,30 @@ export const TuiThreadCommand = cmd({
         ? Filesystem.resolve(path.isAbsolute(args.project) ? args.project : path.join(root, args.project))
         : Filesystem.resolve(process.cwd())
       const file = await target()
+
+      if (args.ephemeral && args.worktree === undefined) {
+        UI.error("--ephemeral requires --worktree")
+        process.exitCode = 1
+        return
+      }
+
+      let resolved = next
+      let worktreeInfo: { name: string; branch: string; directory: string } | undefined
+      if (args.worktree !== undefined) {
+        try {
+          worktreeInfo = await resolveWorktree(args.worktree || "", next)
+          resolved = worktreeInfo.directory
+        } catch (e) {
+          UI.error(`Worktree failed: ${e instanceof Error ? e.message : e}`)
+          process.exitCode = 1
+          return
+        }
+      }
+
       try {
-        process.chdir(next)
+        process.chdir(resolved)
       } catch {
-        UI.error("Failed to change directory to " + next)
+        UI.error("Failed to change directory to " + resolved)
         return
       }
       const cwd = Filesystem.resolve(process.cwd())
@@ -173,6 +286,12 @@ export const TuiThreadCommand = cmd({
           })
         })
         worker.terminate()
+        if (args.ephemeral && worktreeInfo) {
+          const patch = await ephemeralCleanup(worktreeInfo, next)
+          if (patch.status === "conflict") {
+            process.stderr.write(`Warning: patch conflict, branch ${patch.branch} preserved\n`)
+          }
+        }
       }
 
       // Graceful shutdown on terminal signals

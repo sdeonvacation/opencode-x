@@ -156,6 +156,7 @@ export namespace Worktree {
   // ---------------------------------------------------------------------------
 
   export interface Interface {
+    readonly findByName: (name: string) => Effect.Effect<Info | null>
     readonly makeWorktreeInfo: (name?: string) => Effect.Effect<Info>
     readonly createFromInfo: (info: Info, startCommand?: string) => Effect.Effect<void>
     readonly create: (input?: CreateInput) => Effect.Effect<Info>
@@ -342,6 +343,30 @@ export namespace Worktree {
             return acc
           }, [])
       }
+
+      const findByName = Effect.fn("Worktree.findByName")(function* (name: string) {
+        const ctx = yield* InstanceState.context
+        if (ctx.project.vcs !== "git") {
+          throw new NotGitError({ message: "Worktrees are only supported for git projects" })
+        }
+
+        const list = yield* git(["worktree", "list", "--porcelain"], { cwd: ctx.worktree })
+        if (list.code !== 0) return null
+
+        const entries = parseWorktreeList(list.text)
+        const target = `refs/heads/opencode/${name}`
+        const entry = entries.find((e) => e.branch === target)
+        if (!entry?.path) return null
+
+        const exists = yield* fs.exists(entry.path).pipe(Effect.orDie)
+        if (!exists) return null
+
+        return Info.parse({
+          name,
+          branch: `opencode/${name}`,
+          directory: entry.path,
+        })
+      })
 
       const locateWorktree = Effect.fnUntraced(function* (
         entries: { path?: string; branch?: string }[],
@@ -591,7 +616,7 @@ export namespace Worktree {
         return true
       })
 
-      return Service.of({ makeWorktreeInfo, createFromInfo, create, remove, reset })
+      return Service.of({ findByName, makeWorktreeInfo, createFromInfo, create, remove, reset })
     }),
   )
 
@@ -603,6 +628,10 @@ export namespace Worktree {
     Layer.provide(NodePath.layer),
   )
   const { runPromise } = makeRuntime(Service, defaultLayer)
+
+  export async function findByName(name: string) {
+    return runPromise((svc) => svc.findByName(name))
+  }
 
   export async function makeWorktreeInfo(name?: string) {
     return runPromise((svc) => svc.makeWorktreeInfo(name))

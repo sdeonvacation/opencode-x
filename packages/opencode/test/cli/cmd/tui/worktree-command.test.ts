@@ -8,16 +8,12 @@ function makeDeps(overrides?: Partial<WorktreeCommandDeps>): WorktreeCommandDeps
     sdk: {
       client: {
         worktree: {
-          create: mock(async () => ({ data: { name: "feat", branch: "feat", directory: "/tmp/wt/feat" } })),
           list: mock(async () => ({ data: ["/tmp/wt/a", "/tmp/wt/b"] })),
           remove: mock(async () => ({ data: true })),
         },
-        project: { current: mock(async () => ({})) },
       },
-      changeDirectory: mock(async () => {}),
     },
     toast: { show: mock(() => {}) },
-    sync: { path: { worktree: "/project", directory: "/tmp/wt/a" } },
     ...overrides,
   }
 }
