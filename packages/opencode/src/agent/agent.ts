@@ -214,12 +214,6 @@ export namespace Agent {
                 defaults,
                 Permission.fromConfig({
                   "*": "deny",
-                  read: "allow",
-                  write: "allow",
-                  edit: "allow",
-                  glob: "allow",
-                  grep: "allow",
-                  task: "allow",
                 }),
                 user,
               ),

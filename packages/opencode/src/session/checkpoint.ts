@@ -15,8 +15,8 @@ import { checkpointPath, memoryPath, notesPath, globalMemoryPath, metaDir, tasks
 import { readBudgeted, readBudgetedSectionAware } from "./budgeted-read"
 import { composeWriterPrompt } from "./checkpoint-writer-prompt"
 import { CHECKPOINT_TEMPLATE, CHECKPOINT_SECTION_BUDGETS } from "./checkpoint-templates"
-import { spawnSubagent } from "@/orchestration/task-spawn"
 import { SessionPrompt } from "./prompt"
+import { spawnSubagent } from "@/orchestration/task-spawn"
 import { Agent } from "@/agent/agent"
 
 export namespace Checkpoint {
@@ -135,7 +135,7 @@ export namespace Checkpoint {
 
         const writerMessage = [prompt, "", "## Conversation to Summarize", "", head].join("\n")
 
-        // Spawn writer subagent in background
+        // Spawn writer in background, then extract output and write files
         const dir = metaDir(input.sessionID)
         void (async () => {
           try {
@@ -157,7 +157,19 @@ export namespace Checkpoint {
               agent: "checkpoint-writer",
               parts: [{ type: "text", text: writerMessage }],
             })
-            Effect.runFork(Deferred.succeed(deferred, true))
+
+            // Read writer output and write files programmatically
+            const msgs = await Session.messages({ sessionID: spawned.session.id })
+            const output = msgs
+              .filter((m) => m.info.role === "assistant")
+              .flatMap((m) => m.parts.filter((p): p is MessageV2.TextPart => p.type === "text"))
+              .map((p) => p.text)
+              .join("\n")
+
+            const parsed = parseWriterOutput(output)
+            const written = await writeCheckpointFiles(input.sessionID, parsed)
+            log.info("files written", { session: input.sessionID, count: written })
+            Effect.runFork(Deferred.succeed(deferred, written > 0))
           } catch (err) {
             log.error("writer failed", { session: input.sessionID, error: String(err) })
             Effect.runFork(Deferred.succeed(deferred, false))
@@ -364,6 +376,42 @@ export namespace Checkpoint {
   export async function isWriterRunning(input: { sessionID: SessionID }) {
     return runPromise((svc) => svc.isWriterRunning(input))
   }
+}
+
+interface ParsedOutput {
+  checkpoint?: string
+  memory?: string
+  notes?: string
+}
+
+function parseWriterOutput(output: string): ParsedOutput {
+  const extract = (tag: string): string | undefined => {
+    const re = new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`)
+    const match = output.match(re)
+    return match?.[1]?.trim() || undefined
+  }
+  return {
+    checkpoint: extract("checkpoint-file"),
+    memory: extract("memory-file"),
+    notes: extract("notes-file"),
+  }
+}
+
+async function writeCheckpointFiles(session: SessionID, parsed: ParsedOutput): Promise<number> {
+  let count = 0
+  if (parsed.checkpoint) {
+    await Bun.write(checkpointPath(session), parsed.checkpoint)
+    count++
+  }
+  if (parsed.memory) {
+    await Bun.write(memoryPath(session), parsed.memory)
+    count++
+  }
+  if (parsed.notes) {
+    await Bun.write(notesPath(session), parsed.notes)
+    count++
+  }
+  return count
 }
 
 async function readFile(path: string): Promise<string | undefined> {
