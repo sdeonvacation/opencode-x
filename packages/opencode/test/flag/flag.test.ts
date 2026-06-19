@@ -8,12 +8,9 @@ describe("Flag.OPENCODE_EXPERIMENTAL_DREAM", () => {
     expect(typeof Flag.OPENCODE_EXPERIMENTAL_DREAM).toBe("boolean")
   })
 
-  test("is false when env unset and OPENCODE_EXPERIMENTAL is off", async () => {
-    // Flag module is evaluated at import time with static env.
-    // We verify the exported value is boolean (structural correctness).
+  test("is true by default (enabled unless explicitly disabled)", async () => {
     const { Flag } = await import("../../src/flag/flag")
-    // enabledByExperimental returns OPENCODE_EXPERIMENTAL when key undefined
-    // In test env, OPENCODE_EXPERIMENTAL defaults to false
-    expect(Flag.OPENCODE_EXPERIMENTAL_DREAM).toBe(Flag.OPENCODE_EXPERIMENTAL)
+    // !falsy() pattern means true unless OPENCODE_EXPERIMENTAL_DREAM="false"/"0"
+    expect(Flag.OPENCODE_EXPERIMENTAL_DREAM).toBe(true)
   })
 })

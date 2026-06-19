@@ -101,9 +101,7 @@ test("dream rejects invalid interval_days", async () => {
   await Instance.provide({
     directory: tmp.path,
     fn: async () => {
-      const config = await Config.get()
-      // Invalid value should be stripped by zod positive() constraint
-      expect(config.dream?.interval_days).toBeUndefined()
+      await expect(Config.get()).rejects.toThrow("ConfigInvalidError")
     },
   })
 })
@@ -119,9 +117,7 @@ test("distill rejects non-integer interval_days", async () => {
   await Instance.provide({
     directory: tmp.path,
     fn: async () => {
-      const config = await Config.get()
-      // Non-integer should be stripped by zod int() constraint
-      expect(config.distill?.interval_days).toBeUndefined()
+      await expect(Config.get()).rejects.toThrow("ConfigInvalidError")
     },
   })
 })
