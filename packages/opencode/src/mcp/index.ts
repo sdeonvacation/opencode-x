@@ -389,7 +389,7 @@ export namespace MCP {
 
       const connectLocal = Effect.fn("MCP.connectLocal")(function* (key: string, mcp: Config.Mcp & { type: "local" }) {
         const [cmd, ...args] = mcp.command
-        const cwd = Instance.directory
+        const cwd = mcp.cwd ? path.resolve(Instance.directory, mcp.cwd) : Instance.directory
         const transport = new StdioClientTransport({
           stderr: "pipe",
           command: cmd,
