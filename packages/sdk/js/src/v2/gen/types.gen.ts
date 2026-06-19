@@ -205,6 +205,13 @@ export type StructuredOutputError = {
   }
 }
 
+export type ContentFilterError = {
+  name: "ContentFilterError"
+  data: {
+    message: string
+  }
+}
+
 export type ContextOverflowError = {
   name: "ContextOverflowError"
   data: {
@@ -239,6 +246,7 @@ export type EventSessionError = {
       | MessageOutputLengthError
       | MessageAbortedError
       | StructuredOutputError
+      | ContentFilterError
       | ContextOverflowError
       | ApiError
   }
@@ -711,6 +719,7 @@ export type AssistantMessage = {
     | MessageOutputLengthError
     | MessageAbortedError
     | StructuredOutputError
+    | ContentFilterError
     | ContextOverflowError
     | ApiError
   parentID: string

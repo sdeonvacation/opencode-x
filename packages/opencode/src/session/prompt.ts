@@ -2239,6 +2239,16 @@ export namespace SessionPrompt {
 
               const finished = handle.message.finish && !["tool-calls", "unknown"].includes(handle.message.finish)
               if (finished && !handle.message.error) {
+                // Surface content-filter finish (e.g. Anthropic refusal) as a visible error.
+                // Previously the session went idle silently on filtered responses.
+                if (handle.message.finish === "content-filter") {
+                  handle.message.error = new MessageV2.ContentFilterError({
+                    message: "The response was blocked by the provider's content filter",
+                  }).toObject()
+                  yield* sessions.updateMessage(handle.message)
+                  yield* bus.publish(Session.Event.Error, { sessionID, error: handle.message.error })
+                  return "break" as const
+                }
                 if (format.type === "json_schema") {
                   handle.message.error = new MessageV2.StructuredOutputError({
                     message: "Model did not produce structured output",
@@ -2380,6 +2390,15 @@ export namespace SessionPrompt {
         }
 
         const templateParts = yield* resolvePromptParts(template)
+        // Deduplicate file parts already present in user input to avoid sending content twice
+        const inputFiles = new Set(
+          input.parts
+            ?.filter((p) => p.type === "file" && new URL(p.url).protocol === "file:")
+            .map((p) => fileURLToPath(p.url)),
+        )
+        const uniqueTemplateParts = templateParts.filter(
+          (p) => p.type !== "file" || !inputFiles.has(fileURLToPath(p.url)),
+        )
         const isSubtask = (agent.mode === "subagent" && cmd.subtask !== false) || cmd.subtask === true
         const parts = isSubtask
           ? [
@@ -2392,7 +2411,7 @@ export namespace SessionPrompt {
                 prompt: templateParts.find((y) => y.type === "text")?.text ?? "",
               },
             ]
-          : [...templateParts, ...(input.parts ?? [])]
+          : [...uniqueTemplateParts, ...(input.parts ?? [])]
 
         const userAgent = isSubtask ? (input.agent ?? (yield* agents.defaultAgent())) : agentName
         const userModel = isSubtask

@@ -39,6 +39,12 @@ export namespace MessageV2 {
       retries: z.number(),
     }),
   )
+  export const ContentFilterError = NamedError.create(
+    "ContentFilterError",
+    z.object({
+      message: z.string(),
+    }),
+  )
   export const AuthError = NamedError.create(
     "ProviderAuthError",
     z.object({
@@ -433,6 +439,7 @@ export namespace MessageV2 {
         OutputLengthError.Schema,
         AbortedError.Schema,
         StructuredOutputError.Schema,
+        ContentFilterError.Schema,
         ContextOverflowError.Schema,
         APIError.Schema,
       ])
