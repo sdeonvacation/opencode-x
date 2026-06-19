@@ -148,7 +148,7 @@ export namespace MCP {
       inputSchema: jsonSchema(schema),
       execute: async (args: unknown) => {
         const value = timeout ?? DEFAULT_TIMEOUT
-        return client.callTool(
+        const result = await client.callTool(
           {
             name: mcpTool.name,
             arguments: (args || {}) as Record<string, unknown>,
@@ -161,6 +161,18 @@ export namespace MCP {
             onprogress: () => {},
           },
         )
+        if (result.isError)
+          throw new Error(
+            (result.content as Array<{ type: string; text?: string }>)
+              .flatMap((item) => (item.type === "text" ? [item.text] : []))
+              .filter((text: string | undefined) => text?.trim())
+              .join("\n\n") || "MCP tool returned an error",
+          )
+        if (result.structuredContent === undefined || result.structuredContent === null) return result
+        return {
+          ...result,
+          content: [{ type: "text" as const, text: JSON.stringify(result.structuredContent) }],
+        }
       },
     })
   }
