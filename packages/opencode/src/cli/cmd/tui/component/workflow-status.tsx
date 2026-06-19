@@ -11,7 +11,9 @@ export function WorkflowStatus() {
       {(s) => (
         <box flexDirection="row" gap={1} flexShrink={0}>
           <text fg={theme.textMuted}>
-            <span style={{ fg: theme.accent }}>⚡</span> {s().name}: {s().phase}
+            <span style={{ fg: theme.accent }}>⚡</span> {s().name}
+            {s().agent ? `: running "${s().agent}"` : s().status === "waiting" ? ": waiting…" : `: ${s().phase}`}
+            {s().prompt ? ` — ${s().prompt!.slice(0, 50)}${s().prompt!.length > 50 ? "…" : ""}` : ""}
             {s().status !== "running" ? ` [${s().status}]` : ""}
             <Show when={s().error}>
               <span style={{ fg: theme.error }}> — {s().error}</span>

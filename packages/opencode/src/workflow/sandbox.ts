@@ -15,6 +15,29 @@ function module() {
   return wasm
 }
 
+// Mutex: asyncify supports only one suspended call per WASM module
+let lock: Promise<void> = Promise.resolve()
+let busy = false
+
+function acquire(): Promise<() => void> {
+  let release: () => void
+  const prev = lock
+  lock = new Promise((r) => {
+    release = r
+  })
+  return prev.then(() => {
+    busy = true
+    return () => {
+      busy = false
+      release!()
+    }
+  })
+}
+
+export function isBusy(): boolean {
+  return busy
+}
+
 // Mulberry32 PRNG — deterministic, fast, 32-bit state
 function prng(seed: string): string {
   return `(function(){
@@ -148,6 +171,15 @@ export namespace Sandbox {
   } satisfies Options
 
   export async function evaluate(script: string, opts: Partial<Options> = {}): Promise<Result> {
+    const release = await acquire()
+    try {
+      return await run(script, opts)
+    } finally {
+      release()
+    }
+  }
+
+  async function run(script: string, opts: Partial<Options>): Promise<Result> {
     const cfg = { ...defaults, ...opts }
     const mod = await module()
     const runtime = mod.newRuntime()
@@ -190,13 +222,11 @@ export namespace Sandbox {
     }
   }
 
-  export function dispose(runtime: QuickJSAsyncRuntime, ctx: QuickJSAsyncContext) {
-    try {
-      ctx.dispose()
-    } catch {}
-    try {
-      runtime.dispose()
-    } catch {}
+  export function dispose(_runtime: QuickJSAsyncRuntime, _ctx: QuickJSAsyncContext) {
+    // Intentionally do NOT dispose runtime/ctx.
+    // QuickJS asyncified functions leave dangling host refs that trigger
+    // a fatal WASM abort (gc_obj_list assertion) on disposal.
+    // Let GC reclaim the memory instead — safe since each eval gets a fresh runtime.
   }
 }
 

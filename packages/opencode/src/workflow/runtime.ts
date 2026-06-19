@@ -1,4 +1,4 @@
-import { Sandbox } from "./sandbox"
+import { Sandbox, isBusy } from "./sandbox"
 import { WorkflowMeta } from "./meta"
 import { WorkflowResolve } from "./resolve"
 import { WorkflowBuiltin } from "./builtin"
@@ -70,8 +70,8 @@ export namespace WorkflowRuntime {
       if (depth >= cfg.depth) throw new Error(`Max workflow depth (${cfg.depth}) exceeded`)
     }
 
-    // Concurrency check
-    if (slots >= cfg.concurrent) throw new Error("Workflow queue full, try later")
+    // Concurrency: limit total active workflows (not per-workflow agents)
+    if (slots >= 10) throw new Error("Too many concurrent workflows, try later")
     slots++
 
     const script = resolveScript(input.name)
@@ -132,6 +132,16 @@ export namespace WorkflowRuntime {
     return WorkflowPersistence.list(session as SessionID | undefined)
   }
 
+  export function shutdown() {
+    for (const [id, entry] of active) {
+      entry.abort.abort()
+      const rid = WorkflowRunID.make(id)
+      WorkflowPersistence.recordTerminal(rid, "cancelled", "Session terminated")
+      slots--
+    }
+    active.clear()
+  }
+
   export async function resume(id: string): Promise<string> {
     const rid = WorkflowRunID.make(id)
     const run = WorkflowPersistence.load(rid)
@@ -152,7 +162,7 @@ export namespace WorkflowRuntime {
 
     WorkflowPersistence.recordTerminal(rid, "running")
 
-    if (slots >= cfg!.concurrent) throw new Error("Workflow queue full, try later")
+    if (slots >= 10) throw new Error("Too many concurrent workflows, try later")
     slots++
 
     const ctrl = new AbortController()
@@ -190,6 +200,8 @@ export namespace WorkflowRuntime {
         name: "agent",
         fn: async (name: unknown, opts: unknown) => {
           const agent = String(name)
+          const options = (typeof opts === "object" && opts !== null ? opts : {}) as Record<string, unknown>
+          const prompt = String(options.prompt ?? `Execute: ${agent}`)
           if (signal.aborted) throw new Error("Workflow cancelled")
           if (completed.has(agent)) return { result: "skipped", cached: true }
 
@@ -200,6 +212,7 @@ export namespace WorkflowRuntime {
             timestamp: Date.now(),
             data: { name: agent },
           })
+          Bus.publish(WorkflowEvent.AgentStarted, { runID: id, agent, prompt })
 
           try {
             const result = await runAgent(agent, opts, input.session as SessionID, signal)
@@ -255,6 +268,11 @@ export namespace WorkflowRuntime {
     const args = input.args ?? {}
     const stripped = body.replace(/\bawait\s+/g, "")
     const script = `const args = ${JSON.stringify(args)};\n${stripped}`
+
+    // Notify if another workflow holds the sandbox lock
+    if (isBusy()) {
+      Bus.publish(WorkflowEvent.Waiting, { runID: id, name: input.name })
+    }
 
     try {
       await Sandbox.evaluate(script, {

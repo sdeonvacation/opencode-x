@@ -11,6 +11,14 @@ export namespace WorkflowEvent {
     }),
   )
 
+  export const Waiting = BusEvent.define(
+    "workflow.waiting",
+    z.object({
+      runID: z.string(),
+      name: z.string(),
+    }),
+  )
+
   export const Finished = BusEvent.define(
     "workflow.finished",
     z.object({
@@ -35,6 +43,15 @@ export namespace WorkflowEvent {
       runID: z.string(),
       level: z.enum(["info", "warn", "error"]),
       message: z.string(),
+    }),
+  )
+
+  export const AgentStarted = BusEvent.define(
+    "workflow.agent-started",
+    z.object({
+      runID: z.string(),
+      agent: z.string(),
+      prompt: z.string(),
     }),
   )
 

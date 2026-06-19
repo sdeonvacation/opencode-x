@@ -33,6 +33,10 @@ export async function InstanceBootstrap() {
     dir: Instance.directory,
   })
 
+  process.on("SIGINT", () => WorkflowRuntime.shutdown())
+  process.on("SIGTERM", () => WorkflowRuntime.shutdown())
+  process.on("beforeExit", () => WorkflowRuntime.shutdown())
+
   Bus.subscribe(Command.Event.Executed, async (payload) => {
     if (payload.properties.name === Command.Default.INIT) {
       Project.setInitialized(Instance.project.id)
