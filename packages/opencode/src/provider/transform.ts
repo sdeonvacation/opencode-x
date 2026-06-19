@@ -1214,6 +1214,95 @@ export namespace ProviderTransform {
     return Math.min(model.limit.output, OUTPUT_TOKEN_MAX) || OUTPUT_TOKEN_MAX
   }
 
+  type JsonRecord = Record<string, unknown>
+
+  function isJsonObject(value: unknown): value is JsonRecord {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+  }
+
+  // Mirrors Codex's Rust JSON schema compatibility lowering for OpenAI tool schemas.
+  function sanitizeOpenAISchema(value: unknown): unknown {
+    const types = ["string", "number", "boolean", "integer", "object", "array", "null"]
+    const compositionKeys = ["anyOf", "oneOf", "allOf"]
+
+    // JSON Schema's boolean form (`true`/`false`) is unsupported by OpenAI tool schemas.
+    if (typeof value === "boolean") return { type: "string" }
+    if (Array.isArray(value)) return value.map(sanitizeOpenAISchema)
+    if (!isJsonObject(value)) return value
+
+    const result: JsonRecord = {}
+
+    if (typeof value.$ref === "string") result.$ref = value.$ref
+    if (typeof value.description === "string") result.description = value.description
+    if ("const" in value) result.enum = [value.const]
+    else if (Array.isArray(value.enum)) result.enum = value.enum
+
+    if (isJsonObject(value.properties)) {
+      result.properties = Object.fromEntries(
+        Object.entries(value.properties).map(([key, item]) => [key, sanitizeOpenAISchema(item)]),
+      )
+    }
+
+    if (Array.isArray(value.required)) {
+      result.required = value.required.filter((item) => typeof item === "string")
+    }
+
+    if ("items" in value) result.items = sanitizeOpenAISchema(value.items)
+
+    if ("additionalProperties" in value) {
+      result.additionalProperties =
+        typeof value.additionalProperties === "boolean"
+          ? value.additionalProperties
+          : sanitizeOpenAISchema(value.additionalProperties)
+    }
+
+    for (const key of compositionKeys) {
+      if (Array.isArray(value[key])) result[key] = (value[key] as unknown[]).map(sanitizeOpenAISchema)
+    }
+
+    for (const key of ["$defs", "definitions"]) {
+      if (isJsonObject(value[key])) {
+        result[key] = Object.fromEntries(
+          Object.entries(value[key] as JsonRecord).map(([name, item]) => [name, sanitizeOpenAISchema(item)]),
+        )
+      }
+    }
+
+    const schemaTypes =
+      typeof value.type === "string"
+        ? types.includes(value.type)
+          ? [value.type]
+          : []
+        : Array.isArray(value.type)
+          ? (value.type as string[]).filter((item) => typeof item === "string" && types.includes(item))
+          : []
+
+    if (schemaTypes.length === 0 && (typeof result.$ref === "string" || compositionKeys.some((key) => key in result))) {
+      return result
+    }
+
+    // MCP schemas may omit `type` while still using keywords that imply one.
+    const inferredTypes =
+      schemaTypes.length > 0
+        ? schemaTypes
+        : ["properties", "required", "additionalProperties"].some((key) => key in value)
+          ? ["object"]
+          : ["items", "prefixItems"].some((key) => key in value)
+            ? ["array"]
+            : "enum" in result || "format" in value
+              ? ["string"]
+              : ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"].some((key) => key in value)
+                ? ["number"]
+                : []
+
+    if (inferredTypes.length === 0) return {}
+
+    result.type = inferredTypes.length === 1 ? inferredTypes[0] : inferredTypes
+    if (inferredTypes.includes("object") && !("properties" in result)) result.properties = {}
+    if (inferredTypes.includes("array") && !("items" in result)) result.items = { type: "string" }
+    return result
+  }
+
   export function schema(model: Provider.Model, schema: JSONSchema.BaseSchema | JSONSchema7): JSONSchema7 {
     /*
     if (["openai", "azure"].includes(providerID)) {
@@ -1232,6 +1321,10 @@ export namespace ProviderTransform {
       }
     }
     */
+
+    if (model.api.npm === "@ai-sdk/openai" || model.api.npm === "@ai-sdk/azure") {
+      schema = sanitizeOpenAISchema(schema) as typeof schema
+    }
 
     // Strict schema sanitizer for providers that reject extra keywords alongside $ref
     // and don't support tuple items (e.g., Moonshot/Kimi APIs)
@@ -1299,6 +1392,20 @@ export namespace ProviderTransform {
             result[key] = sanitizeGemini(value)
           } else {
             result[key] = value
+          }
+        }
+
+        // Gemini requires a single `type`, not a JSON Schema type array.
+        // Split non-null types into `anyOf`, lift `null` into `nullable`.
+        if (Array.isArray(result.type)) {
+          const hasNull = result.type.includes("null")
+          const nonNull = result.type.filter((entry: unknown) => entry !== "null")
+          if (nonNull.length === 0) {
+            result.type = "null"
+          } else {
+            delete result.type
+            result.anyOf = nonNull.map((entry: unknown) => ({ type: entry }))
+            if (hasNull) result.nullable = true
           }
         }
 
