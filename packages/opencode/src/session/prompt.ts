@@ -156,14 +156,20 @@ export namespace SessionPrompt {
         // Find running children
         const kids = yield* sessions.children(sessionID)
         const running: Array<{ childID: SessionID; description: string; runner: typeof runner }> = []
+        const pending: Array<{ childID: SessionID; description: string }> = []
         for (const child of kids) {
+          if (child.time.archived) continue
           const r = yield* state.peek(child.id)
-          if (!r) continue
-          if (r.state._tag !== "Running" && r.state._tag !== "ShellThenRun") continue
-          running.push({ childID: child.id, description: child.title ?? child.id, runner: r })
+          if (r && (r.state._tag === "Running" || r.state._tag === "ShellThenRun")) {
+            running.push({ childID: child.id, description: child.title ?? child.id, runner: r })
+          } else if (!r || r.state._tag !== "Idle") {
+            // Child exists but runner not started or not yet running — still in-flight
+            pending.push({ childID: child.id, description: child.title ?? child.id })
+          }
         }
 
-        if (running.length === 0) return 0
+        const all = [...running, ...pending]
+        if (all.length === 0) return 0
 
         // Get parent model/agent for auto-resume
         const msgs = MessageV2.page({ sessionID, limit: 5 })
@@ -175,15 +181,15 @@ export namespace SessionPrompt {
         const agent = lastAssist && lastAssist.info.role === "assistant" ? lastAssist.info.agent : "build"
         const variant = lastAssist && lastAssist.info.role === "assistant" ? lastAssist.info.variant : undefined
 
-        // Protect children from cancel cascade
-        for (const child of running) {
+        // Protect all children from cancel cascade (including pending ones)
+        for (const child of all) {
           DetachedNotes.protect(child.childID)
         }
 
         // Register parent state for tracking
         DetachedNotes.registerParent(
           sessionID,
-          running.map((c) => ({ childID: c.childID, description: c.description })),
+          all.map((c) => ({ childID: c.childID, description: c.description })),
           model,
           agent,
           variant,
@@ -287,8 +293,61 @@ export namespace SessionPrompt {
           )
         }
 
+        // Monitor pending children (runner not started yet) — poll until runner appears
+        for (const child of pending) {
+          const run = Effect.gen(function* () {
+            // Poll until runner starts (500ms intervals, max 5 min)
+            let r: typeof runner | undefined
+            for (let i = 0; i < 600; i++) {
+              r = yield* state.peek(child.childID)
+              if (r && (r.state._tag === "Running" || r.state._tag === "ShellThenRun")) break
+              if (r && r.state._tag === "Idle") return ""
+              yield* Effect.sleep("500 millis")
+            }
+            if (!r || (r.state._tag !== "Running" && r.state._tag !== "ShellThenRun")) return ""
+            const done = r.state._tag === "Running" ? r.state.run.done : r.state.run.done
+            const msg = yield* Deferred.await(done)
+            return msg.parts.findLast((p) => p.type === "text")?.text ?? ""
+          }).pipe(
+            Effect.tap((summary) =>
+              Effect.promise(() =>
+                autoResume(sessionID, child.childID, {
+                  childID: child.childID,
+                  description: child.description,
+                  result: summary,
+                  state: "completed",
+                }),
+              ),
+            ),
+            Effect.catchCause((cause: Cause.Cause<any>) => {
+              const squashed = Cause.squash(cause)
+              const cancelled = squashed && (squashed as any)._tag === "RunnerCancelled"
+              return Effect.promise(() =>
+                autoResume(sessionID, child.childID, {
+                  childID: child.childID,
+                  description: child.description,
+                  error: cancelled ? "cancelled" : String(squashed),
+                  state: cancelled ? "cancelled" : "error",
+                }),
+              ).pipe(Effect.as(""))
+            }),
+          )
+
+          yield* Effect.promise(() =>
+            bgRuntime.runPromise((svc) =>
+              svc.start({
+                id: child.childID,
+                type: "session.background",
+                title: child.description,
+                metadata: { sessionID, childID: child.childID },
+                run,
+              }),
+            ),
+          )
+        }
+
         // Publish "running" events for badge counter
-        for (const child of running) {
+        for (const child of all) {
           yield* Effect.promise(() =>
             Bus.publish(TuiEvent.BackgroundTaskUpdate, {
               sessionID,
