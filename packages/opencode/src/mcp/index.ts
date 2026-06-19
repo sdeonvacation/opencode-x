@@ -1,13 +1,15 @@
 import path from "path"
 import os from "os"
+import { pathToFileURL } from "node:url"
 import { dynamicTool, type Tool, jsonSchema, type JSONSchema7 } from "ai"
-import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { Client, type ClientOptions } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
 import {
   CallToolResultSchema,
+  ListRootsRequestSchema,
   type Tool as MCPToolDef,
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js"
@@ -35,6 +37,21 @@ import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 export namespace MCP {
   const log = Log.create({ service: "mcp" })
   const DEFAULT_TIMEOUT = 30_000
+
+  const CLIENT_OPTIONS = {
+    capabilities: {
+      roots: {},
+    },
+  } satisfies ClientOptions
+
+  function createClient() {
+    const dir = Instance.directory
+    const client = new Client({ name: "opencode", version: Installation.VERSION }, CLIENT_OPTIONS)
+    client.setRequestHandler(ListRootsRequestSchema, () =>
+      Promise.resolve({ roots: [{ uri: pathToFileURL(dir).href }] }),
+    )
+    return client
+  }
 
   export const Resource = z
     .object({
@@ -280,7 +297,7 @@ export namespace MCP {
           (t) =>
             Effect.tryPromise({
               try: () => {
-                const client = new Client({ name: "opencode", version: Installation.VERSION })
+                const client = createClient()
                 return withTimeout(client.connect(t), timeout).then(() => client)
               },
               catch: (e) => (e instanceof Error ? e : new Error(String(e))),
@@ -699,8 +716,11 @@ export namespace MCP {
               for (const key of Object.keys(s.status)) {
                 s.status[key] = { status: "disabled" }
               }
+              const clients = Object.values(s.clients)
+              s.clients = {}
+              s.defs = {}
               yield* Effect.forEach(
-                Object.values(s.clients),
+                clients,
                 (client) =>
                   Effect.gen(function* () {
                     const pid = (client.transport as any)?.pid
@@ -726,6 +746,7 @@ export namespace MCP {
 
       function closeClient(s: State, name: string) {
         const client = s.clients[name]
+        delete s.clients[name]
         delete s.defs[name]
         if (!client) return Effect.void
         return Effect.tryPromise(() => client.close()).pipe(Effect.ignore)
@@ -764,15 +785,15 @@ export namespace MCP {
         s.status[name] = result.status
         if (!result.mcpClient) {
           yield* closeClient(s, name)
-          delete s.clients[name]
           return result.status
         }
 
-        yield* closeClient(s, name)
+        const previous = s.clients[name]
         s.clients[name] = result.mcpClient
         s.defs[name] = result.defs!
         watch(s, name, result.mcpClient, mcp.timeout)
         monitor(s, name, result.mcpClient, mcp)
+        if (previous) yield* Effect.tryPromise(() => previous.close()).pipe(Effect.ignore)
         return result.status
       })
 
@@ -978,7 +999,7 @@ export namespace MCP {
 
         return yield* Effect.tryPromise({
           try: () => {
-            const client = new Client({ name: "opencode", version: Installation.VERSION })
+            const client = createClient()
             return client.connect(transport).then(() => ({ authorizationUrl: "", oauthState }))
           },
           catch: (error) => error,
