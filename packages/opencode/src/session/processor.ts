@@ -27,6 +27,7 @@ import { isRecord } from "@/util/record"
 import { Flag } from "@/flag/flag"
 import * as PartCoalescer from "./part-coalescer" // [fork-perf] Phase 1B
 import * as DoomLoopDetector from "./doom-loop" // [fork-perf] Phase 1B
+import { Checkpoint } from "./checkpoint"
 import { SnapshotGate } from "./snapshot-gate" // [fork-perf] Phase 4
 import { ReactiveCompact } from "./llm/reactive-compact" // [fork-perf] Phase 5
 import { DetachedNotes } from "./detached-notes"
@@ -686,6 +687,11 @@ export namespace SessionProcessor {
                 isOverflow({ cfg: yield* config.get(), tokens: usage.tokens, model: ctx.model })
               ) {
                 ctx.needsCompaction = true
+                // Checkpoint: fire-and-forget writer spawn on overflow
+                const msgs = yield* session.messages({ sessionID: ctx.sessionID })
+                yield* Effect.promise(() =>
+                  Checkpoint.tryStartCheckpointWriter({ sessionID: ctx.sessionID, messages: msgs }),
+                )
               }
               return
             }

@@ -12,6 +12,7 @@ import { Flag } from "@/flag/flag"
 import { writeHeapSnapshot } from "node:v8"
 import { Heap } from "@/cli/heap"
 import { SessionStatus } from "@/session/status"
+import { Checkpoint } from "@/session/checkpoint"
 import { LSP } from "@/lsp"
 
 // Wire up the busy-check so Instance.waitIdle can poll session status
@@ -112,6 +113,7 @@ export const rpc = {
   async shutdown() {
     Log.Default.info("worker shutting down")
 
+    await Checkpoint.drainWriters().catch(() => {})
     await Instance.disposeAll()
     if (server) await server.stop(true)
   },

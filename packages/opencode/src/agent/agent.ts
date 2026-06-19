@@ -10,6 +10,7 @@ import { ProviderTransform } from "../provider/transform"
 
 import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
+import PROMPT_CHECKPOINT_WRITER from "./prompt/checkpoint-writer.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
@@ -198,6 +199,27 @@ export namespace Agent {
                 defaults,
                 Permission.fromConfig({
                   "*": "deny",
+                }),
+                user,
+              ),
+              options: {},
+            },
+            "checkpoint-writer": {
+              name: "checkpoint-writer",
+              mode: "primary",
+              native: true,
+              hidden: true,
+              prompt: PROMPT_CHECKPOINT_WRITER,
+              permission: Permission.merge(
+                defaults,
+                Permission.fromConfig({
+                  "*": "deny",
+                  read: "allow",
+                  write: "allow",
+                  edit: "allow",
+                  glob: "allow",
+                  grep: "allow",
+                  task: "allow",
                 }),
                 user,
               ),

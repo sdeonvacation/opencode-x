@@ -21,6 +21,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { isOverflow as overflow, usable } from "./overflow"
 import { resolveLocal } from "./resolve-local"
 import { SlidingWindow } from "./sliding-window" // [fork-perf] Phase 5
+import { Checkpoint } from "./checkpoint"
 
 export namespace SessionCompaction {
   const log = Log.create({ service: "session.compaction" })
@@ -416,6 +417,24 @@ Rules:
         }
 
         const cfg = yield* config.get()
+
+        // Checkpoint: fire-and-forget writer spawn before compaction
+        log.info("checkpoint trigger entering", { session: input.sessionID, msgCount: input.messages.length })
+        yield* Effect.promise(async () => {
+          log.info("checkpoint promise executing", { session: input.sessionID })
+          try {
+            const result = await Checkpoint.tryStartCheckpointWriter({
+              sessionID: input.sessionID,
+              messages: input.messages,
+            })
+            log.info("checkpoint trigger result", { session: input.sessionID, result })
+            return result
+          } catch (err: any) {
+            log.error("checkpoint trigger error", { session: input.sessionID, error: err?.message ?? String(err) })
+            return false
+          }
+        })
+
         const agent = yield* agents.get("compaction")
         const model = yield* resolveModel({ model: userMessage.model })
         const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
@@ -506,6 +525,26 @@ Rules:
             ...compactionPart,
             tail_start_id: selected.tail_start_id,
           })
+        }
+
+        // Checkpoint rebuild: inject context from checkpoint artifacts into session
+        if (result === "continue") {
+          const hasCheckpoint = yield* Effect.promise(() => Checkpoint.hasCheckpoint({ sessionID: input.sessionID }))
+          if (hasCheckpoint) {
+            yield* Effect.promise(() => Checkpoint.waitForWriter({ sessionID: input.sessionID, timeout: 60_000 }))
+            const context = yield* Effect.promise(() =>
+              Checkpoint.renderRebuildContext({ sessionID: input.sessionID, tail: [] }),
+            )
+            if (context) {
+              yield* Effect.promise(() =>
+                Checkpoint.insertRebuildBoundary({
+                  sessionID: input.sessionID,
+                  context,
+                  messages: input.messages,
+                }),
+              )
+            }
+          }
         }
 
         if (result === "continue" && input.auto) {
@@ -665,8 +704,6 @@ Rules:
 
   // [fork-perf] Phase 5: async-compaction fork variant — spawns SlidingWindow.compact on a fiber
   // Consumer is responsible for gating on cfg.experimental?.async_compaction === true.
-  export const compactAsync = (
-    input: SlidingWindow.CompactInput,
-  ): Effect.Effect<void> =>
+  export const compactAsync = (input: SlidingWindow.CompactInput): Effect.Effect<void> =>
     SlidingWindow.compact(input).pipe(Effect.forkChild, Effect.asVoid) // [fork-perf] Phase 5
 }

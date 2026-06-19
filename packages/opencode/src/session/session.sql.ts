@@ -54,6 +54,7 @@ export const SessionTable = sqliteTable(
         }
       >
     >(),
+    last_checkpoint_message_id: text().$type<MessageID>(),
   },
   (table) => [
     index("session_project_idx").on(table.project_id),
