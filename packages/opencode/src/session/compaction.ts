@@ -419,16 +419,12 @@ Rules:
         const cfg = yield* config.get()
 
         // Checkpoint: fire-and-forget writer spawn before compaction
-        log.info("checkpoint trigger entering", { session: input.sessionID, msgCount: input.messages.length })
         yield* Effect.promise(async () => {
-          log.info("checkpoint promise executing", { session: input.sessionID })
           try {
-            const result = await Checkpoint.tryStartCheckpointWriter({
+            return await Checkpoint.tryStartCheckpointWriter({
               sessionID: input.sessionID,
               messages: input.messages,
             })
-            log.info("checkpoint trigger result", { session: input.sessionID, result })
-            return result
           } catch (err: any) {
             log.error("checkpoint trigger error", { session: input.sessionID, error: err?.message ?? String(err) })
             return false

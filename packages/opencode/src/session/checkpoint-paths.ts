@@ -16,7 +16,7 @@ export function memoryPath(session: SessionID): string {
 }
 
 export function globalMemoryPath(): string {
-  return path.join(Global.Path.data, "memory", "memory.md")
+  return path.join(Global.Path.data, "memory")
 }
 
 export function notesPath(session: SessionID): string {

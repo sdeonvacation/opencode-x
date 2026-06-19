@@ -12,7 +12,7 @@ import { type SessionID, type MessageID, MessageID as MessageIDUtil, PartID as P
 import { SessionID as SessionIDSchema } from "./schema"
 import { computeBoundary, COMPACTABLE_TOOL_NAMES } from "./checkpoint-boundary"
 import { checkpointPath, memoryPath, notesPath, globalMemoryPath, metaDir, tasksDir } from "./checkpoint-paths"
-import { readBudgeted, readBudgetedSectionAware } from "./budgeted-read"
+import { readBudgeted, readBudgetedSectionAware, readDirBudgeted } from "./budgeted-read"
 import { composeWriterPrompt } from "./checkpoint-writer-prompt"
 import { CHECKPOINT_TEMPLATE, CHECKPOINT_SECTION_BUDGETS } from "./checkpoint-templates"
 import { SessionPrompt } from "./prompt"
@@ -240,7 +240,7 @@ export namespace Checkpoint {
             readBudgetedSectionAware(checkpointPath(input.sessionID), REBUILD_CHECKPOINT_BUDGET),
             readBudgeted(memoryPath(input.sessionID), REBUILD_MEMORY_BUDGET),
             readBudgeted(notesPath(input.sessionID), REBUILD_NOTES_BUDGET),
-            readBudgeted(globalMemoryPath(), REBUILD_GLOBAL_MEMORY_BUDGET),
+            readDirBudgeted(globalMemoryPath(), REBUILD_GLOBAL_MEMORY_BUDGET),
           ]),
         )
 
