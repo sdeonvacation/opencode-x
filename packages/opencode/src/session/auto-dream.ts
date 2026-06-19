@@ -28,24 +28,17 @@ Rules:
 - Skip anything already in persistent memory
 - Maximum 10 new memories per run`
 
-  export const DISTILL_TASK = `You are a distill agent. Review recent sessions to identify repeated multi-step workflows that should become reusable skills.
+  export const DISTILL_TASK = `Review recent sessions for complex workflows worth extracting into skills.
 
-A good skill candidate:
-- Was performed 3+ times across sessions
-- Has a clear trigger condition (when to use)
-- Has reproducible steps
-- Would save significant time if automated
+Key criteria — only create a skill if ALL are true:
+- Non-obvious: agent would get it wrong without explicit guidance
+- Complex: 5+ steps with specific commands, file paths, or code templates
+- Recurring: performed 2+ times across sessions
+- Not covered: persistent memories alone are insufficient
 
-For each identified workflow, create a skill file at ~/.config/opencode/skills/<name>/SKILL.md with:
-- Clear description and when_to_use
-- Step-by-step instructions
-- Any relevant code patterns or templates
+Do NOT create skills for simple patterns already in memory (git flows, basic flag removal, etc). A good skill has exact file paths, code templates, ordering constraints, and gotcha warnings.
 
-Rules:
-- Only extract patterns you can verify from actual sessions
-- Do not create skills that duplicate existing ones
-- Maximum 3 new skills per run
-- Each skill must have a clear, distinct purpose`
+If nothing qualifies, output "No skills worth creating" and explain why candidates were rejected.`
 
   let lastDreamSpawn = 0
   let lastDistillSpawn = 0
