@@ -32,6 +32,14 @@ function assistant(): MessageV2.WithParts {
       role: "assistant",
       sessionID: sid,
       time: { created: Date.now(), completed: Date.now() },
+      parentID: MessageID.ascending(),
+      modelID: ModelID.make("test-model"),
+      providerID: ProviderID.make("test"),
+      mode: "default",
+      agent: "build",
+      path: { cwd: "/tmp", root: "/tmp" },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     },
     parts: [
       {
@@ -63,11 +71,16 @@ function toolPart(): MessageV2.Part {
     sessionID: sid,
     messageID: id,
     type: "tool",
+    callID: "call-1",
     tool: "bash",
-    state: "completed",
-    input: {},
-    output: "done",
-    time: { start: Date.now(), end: Date.now() },
+    state: {
+      status: "completed",
+      input: {},
+      output: "done",
+      title: "bash",
+      metadata: {},
+      time: { start: Date.now(), end: Date.now() },
+    },
   } as MessageV2.Part
 }
 
