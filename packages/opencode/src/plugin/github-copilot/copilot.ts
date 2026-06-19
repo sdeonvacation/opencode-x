@@ -69,6 +69,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
         return CopilotModels.get(
           base(auth.enterpriseUrl),
           {
+            ...(provider.options?.headers as Record<string, string> | undefined),
             Authorization: `Bearer ${auth.refresh}`,
             "User-Agent": `opencode/${Installation.VERSION}`,
           },
