@@ -1512,6 +1512,69 @@ When complete, call goal_complete with evidence.
 
 ---
 
+## Dream & Distill (Self-Improvement)
+
+Background sessions that automatically consolidate project knowledge and extract reusable workflows. Fires on session start when enough time has elapsed.
+
+- **Dream** (every 7 days): Reviews recent session history, writes project facts to persistent memory
+- **Distill** (every 30 days): Identifies repeated workflows, creates skill files in `~/.config/opencode/skills/`
+
+Enabled by default. Disable with `OPENCODE_EXPERIMENTAL_DREAM=false`.
+
+### Slash Commands
+
+```
+/dream    — manually trigger dream consolidation
+/distill  — manually trigger distill extraction
+```
+
+### How It Works
+
+1. On first message in a top-level session, checks if interval has elapsed
+2. Queries DB for last dream/distill session by title
+3. If eligible, spawns a background subagent (fire-and-forget, never blocks)
+4. Injects recent session conversation history (text only, no tool outputs) into the prompt
+5. Dream agent writes `memory_persist` entries; distill agent creates skill files
+
+### Configuration
+
+```json
+{
+  "dream": {
+    "auto": true,
+    "interval_days": 7,
+    "max_context_chars": 100000,
+    "max_sessions": 20,
+    "max_messages": 100
+  },
+  "distill": {
+    "auto": true,
+    "interval_days": 30,
+    "max_context_chars": 100000,
+    "max_sessions": 20,
+    "max_messages": 100
+  }
+}
+```
+
+| Field               | Default  | Description                                  |
+| ------------------- | -------- | -------------------------------------------- |
+| `auto`              | `true`   | Enable automatic triggering on session start |
+| `interval_days`     | 7 / 30   | Days between runs                            |
+| `max_context_chars` | `100000` | Max chars of session history injected        |
+| `max_sessions`      | `20`     | Max sessions to review                       |
+| `max_messages`      | `100`    | Max messages per session                     |
+
+### Safety
+
+- Dream agent is read-only: `read`, `glob`, `grep`, `memory_persist` (no write/edit/bash)
+- Distill agent can write to skill dirs only: `read`, `glob`, `grep`, `write`, `edit`, `memory_persist`
+- Never blocks user session (fire-and-forget spawn)
+- Bounded by `experimental.subagent_timeout`
+- Module-level debounce (10s) + DB-based interval check prevent double-spawning
+
+---
+
 ## Claude Code Hooks
 
 OpenCode X natively supports Claude Code hooks and plugins. **Your existing `~/.claude/settings.json` hooks work automatically** — no migration needed. An optional `~/.config/opencode/hooks.json` file can be used to add opencode-specific hooks or override Claude defaults.

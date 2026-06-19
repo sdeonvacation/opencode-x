@@ -76,7 +76,7 @@ beforeEach(() => {
 describe("session/dream-spawn", () => {
   describe("dream", () => {
     test("spawns subagent with correct input", async () => {
-      await DreamSpawn.dream("sess-1" as SessionID, agent)
+      await DreamSpawn.dream("sess-1" as SessionID, agent, {} as any)
       expect(spawns).toHaveLength(1)
       expect(spawns[0].parentID).toBe("sess-1")
       expect(spawns[0].description).toBe("Auto Dream")
@@ -88,7 +88,7 @@ describe("session/dream-spawn", () => {
   describe("distill", () => {
     test("spawns subagent with correct input", async () => {
       const distillAgent: Agent.Info = { name: "distill", mode: "subagent", permission: [], options: {} }
-      await DreamSpawn.distill("sess-3" as SessionID, distillAgent)
+      await DreamSpawn.distill("sess-3" as SessionID, distillAgent, {} as any)
       expect(spawns).toHaveLength(1)
       expect(spawns[0].parentID).toBe("sess-3")
       expect(spawns[0].description).toBe("Auto Distill")
@@ -105,7 +105,7 @@ describe("session/dream-spawn", () => {
       }))
       const { DreamSpawn: DS } = await import("../../src/session/dream-spawn")
       // Should not throw
-      await DS.dream("sess-2" as SessionID, agent)
+      await DS.dream("sess-2" as SessionID, agent, {} as any)
     })
   })
 })

@@ -1348,12 +1348,28 @@ export namespace Config {
         .object({
           auto: z.boolean().optional().describe("Enable automatic dream consolidation"),
           interval_days: z.number().int().positive().optional().describe("Days between dream runs (default: 7)"),
+          max_context_chars: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max chars of session history to include (default: 100000)"),
+          max_sessions: z.number().int().positive().optional().describe("Max sessions to review (default: 20)"),
+          max_messages: z.number().int().positive().optional().describe("Max messages per session (default: 100)"),
         })
         .optional(),
       distill: z
         .object({
           auto: z.boolean().optional().describe("Enable automatic distill skill extraction"),
           interval_days: z.number().int().positive().optional().describe("Days between distill runs (default: 30)"),
+          max_context_chars: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max chars of session history to include (default: 100000)"),
+          max_sessions: z.number().int().positive().optional().describe("Max sessions to review (default: 20)"),
+          max_messages: z.number().int().positive().optional().describe("Max messages per session (default: 100)"),
         })
         .optional(),
       hooks: z

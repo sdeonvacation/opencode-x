@@ -1,6 +1,7 @@
 import { spawnSubagent } from "../orchestration/task-spawn"
 import type { SessionID } from "./schema"
 import type { Agent } from "../agent/agent"
+import type { Config } from "../config/config"
 import { AutoDream } from "./auto-dream"
 import { Session } from "./index"
 import { MessageV2 } from "./message-v2"
@@ -8,12 +9,11 @@ import { Log } from "../util/log"
 
 const log = Log.create({ service: "dream-spawn" })
 
-const MAX_CONTEXT_CHARS = 100_000
-const MAX_SESSIONS = 20
-const MAX_MESSAGES_PER_SESSION = 100
+const DEFAULT_MAX_CONTEXT_CHARS = 100_000
+const DEFAULT_MAX_SESSIONS = 20
+const DEFAULT_MAX_MESSAGES = 100
 
 function extractText(msg: MessageV2.WithParts): string {
-  // Prefer message summary (compact) over full text
   if (msg.info.role === "user" && msg.info.summary) {
     const s = msg.info.summary
     const parts = [s.title, s.body].filter(Boolean)
@@ -25,11 +25,18 @@ function extractText(msg: MessageV2.WithParts): string {
     .join("\n")
 }
 
-export function buildContext(days: number): string {
+export function buildContext(
+  days: number,
+  opts?: { max_context_chars?: number; max_sessions?: number; max_messages?: number },
+): string {
+  const maxChars = opts?.max_context_chars ?? DEFAULT_MAX_CONTEXT_CHARS
+  const maxSessions = opts?.max_sessions ?? DEFAULT_MAX_SESSIONS
+  const maxMessages = opts?.max_messages ?? DEFAULT_MAX_MESSAGES
+
   const cutoff = Date.now() - days * AutoDream.DAY_MS
   const sessions: Array<{ title: string; time: number; id: SessionID }> = []
 
-  for (const s of Session.list({ roots: true, start: cutoff, limit: MAX_SESSIONS })) {
+  for (const s of Session.list({ roots: true, start: cutoff, limit: maxSessions })) {
     if (s.title.startsWith(AutoDream.AUTO_DREAM_TITLE)) continue
     if (s.title.startsWith(AutoDream.AUTO_DISTILL_TITLE)) continue
     sessions.push({ title: s.title, time: s.time.created, id: s.id })
@@ -42,11 +49,11 @@ export function buildContext(days: number): string {
 
   for (const s of sessions) {
     const header = `### ${s.title} (${new Date(s.time).toISOString().slice(0, 10)})\n\n`
-    if (chars + header.length > MAX_CONTEXT_CHARS) break
+    if (chars + header.length > maxChars) break
     out += header
     chars += header.length
 
-    const { items } = MessageV2.page({ sessionID: s.id, limit: MAX_MESSAGES_PER_SESSION })
+    const { items } = MessageV2.page({ sessionID: s.id, limit: maxMessages })
     for (const msg of items) {
       const role = msg.info.role === "user" ? "User" : "Assistant"
       const text = extractText(msg)
@@ -54,7 +61,7 @@ export function buildContext(days: number): string {
 
       const truncated = text.length > 4000 ? text.slice(0, 4000) + "..." : text
       const entry = `**${role}**: ${truncated}\n\n`
-      if (chars + entry.length > MAX_CONTEXT_CHARS) break
+      if (chars + entry.length > maxChars) break
       out += entry
       chars += entry.length
     }
@@ -64,7 +71,6 @@ export function buildContext(days: number): string {
 }
 
 async function kick(sessionID: SessionID, agent: string, task: string) {
-  // Dynamic import avoids circular: prompt → dream-trigger → dream-spawn → prompt
   const { SessionPrompt } = await import("./prompt")
   SessionPrompt.prompt({
     sessionID,
@@ -74,9 +80,9 @@ async function kick(sessionID: SessionID, agent: string, task: string) {
 }
 
 export namespace DreamSpawn {
-  export async function dream(parentID: SessionID, agent: Agent.Info) {
+  export async function dream(parentID: SessionID, agent: Agent.Info, cfg: Config.Info) {
     try {
-      const context = buildContext(AutoDream.DEFAULT_DREAM_INTERVAL_DAYS)
+      const context = buildContext(cfg.dream?.interval_days ?? AutoDream.DEFAULT_DREAM_INTERVAL_DAYS, cfg.dream)
       const result = await spawnSubagent(undefined, {
         parentSessionID: parentID,
         agent,
@@ -95,9 +101,9 @@ export namespace DreamSpawn {
     }
   }
 
-  export async function distill(parentID: SessionID, agent: Agent.Info) {
+  export async function distill(parentID: SessionID, agent: Agent.Info, cfg: Config.Info) {
     try {
-      const context = buildContext(AutoDream.DEFAULT_DISTILL_INTERVAL_DAYS)
+      const context = buildContext(cfg.distill?.interval_days ?? AutoDream.DEFAULT_DISTILL_INTERVAL_DAYS, cfg.distill)
       const result = await spawnSubagent(undefined, {
         parentSessionID: parentID,
         agent,

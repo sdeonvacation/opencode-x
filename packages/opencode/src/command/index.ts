@@ -127,7 +127,7 @@ export namespace Command {
             agent: "dream",
             source: "command",
             get template() {
-              const context = buildContext(AutoDream.DEFAULT_DREAM_INTERVAL_DAYS)
+              const context = buildContext(cfg.dream?.interval_days ?? AutoDream.DEFAULT_DREAM_INTERVAL_DAYS, cfg.dream)
               return context ? `${AutoDream.DREAM_TASK}\n\n${context}` : AutoDream.DREAM_TASK
             },
             hints: [],
@@ -138,7 +138,10 @@ export namespace Command {
             agent: "distill",
             source: "command",
             get template() {
-              const context = buildContext(AutoDream.DEFAULT_DISTILL_INTERVAL_DAYS)
+              const context = buildContext(
+                cfg.distill?.interval_days ?? AutoDream.DEFAULT_DISTILL_INTERVAL_DAYS,
+                cfg.distill,
+              )
               return context ? `${AutoDream.DISTILL_TASK}\n\n${context}` : AutoDream.DISTILL_TASK
             },
             hints: [],
