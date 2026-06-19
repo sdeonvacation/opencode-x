@@ -5,10 +5,13 @@ import { SessionID, MessageID } from "@/session/schema"
 import { Effect, Layer, ServiceMap } from "effect"
 import z from "zod"
 import { Config } from "../config/config"
+import { Flag } from "../flag/flag"
 import { Hook } from "../hook/hook"
 import { MCP } from "../mcp"
 import { Skill } from "../skill"
 import { Log } from "../util/log"
+import { AutoDream } from "../session/auto-dream"
+import { buildContext } from "../session/dream-spawn"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
 import PROMPT_SWARM from "./template/swarm.txt"
@@ -114,6 +117,31 @@ export namespace Command {
               return PROMPT_SWARM
             },
             hints: hints(PROMPT_SWARM),
+          }
+        }
+
+        if (cfg.experimental?.dream_and_distill || Flag.OPENCODE_EXPERIMENTAL_DREAM) {
+          commands["dream"] = {
+            name: "dream",
+            description: "consolidate recent session learnings into persistent memory",
+            agent: "dream",
+            source: "command",
+            get template() {
+              const context = buildContext(AutoDream.DEFAULT_DREAM_INTERVAL_DAYS)
+              return context ? `${AutoDream.DREAM_TASK}\n\n${context}` : AutoDream.DREAM_TASK
+            },
+            hints: [],
+          }
+          commands["distill"] = {
+            name: "distill",
+            description: "extract repeated workflows into reusable skill files",
+            agent: "distill",
+            source: "command",
+            get template() {
+              const context = buildContext(AutoDream.DEFAULT_DISTILL_INTERVAL_DAYS)
+              return context ? `${AutoDream.DISTILL_TASK}\n\n${context}` : AutoDream.DISTILL_TASK
+            },
+            hints: [],
           }
         }
 

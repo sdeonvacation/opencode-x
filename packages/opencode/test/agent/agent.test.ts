@@ -29,6 +29,8 @@ test("returns default native agents when no config", async () => {
       expect(names).toContain("compaction")
       expect(names).toContain("title")
       expect(names).toContain("summary")
+      expect(names).toContain("dream")
+      expect(names).toContain("distill")
     },
   })
 })
@@ -117,6 +119,48 @@ test("compaction agent denies all permissions", async () => {
       expect(evalPerm(compaction, "bash")).toBe("deny")
       expect(evalPerm(compaction, "edit")).toBe("deny")
       expect(evalPerm(compaction, "read")).toBe("deny")
+    },
+  })
+})
+
+test("dream agent is hidden subagent with read-only + memory_persist", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const dream = await Agent.get("dream")
+      expect(dream).toBeDefined()
+      expect(dream?.mode).toBe("subagent")
+      expect(dream?.native).toBe(true)
+      expect(dream?.hidden).toBe(true)
+      expect(evalPerm(dream, "read")).toBe("allow")
+      expect(evalPerm(dream, "glob")).toBe("allow")
+      expect(evalPerm(dream, "grep")).toBe("allow")
+      expect(evalPerm(dream, "memory_persist")).toBe("allow")
+      expect(evalPerm(dream, "edit")).toBe("deny")
+      expect(evalPerm(dream, "write")).toBe("deny")
+      expect(evalPerm(dream, "bash")).toBe("deny")
+    },
+  })
+})
+
+test("distill agent is hidden subagent with read/write + memory_persist", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const distill = await Agent.get("distill")
+      expect(distill).toBeDefined()
+      expect(distill?.mode).toBe("subagent")
+      expect(distill?.native).toBe(true)
+      expect(distill?.hidden).toBe(true)
+      expect(evalPerm(distill, "read")).toBe("allow")
+      expect(evalPerm(distill, "glob")).toBe("allow")
+      expect(evalPerm(distill, "grep")).toBe("allow")
+      expect(evalPerm(distill, "write")).toBe("allow")
+      expect(evalPerm(distill, "edit")).toBe("allow")
+      expect(evalPerm(distill, "memory_persist")).toBe("allow")
+      expect(evalPerm(distill, "bash")).toBe("deny")
     },
   })
 })

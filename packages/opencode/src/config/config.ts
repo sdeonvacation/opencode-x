@@ -1344,6 +1344,18 @@ export namespace Config {
             .optional(),
         })
         .optional(),
+      dream: z
+        .object({
+          auto: z.boolean().optional().describe("Enable automatic dream consolidation"),
+          interval_days: z.number().int().positive().optional().describe("Days between dream runs (default: 7)"),
+        })
+        .optional(),
+      distill: z
+        .object({
+          auto: z.boolean().optional().describe("Enable automatic distill skill extraction"),
+          interval_days: z.number().int().positive().optional().describe("Days between distill runs (default: 30)"),
+        })
+        .optional(),
       hooks: z
         .object({
           PreToolUse: z
@@ -1666,6 +1678,7 @@ export namespace Config {
           worktree_isolation: z.boolean().optional().describe("Enable worktree isolation for subagent tasks"),
           hooks: z.boolean().optional().describe("Enable plugin hooks system (Claude Code compatible)"),
           persistent_memory: z.boolean().optional().describe("Enable cross-session persistent memory"),
+          dream_and_distill: z.boolean().optional().describe("Enable dream/distill self-improvement"),
           swarm: z.boolean().optional().describe("Enable swarm mode tool and /swarm command"),
           swarm_max_items: z
             .number()

@@ -68,6 +68,7 @@ import type { TaskPromptOps } from "@/tool/task"
 import { Flag } from "../flag/flag"
 import { BackgroundJob } from "@/background/job"
 import { TuiEvent } from "@/cli/cmd/tui/event"
+import { DreamTrigger } from "./dream-trigger"
 import { DetachedNotes } from "./detached-notes"
 
 // @ts-ignore
@@ -1703,6 +1704,13 @@ export namespace SessionPrompt {
                 modelID: lastUser.model.modelID,
                 providerID: lastUser.model.providerID,
                 history: msgs,
+              }).pipe(Effect.ignore, Effect.forkIn(scope))
+
+            if (step === 1 && !session.parentID)
+              yield* Effect.gen(function* () {
+                const dream = yield* agents.get("dream")
+                const distill = yield* agents.get("distill")
+                DreamTrigger.check({ sessionID, cfg: _cfgPerf, dream, distill })
               }).pipe(Effect.ignore, Effect.forkIn(scope))
 
             const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)

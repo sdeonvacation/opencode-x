@@ -13,6 +13,8 @@ import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
+import PROMPT_DREAM from "./prompt/dream.txt"
+import PROMPT_DISTILL from "./prompt/distill.txt"
 import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@/global"
@@ -231,6 +233,49 @@ export namespace Agent {
                 user,
               ),
               prompt: PROMPT_SUMMARY,
+            },
+            dream: {
+              name: "dream",
+              mode: "subagent",
+              native: true,
+              hidden: true,
+              prompt: PROMPT_DREAM,
+              permission: Permission.merge(
+                defaults,
+                Permission.fromConfig({
+                  "*": "deny",
+                  read: "allow",
+                  glob: "allow",
+                  grep: "allow",
+                  memory_persist: "allow",
+                }),
+                user,
+              ),
+              options: {},
+            },
+            distill: {
+              name: "distill",
+              mode: "subagent",
+              native: true,
+              hidden: true,
+              prompt: PROMPT_DISTILL,
+              permission: Permission.merge(
+                defaults,
+                Permission.fromConfig({
+                  "*": "deny",
+                  read: "allow",
+                  glob: "allow",
+                  grep: "allow",
+                  write: "allow",
+                  edit: "allow",
+                  memory_persist: "allow",
+                  external_directory: {
+                    ...Object.fromEntries(skillDirs.map((dir) => [path.join(dir, "*"), "allow"])),
+                  },
+                }),
+                user,
+              ),
+              options: {},
             },
           }
 
