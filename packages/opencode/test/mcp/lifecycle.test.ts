@@ -119,7 +119,7 @@ mock.module("@modelcontextprotocol/sdk/client/index.js", () => ({
     _state!: MockClientState
     transport: any
 
-    constructor(_opts: any) {
+    constructor(_opts: any, _clientOpts?: any) {
       clientCreateCount++
     }
 
@@ -129,6 +129,8 @@ mock.module("@modelcontextprotocol/sdk/client/index.js", () => ({
       // After successful connect, bind to the last-created client name
       this._state = getOrCreateClientState(lastCreatedClientName)
     }
+
+    setRequestHandler(_schema: unknown, _handler: (...args: any[]) => any) {}
 
     setNotificationHandler(schema: unknown, handler: (...args: any[]) => any) {
       this._state?.notificationHandlers.set(schema, handler)
