@@ -1752,6 +1752,12 @@ export namespace Config {
             .describe(
               "Write per-turn cache-behavior debug log to ~/.local/share/opencode/cache-debug/ (default: false)",
             ),
+          wire_diagnostics: z
+            .boolean()
+            .optional()
+            .describe(
+              "Enable per-request wire diagnostics JSONL logging to ~/.local/share/opencode/wire-diagnostics/ (default: false)",
+            ),
           // [fork-perf] strip-thinking
           strip_thinking_text: z
             .boolean()

@@ -2181,3 +2181,55 @@ This ensures the same LSP client handles requests regardless of which agent type
 - Consistent diagnostics across all agents in a session
 - Worktree isolation works without LSP overhead multiplication
 - Single TypeScript/ESLint/etc server for entire project
+
+## Wire Diagnostics
+
+Per-request LLM profiling logger. Captures request/response metrics (no content) as JSONL for debugging token usage, cache behavior, and latency.
+
+**Feature flag**: `experimental.wire_diagnostics`
+
+### Configuration
+
+```json
+{
+  "experimental": {
+    "wire_diagnostics": true
+  }
+}
+```
+
+### Output
+
+JSONL files written to `~/.local/share/opencode/wire-diagnostics/<sessionID>-<unix-ts>.jsonl`.
+
+Each line contains:
+
+- `ts`, `sessionID`, `modelID`
+- `messages.count`, `messages.byRole`, `messages.totalBytes`
+- `tools.count`, `tools.schemaBytes`
+- `providerOptions.bytes`
+- `response.inputTokens`, `response.outputTokens`, `response.cacheRead`, `response.cacheWrite`, `response.durationMs`, `response.toolCalls`
+
+No message content is logged (privacy-safe). Fire-and-forget writes with zero stream-blocking overhead.
+
+## Tool Call JSON Repair
+
+Automatic repair of truncated/malformed JSON in streaming tool call arguments. Handles common provider failures where tool args are cut off mid-stream.
+
+### Repair Capabilities
+
+- Auto-close unclosed strings, objects, arrays
+- Strip trailing commas before closers
+- Fix truncated decimals (`123.` → `123.0`)
+- Strip null bytes and control characters
+- Nested structure recovery
+
+### How It Works
+
+Wired into AI SDK's `experimental_repairToolCall` hook. When a tool call fails JSON parsing:
+
+1. Case-mismatch repair (existing) — lowercases tool name
+2. JSON repair — state-machine parser attempts to fix truncated args
+3. Fallback — routes to `invalid` tool (existing behavior)
+
+Always on, no configuration needed. Only triggers on already-failed tool calls (no risk to valid calls).

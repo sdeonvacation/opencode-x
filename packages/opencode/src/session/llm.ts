@@ -7,6 +7,7 @@ import { streamText, wrapLanguageModel, stepCountIs, type ModelMessage, type Too
 import { mergeDeep } from "remeda"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
 import { ProviderTransform } from "@/provider/transform"
+import { JsonRepair } from "@/provider/json-repair"
 import { Config } from "@/config/config"
 import { Instance } from "@/project/instance"
 import type { Agent } from "@/agent/agent"
@@ -21,6 +22,7 @@ import { Installation } from "@/installation"
 import { resolveHybridRoute } from "@/session/route-classifier"
 import { WorkflowApproval } from "./llm/workflow-approval"
 import { ReactiveCompact } from "./llm/reactive-compact" // [fork-perf] Phase 5
+import { WireDiagnostics } from "./wire-diagnostics"
 
 export namespace LLM {
   const log = Log.create({ service: "llm" })
@@ -334,7 +336,11 @@ export namespace LLM {
       sessionPermission: input.permission ?? [],
     })
 
-    return streamText({
+    // [wire-diagnostics] pre-capture
+    const diag = WireDiagnostics.open(input.sessionID, cfg)
+    const diagStart = diag ? Date.now() : 0
+
+    const result = streamText({
       allowSystemInMessages: true,
       onError(error) {
         // [fork-perf] Phase 5: log overflow errors; processor.halt() catches and sets needsCompaction
@@ -346,6 +352,7 @@ export namespace LLM {
       },
       stopWhen: input.maxSteps && input.maxSteps > 1 ? stepCountIs(input.maxSteps) : undefined,
       async experimental_repairToolCall(failed) {
+        // 1. Case-mismatch repair
         const lower = failed.toolCall.toolName.toLowerCase()
         if (lower !== failed.toolCall.toolName && tools[lower]) {
           l.info("repairing tool call", {
@@ -357,6 +364,25 @@ export namespace LLM {
             toolName: lower,
           }
         }
+
+        // 2. JSON repair for malformed arguments
+        const args = failed.toolCall.input
+        if (JsonRepair.isRepairable(args, failed.error.message)) {
+          const repaired = JsonRepair.repair(args)
+          if (repaired) {
+            l.info("repaired tool call JSON", {
+              tool: failed.toolCall.toolName,
+              originalLen: args.length,
+              repairedLen: repaired.length,
+            })
+            return {
+              ...failed.toolCall,
+              input: repaired,
+            }
+          }
+        }
+
+        // 3. Fallback: route to invalid tool
         return {
           ...failed.toolCall,
           input: JSON.stringify({
@@ -422,6 +448,43 @@ export namespace LLM {
         },
       },
     })
+
+    // [wire-diagnostics] fire-and-forget post-capture on stream completion
+    if (diag) {
+      const count = messages.length
+      const toolCount = Object.keys(visible).length
+
+      Promise.resolve(result.usage)
+        .then((usage) => {
+          // Defer serialization to async path to avoid blocking the stream
+          const role = { system: 0, user: 0, assistant: 0, tool: 0 }
+          let bytes = 0
+          for (const msg of messages) {
+            const r = msg.role as keyof typeof role
+            if (r in role) role[r]++
+            bytes += JSON.stringify(msg.content).length
+          }
+          diag.log({
+            ts: diagStart,
+            sessionID: input.sessionID,
+            modelID: model.id,
+            messages: { count, byRole: role, totalBytes: bytes },
+            tools: { count: toolCount, schemaBytes: 0 },
+            providerOptions: { bytes: 0 },
+            response: {
+              inputTokens: (usage as any).promptTokens ?? 0,
+              outputTokens: (usage as any).completionTokens ?? 0,
+              cacheRead: (usage as any).cachedInputTokens ?? 0,
+              cacheWrite: (usage as any).cachedOutputTokens ?? 0,
+              durationMs: Date.now() - diagStart,
+              toolCalls: 0,
+            },
+          })
+        })
+        .catch(() => {})
+    }
+
+    return result
   }
 
   function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "permission" | "user">) {
