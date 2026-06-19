@@ -414,7 +414,7 @@ export function Autocomplete(props: {
           props.input().deleteRange(0, 0, cursor.row, cursor.col)
           props.input().insertText(newText)
           props.input().cursorOffset = Bun.stringWidth(newText)
-          if (serverCommand.source === "hook") {
+          if (serverCommand.source === "hook" || serverCommand.hints.length === 0) {
             props.setPrompt((draft) => {
               draft.input = newText
             })
