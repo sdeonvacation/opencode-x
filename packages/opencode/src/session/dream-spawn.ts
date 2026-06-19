@@ -8,9 +8,22 @@ import { Log } from "../util/log"
 
 const log = Log.create({ service: "dream-spawn" })
 
-const MAX_CONTEXT_CHARS = 30_000
-const MAX_SESSIONS = 15
-const MAX_MESSAGES_PER_SESSION = 20
+const MAX_CONTEXT_CHARS = 100_000
+const MAX_SESSIONS = 20
+const MAX_MESSAGES_PER_SESSION = 100
+
+function extractText(msg: MessageV2.WithParts): string {
+  // Prefer message summary (compact) over full text
+  if (msg.info.role === "user" && msg.info.summary) {
+    const s = msg.info.summary
+    const parts = [s.title, s.body].filter(Boolean)
+    if (parts.length > 0) return parts.join(": ")
+  }
+  return msg.parts
+    .filter((p): p is MessageV2.TextPart => p.type === "text" && !("synthetic" in p && p.synthetic))
+    .map((p) => p.text)
+    .join("\n")
+}
 
 export function buildContext(days: number): string {
   const cutoff = Date.now() - days * AutoDream.DAY_MS
@@ -36,13 +49,10 @@ export function buildContext(days: number): string {
     const { items } = MessageV2.page({ sessionID: s.id, limit: MAX_MESSAGES_PER_SESSION })
     for (const msg of items) {
       const role = msg.info.role === "user" ? "User" : "Assistant"
-      const texts = msg.parts
-        .filter((p): p is MessageV2.TextPart => p.type === "text" && !("synthetic" in p && p.synthetic))
-        .map((p) => p.text)
-        .join("\n")
-      if (!texts) continue
+      const text = extractText(msg)
+      if (!text) continue
 
-      const truncated = texts.length > 2000 ? texts.slice(0, 2000) + "..." : texts
+      const truncated = text.length > 4000 ? text.slice(0, 4000) + "..." : text
       const entry = `**${role}**: ${truncated}\n\n`
       if (chars + entry.length > MAX_CONTEXT_CHARS) break
       out += entry
