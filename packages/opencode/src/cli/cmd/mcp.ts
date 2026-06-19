@@ -2,6 +2,7 @@ import { cmd } from "./cmd"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
+import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js"
 import * as prompts from "@clack/prompts"
 import { UI } from "../ui"
 import { MCP } from "../../mcp"
@@ -660,7 +661,7 @@ export const McpDebugCommand = cmd({
               jsonrpc: "2.0",
               method: "initialize",
               params: {
-                protocolVersion: "2024-11-05",
+                protocolVersion: LATEST_PROTOCOL_VERSION,
                 capabilities: {},
                 clientInfo: { name: "opencode-debug", version: Installation.VERSION },
               },
