@@ -1,0 +1,7 @@
+Execute a workflow script in an isolated QuickJS sandbox. Workflows orchestrate multi-agent pipelines with deterministic replay.
+
+Parameters:
+- script: Name of a workflow script (resolved from .opencode/workflows/<name>.js) or a builtin workflow name
+- args: Optional key-value arguments passed to the workflow script
+- wait: If true (default), wait for workflow completion before returning. If false, return immediately with the run ID.
+- max_concurrent_agents: Override max parallel agent hooks (default from config)

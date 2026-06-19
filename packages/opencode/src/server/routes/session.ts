@@ -26,6 +26,7 @@ import { Bus } from "../../bus"
 import { NamedError } from "@opencode-ai/util/error"
 import { Goal } from "../../goal/goal"
 import { Usage } from "../../session/usage"
+import { WorkflowRuntime } from "@/workflow/runtime"
 
 const log = Log.create({ service: "server" })
 
@@ -1234,6 +1235,38 @@ export const SessionRoutes = lazy(() =>
         const id = c.req.valid("param").sessionID
         const usage = await Usage.forSession(id)
         return c.json(usage)
+      },
+    )
+    .post(
+      "/:sessionID/workflow/start",
+      validator("param", z.object({ sessionID: SessionID.zod })),
+      validator("json", z.object({ name: z.string(), args: z.record(z.string(), z.unknown()).optional() })),
+      async (c) => {
+        const sessionID = c.req.valid("param").sessionID
+        const body = c.req.valid("json")
+        const id = await WorkflowRuntime.start({ name: body.name, args: body.args, session: sessionID })
+        return c.json({ id })
+      },
+    )
+    .get("/:sessionID/workflow/list", validator("param", z.object({ sessionID: SessionID.zod })), async (c) => {
+      const runs = WorkflowRuntime.list(c.req.valid("param").sessionID)
+      return c.json(runs)
+    })
+    .get(
+      "/:sessionID/workflow/:runID",
+      validator("param", z.object({ sessionID: SessionID.zod, runID: z.string() })),
+      async (c) => {
+        const run = WorkflowRuntime.status(c.req.valid("param").runID)
+        if (!run) return c.json({ error: "Not found" }, 404)
+        return c.json(run)
+      },
+    )
+    .post(
+      "/:sessionID/workflow/:runID/cancel",
+      validator("param", z.object({ sessionID: SessionID.zod, runID: z.string() })),
+      async (c) => {
+        WorkflowRuntime.cancel(c.req.valid("param").runID)
+        return c.json({ ok: true })
       },
     ),
 )

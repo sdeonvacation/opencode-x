@@ -1709,6 +1709,20 @@ export namespace Config {
             .max(20)
             .optional()
             .describe("Default per-swarm parallelism cap (default: 5)"),
+          workflow: z.boolean().optional().describe("Enable QuickJS sandboxed workflow engine"),
+          workflow_max_concurrent_agents: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max concurrent agent hooks per workflow (default: 5)"),
+          workflow_agent_timeout_ms: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Per-agent timeout in ms within workflow (default: 300000)"),
+          workflow_max_depth: z.number().int().positive().optional().describe("Max nested workflow depth (default: 3)"),
           multi_step: z
             .boolean()
             .optional()

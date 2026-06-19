@@ -5,6 +5,7 @@ import type { UpgradeWebSocket } from "hono/ws"
 import z from "zod"
 import { createHash } from "node:crypto"
 import * as fs from "node:fs/promises"
+import path from "path"
 import { Log } from "../util/log"
 import { Format } from "../format"
 import { TuiRoutes } from "./routes/tui"
@@ -61,6 +62,44 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
     .route("/", EventRoutes())
     .route("/mcp", McpRoutes())
     .route("/tui", TuiRoutes())
+    .post(
+      "/workflow/create",
+      validator("json", z.object({ name: z.string(), description: z.string(), steps: z.array(z.string()) })),
+      async (c) => {
+        const { name, description, steps } = c.req.valid("json")
+        if (!/^[a-zA-Z0-9_-]+$/.test(name)) return c.json({ error: "Invalid name" }, 400)
+        const phases = steps.map((s, i) => {
+          const phase = i === 0 ? "start" : `step-${i + 1}`
+          return `await phase("${phase}")\nawait agent("${s}", {\n  prompt: "Execute ${s} step"\n})`
+        })
+        const script = [
+          "/// meta",
+          `/// name: "${name}"`,
+          `/// description: "${description}"`,
+          `/// max_agents: ${steps.length}`,
+          "/// end meta",
+          "",
+          ...phases.flatMap((p) => [p, ""]),
+          `log("info", "${name} complete")`,
+          "",
+        ].join("\n")
+        const dir = path.join(Instance.directory, ".opencode", "workflows")
+        await fs.mkdir(dir, { recursive: true })
+        await fs.writeFile(path.join(dir, `${name}.js`), script)
+        return c.json({ path: path.join(dir, `${name}.js`) })
+      },
+    )
+    .get("/workflow/scripts", async (c) => {
+      const scripts: string[] = []
+      const dirs = [path.join(Instance.directory, ".opencode", "workflows"), path.join(Global.Path.config, "workflows")]
+      for (const dir of dirs) {
+        try {
+          const entries = await fs.readdir(dir)
+          for (const e of entries) if (e.endsWith(".js")) scripts.push(e.replace(/\.js$/, ""))
+        } catch {}
+      }
+      return c.json([...new Set(scripts)])
+    })
     .post(
       "/instance/dispose",
       describeRoute({
@@ -290,7 +329,12 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
         const match = embeddedWebUI[path.replace(/^\//, "")] ?? embeddedWebUI["index.html"] ?? null
         if (!match) return c.json({ error: "Not Found" }, 404)
 
-        if (await fs.access(match).then(() => true, () => false)) {
+        if (
+          await fs.access(match).then(
+            () => true,
+            () => false,
+          )
+        ) {
           const mime = getMimeType(match) ?? "text/plain"
           c.header("Content-Type", mime)
           if (mime.startsWith("text/html")) {

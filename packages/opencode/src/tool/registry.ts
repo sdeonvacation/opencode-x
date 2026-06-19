@@ -49,6 +49,7 @@ import { BackgroundJob } from "@/background/job"
 import { GoalCompleteTool } from "./goal-complete"
 import { MemoryPersistTool } from "./memory-persist"
 import { SwarmTool } from "./swarm"
+import { WorkflowTool } from "./workflow"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -195,6 +196,7 @@ export namespace ToolRegistry {
           ...(cfg.experimental?.goal_system !== false ? [GoalCompleteTool] : []),
           ...(cfg.experimental?.persistent_memory !== false ? [MemoryPersistTool] : []),
           ...(cfg.experimental?.swarm !== false ? [swarm] : []),
+          ...(cfg.experimental?.workflow !== false ? [WorkflowTool] : []),
           ...s.custom,
         ]
       })

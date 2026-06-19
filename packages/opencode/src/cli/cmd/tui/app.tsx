@@ -8,6 +8,7 @@ import { createGoalCommand } from "@tui/command/goal-command"
 import { createWorktreeCommand } from "@tui/command/worktree-command"
 import { createConfigCommand } from "@tui/command/config-command"
 import { createUsageCommand } from "@tui/command/usage-command"
+import { createWorkflowCommand } from "@tui/command/workflow-command"
 import { useTerminalTitle } from "@tui/component/terminal-title"
 import { RouteProvider, useRoute } from "@tui/context/route"
 import {
@@ -65,6 +66,7 @@ import { TuiConfigProvider, useTuiConfig } from "./context/tui-config"
 import { TuiConfig } from "@/config/tui"
 import { createTuiApi, TuiPluginRuntime, type RouteMap } from "./plugin"
 import { EditorContextProvider } from "./context/editor"
+import { WorkflowProvider } from "./context/workflow"
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
@@ -141,27 +143,29 @@ export function tui(input: {
                       >
                         <ProjectProvider>
                           <SyncProvider>
-                            <ThemeProvider mode={mode}>
-                              <LocalProvider>
-                                <KeybindProvider>
-                                  <PromptStashProvider>
-                                    <DialogProvider>
-                                      <CommandProvider>
-                                        <FrecencyProvider>
-                                          <PromptHistoryProvider>
-                                            <PromptRefProvider>
-                                              <EditorContextProvider>
-                                                <App onSnapshot={input.onSnapshot} />
-                                              </EditorContextProvider>
-                                            </PromptRefProvider>
-                                          </PromptHistoryProvider>
-                                        </FrecencyProvider>
-                                      </CommandProvider>
-                                    </DialogProvider>
-                                  </PromptStashProvider>
-                                </KeybindProvider>
-                              </LocalProvider>
-                            </ThemeProvider>
+                            <WorkflowProvider>
+                              <ThemeProvider mode={mode}>
+                                <LocalProvider>
+                                  <KeybindProvider>
+                                    <PromptStashProvider>
+                                      <DialogProvider>
+                                        <CommandProvider>
+                                          <FrecencyProvider>
+                                            <PromptHistoryProvider>
+                                              <PromptRefProvider>
+                                                <EditorContextProvider>
+                                                  <App onSnapshot={input.onSnapshot} />
+                                                </EditorContextProvider>
+                                              </PromptRefProvider>
+                                            </PromptHistoryProvider>
+                                          </FrecencyProvider>
+                                        </CommandProvider>
+                                      </DialogProvider>
+                                    </PromptStashProvider>
+                                  </KeybindProvider>
+                                </LocalProvider>
+                              </ThemeProvider>
+                            </WorkflowProvider>
                           </SyncProvider>
                         </ProjectProvider>
                       </SDKProvider>
@@ -573,9 +577,10 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       category: "System",
     },
     createGoalCommand({ dialog, sdk, toast, route }),
-    createWorktreeCommand({ dialog, sdk, toast, sync }),
+    createWorktreeCommand({ dialog, sdk, toast }),
     createConfigCommand({ sdk: { url: sdk.url, fetch: sdk.fetch }, toast, dialog }),
     createUsageCommand({ sdk: { url: sdk.url, fetch: sdk.fetch }, toast, dialog, route }),
+    createWorkflowCommand({ dialog, toast, sdk: { url: sdk.url, fetch: sdk.fetch }, route }),
     {
       title: "Exit the app",
       value: "app.exit",
