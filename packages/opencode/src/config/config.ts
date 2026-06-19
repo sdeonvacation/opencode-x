@@ -1690,6 +1690,17 @@ export namespace Config {
             .boolean()
             .optional()
             .describe("Split system prompt into cached/dynamic sections for improved provider caching"),
+          deep_research: z.boolean().optional().describe("Enable deep research workflow tool and /research command"),
+          deep_research_tunables: z
+            .object({
+              jury_size: z.number().int().min(1).max(5).optional(),
+              reject_quorum: z.number().int().min(1).optional(),
+              source_budget: z.number().int().min(1).max(30).optional(),
+              fact_cap: z.number().int().min(1).max(50).optional(),
+              phase_timeout_ms: z.number().int().positive().optional(),
+            })
+            .optional()
+            .describe("Override deep research tunables"),
           goal_system: z.boolean().optional().describe("Enable autonomous goal system with /goal command"),
           worktree_isolation: z.boolean().optional().describe("Enable worktree isolation for subagent tasks"),
           hooks: z.boolean().optional().describe("Enable plugin hooks system (Claude Code compatible)"),

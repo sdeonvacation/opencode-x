@@ -49,6 +49,7 @@ import { BackgroundJob } from "@/background/job"
 import { GoalCompleteTool } from "./goal-complete"
 import { MemoryPersistTool } from "./memory-persist"
 import { SwarmTool } from "./swarm"
+import { ResearchTool } from "./research"
 import { WorkflowTool } from "./workflow"
 
 export namespace ToolRegistry {
@@ -107,6 +108,7 @@ export namespace ToolRegistry {
       const plan = yield* PlanExitTool
       const webfetch = yield* WebFetchTool
       const websearch = yield* WebSearchTool
+      const research = yield* ResearchTool
       const swarm = yield* SwarmTool
 
       const state = yield* InstanceState.make<State>(
@@ -196,6 +198,7 @@ export namespace ToolRegistry {
           ...(cfg.experimental?.goal_system !== false ? [GoalCompleteTool] : []),
           ...(cfg.experimental?.persistent_memory !== false ? [MemoryPersistTool] : []),
           ...(cfg.experimental?.swarm !== false ? [swarm] : []),
+          ...(cfg.experimental?.deep_research !== false ? [research] : []),
           ...(cfg.experimental?.workflow !== false ? [WorkflowTool] : []),
           ...s.custom,
         ]

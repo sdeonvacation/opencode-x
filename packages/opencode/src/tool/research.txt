@@ -1,0 +1,14 @@
+Deep research: Investigates a question through multi-source web research with fact-checking.
+
+Performs autonomous multi-phase research:
+1. Plans diverse search queries approaching the topic from different angles
+2. Searches the web in parallel across all query angles
+3. Reads and extracts content from top sources (budget-capped)
+4. Extracts falsifiable factual claims from each source
+5. Groups and deduplicates facts
+6. Cross-checks each fact via adversarial jury (majority-reject kills a claim)
+7. Synthesizes a cited report with certainty ratings
+
+Use this tool when the user needs thorough, multi-source research with fact verification. Returns a structured report with citations, confidence ratings, and statistics about the research process.
+
+The research process may take 1-3 minutes depending on the breadth of the question.
