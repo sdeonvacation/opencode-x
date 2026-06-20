@@ -10,19 +10,12 @@ import { ModelID, ProviderID } from "../provider/schema"
 import { SessionPrompt } from "../session/prompt"
 import { Config } from "../config/config"
 import { Effect } from "effect"
-import { acquire, release } from "../orchestration/concurrency"
 import { OrchestrationEvent } from "../orchestration/events"
-import { create as createGuard } from "../orchestration/tool-guard"
-import { withTimeout } from "@/util/timeout"
 import { spawnSubagent } from "../orchestration/task-spawn"
 import { resolveTaskModel } from "../orchestration/task-model-resolver"
-import { BackgroundJob } from "@/background/job"
-import { Flag } from "@/flag/flag"
-import { Log } from "@/util/log"
-import { TuiEvent } from "@/cli/cmd/tui/event"
-import { makeRuntime } from "@/effect/run-service"
 import { Instance } from "@/project/instance"
-import { isolatedRun } from "../orchestration/isolation"
+import { createExecutor } from "../orchestration/factory"
+import type { ExecuteResult } from "../orchestration/executor"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): void
@@ -33,7 +26,7 @@ export interface TaskPromptOps {
 const id = "task"
 const SUBAGENT_TIMEOUT = 1_800_000
 
-const baseParameters = z.object({
+export const parameters = z.object({
   description: z.string().describe("A short (3-5 words) description of the task"),
   prompt: z.string().describe("The task for the agent to perform"),
   subagent_type: z.string().describe("The type of specialized agent to use for this task"),
@@ -55,9 +48,6 @@ const baseParameters = z.object({
       "Run subagent in an isolated git worktree. Use when multiple subagents run in parallel and may edit overlapping files. Each gets a private copy of the repo; changes are captured as a patch and applied back sequentially. Not needed for read-only tasks or when only one subagent writes at a time. NEVER use for sequential fixes to files already modified by a prior task — patch-back will conflict.",
     )
     .optional(),
-})
-
-export const parameters = baseParameters.extend({
   background: z
     .boolean()
     .describe("When true, launch the subagent in the background and return immediately")
@@ -96,19 +86,16 @@ function backgroundUpdateOutput(sessionID: SessionID) {
   ].join("\n")
 }
 
-function errorText(error: unknown) {
-  if (error instanceof Error) return error.message
-  return String(error)
+function formatOutput(result: ExecuteResult): string {
+  switch (result.tag) {
+    case "foreground":
+      return output(result.sessionID, result.text)
+    case "background":
+      return backgroundOutput(result.sessionID)
+    case "background_update":
+      return backgroundUpdateOutput(result.sessionID)
+  }
 }
-
-function formatIsolation(result: Awaited<ReturnType<typeof isolatedRun>>): string {
-  if (result.patch.status === "applied") return result.output + "\n\n[ISOLATION] Changes applied to parent worktree."
-  if (result.patch.status === "conflict")
-    return result.output + `\n\n[ISOLATION] Patch conflict on branch ${result.patch.branch}: ${result.patch.message}`
-  return result.output
-}
-
-const bgRuntime = makeRuntime(BackgroundJob.Service, BackgroundJob.defaultLayer)
 
 export const TaskTool = Tool.defineEffect(
   id,
@@ -116,15 +103,12 @@ export const TaskTool = Tool.defineEffect(
     return {
       parallelSafe: true,
       description: DESCRIPTION,
-      parameters: Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS ? parameters : baseParameters,
+      parameters,
       async execute(params: z.infer<typeof parameters>, ctx: Tool.Context) {
         const cfg = await Config.get()
-        const runInBackground = params.background === true
+        const mode = params.background ? "background" : "foreground"
 
-        if (runInBackground && !Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS) {
-          throw new Error("Background subagents require OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true")
-        }
-
+        // Permission check
         if (!ctx.extra?.bypassAgentCheck) {
           await ctx.ask({
             permission: id,
@@ -139,6 +123,7 @@ export const TaskTool = Tool.defineEffect(
           })
         }
 
+        // Agent resolution
         const next = await Agent.get(params.subagent_type)
         if (!next) {
           throw new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`)
@@ -147,6 +132,7 @@ export const TaskTool = Tool.defineEffect(
         const canTask = next.permission.some((rule) => rule.permission === id)
         const canTodo = next.permission.some((rule) => rule.permission === "todowrite")
 
+        // Spawn subagent session
         const existing = params.task_id
           ? await Session.get(SessionID.make(params.task_id)).catch(() => undefined)
           : undefined
@@ -165,6 +151,7 @@ export const TaskTool = Tool.defineEffect(
 
         const nextSession = subagent.session
 
+        // Model resolution
         const msg = MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID })
         if (msg.info.role !== "assistant") throw new Error("Not an assistant message")
         const parentVariant = msg.info.variant
@@ -183,6 +170,7 @@ export const TaskTool = Tool.defineEffect(
             promptParts.unshift({ type: "text", text: context })
           }
         }
+
         const finalModel = resolveTaskModel({
           prompt: params.prompt,
           subagentType: params.subagent_type,
@@ -192,17 +180,15 @@ export const TaskTool = Tool.defineEffect(
           ultraworkModel: cfg.experimental?.ultrawork_model,
           fallback: model,
         })
+
         const concurrencyKey = `${finalModel.providerID}:${finalModel.modelID}`
         const concurrencyLimit = cfg.experimental?.model_concurrency?.[concurrencyKey] ?? 5
-        const guard = createGuard({
-          sessionID: String(ctx.sessionID),
-          threshold: cfg.experimental?.loop_detector_threshold ?? 5,
-        })
+        const timeout = cfg.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT
 
         const metadata = {
           sessionId: nextSession.id,
           model: finalModel,
-          ...(runInBackground ? { background: true } : {}),
+          ...(mode === "background" ? { background: true } : {}),
         }
 
         ctx.metadata({
@@ -210,248 +196,103 @@ export const TaskTool = Tool.defineEffect(
           metadata,
         })
 
-        // --- Background execution path ---
-        if (runInBackground) {
-          const runTask = async (): Promise<string> => {
-            await guard.before({
-              toolName: "task",
-              input: {
-                prompt: params.prompt,
-                subagent_type: params.subagent_type,
-                task_category: params.task_category,
-                use_ultrawork: params.use_ultrawork,
-                task_id: params.task_id,
-                command: params.command,
-              },
-            })
-            await acquire(concurrencyKey, concurrencyLimit)
-            try {
-              const timeout = cfg.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT
-              const result = await withTimeout(
-                SessionPrompt.prompt({
-                  messageID,
-                  sessionID: nextSession.id,
-                  model: {
-                    modelID: ModelID.make(finalModel.modelID),
-                    providerID: ProviderID.make(finalModel.providerID),
-                  },
-                  variant: parentVariant,
-                  agent: next.name,
-                  tools: {
-                    ...(canTodo ? {} : { todowrite: false }),
-                    ...(canTask ? {} : { task: false }),
-                    ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
-                    goal_complete: false,
-                  },
-                  parts: promptParts,
-                }),
-                timeout,
-              ).catch((err) => {
-                if (err instanceof Error && err.message.includes("Operation timed out")) {
-                  SessionPrompt.cancel(nextSession.id)
-                  throw new Error(`Subagent timed out after ${timeout}ms`)
-                }
-                throw err
-              })
-
-              return result.parts.findLast((item) => item.type === "text")?.text ?? ""
-            } finally {
-              release(concurrencyKey)
-            }
-          }
-
-          const log = Log.create({ service: "task.background" })
-
-          const inject = Instance.bind(async (state: "completed" | "error", text: string) => {
-            try {
-              await Bus.publish(TuiEvent.BackgroundTaskUpdate, {
-                sessionID: ctx.sessionID,
-                taskID: nextSession.id,
-                title: params.description,
-                state,
-              })
-              await Bus.publish(TuiEvent.ToastShow, {
-                title: state === "completed" ? "Background task complete" : "Background task failed",
-                message:
-                  state === "completed"
-                    ? `Background task "${params.description}" finished.`
-                    : `Background task "${params.description}" failed.`,
-                variant: state === "completed" ? "success" : "error",
-                duration: 5000,
-              })
-            } catch (err) {
-              log.error("inject failed", {
-                sessionID: ctx.sessionID,
-                state,
-                error: err instanceof Error ? err.message : String(err),
-              })
-            }
-          })
-
-          const shouldIsolate =
-            params.isolation && cfg.experimental?.worktree_isolation && Instance.project.vcs === "git"
-
-          // Bind to parent Instance context — BackgroundJob fibers lose Node.js ALS
-          const executeTask = Instance.bind(async (): Promise<string> => {
-            if (shouldIsolate) return formatIsolation(await isolatedRun({ sessionID: nextSession.id, run: runTask }))
-            return runTask()
-          })
-
-          const makeRun = () =>
-            Effect.tryPromise({
-              try: () => executeTask(),
-              catch: (err) => err,
-            }).pipe(
-              Effect.tap((text) => Effect.promise(() => inject("completed", text)).pipe(Effect.ignore)),
-              Effect.catch((cause: unknown) =>
-                Effect.gen(function* () {
-                  const err = errorText(cause)
-                  yield* Effect.promise(() => inject("error", err)).pipe(Effect.ignore)
-                  return yield* Effect.fail(cause)
-                }),
-              ),
-            )
-
-          // If job already running and we have a task_id, extend instead of starting new
-          const job = await bgRuntime.runPromise((svc) => svc.get(nextSession.id))
-          if (job?.status === "running" && params.task_id) {
-            const extended = await bgRuntime.runPromise((svc) => svc.extend({ id: nextSession.id, run: makeRun() }))
-            if (extended) {
-              if (subagent.spawned) subagent.spawnInfo.release()
-              return {
-                title: params.description,
-                metadata: { ...metadata, background: true, jobId: nextSession.id },
-                output: backgroundUpdateOutput(nextSession.id),
-              }
-            }
-          }
-
-          await bgRuntime.runPromise((svc) =>
-            svc.start({
-              id: nextSession.id,
-              type: id,
-              title: params.description,
-              metadata,
-              run: makeRun(),
-            }),
-          )
-
-          await Bus.publish(TuiEvent.BackgroundTaskUpdate, {
-            sessionID: ctx.sessionID,
-            taskID: nextSession.id,
-            title: params.description,
-            state: "running",
-          })
-
-          if (subagent.spawned) subagent.spawnInfo.release()
-
-          return {
-            title: params.description,
-            metadata: { ...metadata, jobId: nextSession.id },
-            output: backgroundOutput(nextSession.id),
-          }
+        // Build tools config
+        const tools = {
+          ...(canTodo ? {} : { todowrite: false }),
+          ...(canTask ? {} : { task: false }),
+          ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
+          goal_complete: false,
         }
 
-        // --- Foreground execution path ---
+        // Guard input for loop detection
+        const guardInput = {
+          toolName: "task",
+          input: {
+            prompt: params.prompt,
+            subagent_type: params.subagent_type,
+            task_category: params.task_category,
+            use_ultrawork: params.use_ultrawork,
+            task_id: params.task_id,
+            command: params.command,
+          },
+        }
+
+        const shouldIsolate = params.isolation && cfg.experimental?.worktree_isolation && Instance.project.vcs === "git"
+
+        // Create executor with middleware chain
+        const executor = createExecutor({
+          mode,
+          isolation: !!shouldIsolate,
+          vcs: Instance.project.vcs,
+          worktreeEnabled: cfg.experimental?.worktree_isolation,
+          guardInput,
+          backgroundMeta:
+            mode === "background"
+              ? {
+                  parentSessionID: ctx.sessionID,
+                  description: params.description,
+                  taskID: params.task_id,
+                }
+              : undefined,
+        })
+
+        // Abort handling for foreground
         function cancel() {
           SessionPrompt.cancel(nextSession.id)
         }
+        if (mode === "foreground") {
+          ctx.abort.addEventListener("abort", cancel)
+        }
 
-        ctx.abort.addEventListener("abort", cancel)
         try {
-          await guard.before({
-            toolName: "task",
-            input: {
-              prompt: params.prompt,
-              subagent_type: params.subagent_type,
-              task_category: params.task_category,
-              use_ultrawork: params.use_ultrawork,
-              task_id: params.task_id,
-              command: params.command,
-            },
-          })
-
-          const timeout = cfg.experimental?.subagent_timeout ?? SUBAGENT_TIMEOUT
-          const promptArgs = {
-            messageID,
+          const result = await executor.execute({
             sessionID: nextSession.id,
+            messageID,
             model: {
               modelID: ModelID.make(finalModel.modelID),
               providerID: ProviderID.make(finalModel.providerID),
             },
             variant: parentVariant,
             agent: next.name,
-            tools: {
-              ...(canTodo ? {} : { todowrite: false }),
-              ...(canTask ? {} : { task: false }),
-              ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
-              goal_complete: false,
-            },
+            tools,
             parts: promptParts,
-          }
+            timeout,
+            concurrency: { key: concurrencyKey, limit: concurrencyLimit },
+            guard: {
+              sessionID: String(ctx.sessionID),
+              threshold: cfg.experimental?.loop_detector_threshold ?? 5,
+            },
+            abort: mode === "foreground" ? ctx.abort : undefined,
+            isolation: !!shouldIsolate,
+            metadata: {
+              parentSessionID: ctx.sessionID,
+              description: params.description,
+              agentName: next.name,
+            },
+          })
 
-          if (params.isolation && cfg.experimental?.worktree_isolation && Instance.project.vcs === "git") {
-            const isolated = await isolatedRun({
-              sessionID: nextSession.id,
-              run: async () => {
-                await acquire(concurrencyKey, concurrencyLimit, ctx.abort)
-                try {
-                  const res = await withTimeout(SessionPrompt.prompt(promptArgs), timeout).catch((err) => {
-                    if (err instanceof Error && err.message.includes("Operation timed out")) {
-                      cancel()
-                      throw new Error(`Subagent timed out after ${timeout}ms`)
-                    }
-                    throw err
-                  })
-                  return res.parts.findLast((item) => item.type === "text")?.text ?? ""
-                } finally {
-                  release(concurrencyKey)
-                }
-              },
-            })
-
+          // Publish Complete event for foreground modes
+          if (result.tag === "foreground") {
             await Bus.publish(OrchestrationEvent.Complete, {
               sessionID: nextSession.id,
               parentSessionID: ctx.sessionID,
               agent: next.name,
               durationMs: 0,
             })
-
-            return {
-              title: params.description,
-              metadata,
-              output: output(nextSession.id, formatIsolation(isolated)),
-            }
           }
-
-          await acquire(concurrencyKey, concurrencyLimit, ctx.abort)
-          let result: Awaited<ReturnType<typeof SessionPrompt.prompt>>
-          try {
-            result = await withTimeout(SessionPrompt.prompt(promptArgs), timeout).catch((err) => {
-              if (err instanceof Error && err.message.includes("Operation timed out")) {
-                cancel()
-                throw new Error(`Subagent timed out after ${timeout}ms`)
-              }
-              throw err
-            })
-          } finally {
-            release(concurrencyKey)
-          }
-
-          await Bus.publish(OrchestrationEvent.Complete, {
-            sessionID: nextSession.id,
-            parentSessionID: ctx.sessionID,
-            agent: next.name,
-            durationMs: 0,
-          })
 
           return {
             title: params.description,
-            metadata,
-            output: output(nextSession.id, result.parts.findLast((item) => item.type === "text")?.text ?? ""),
+            metadata: {
+              ...metadata,
+              ...(result.tag === "background" || result.tag === "background_update" ? { jobId: nextSession.id } : {}),
+            },
+            output: formatOutput(result),
           }
         } finally {
-          ctx.abort.removeEventListener("abort", cancel)
+          if (mode === "foreground") {
+            ctx.abort.removeEventListener("abort", cancel)
+          }
           if (subagent.spawned) subagent.spawnInfo.release()
         }
       },

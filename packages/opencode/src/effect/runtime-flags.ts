@@ -32,9 +32,7 @@ export class Service extends ConfigService.Service<Service>()("@opencode/Runtime
   }).pipe(Config.map((flags) => flags.enabled || flags.legacy)),
   enableExperimentalModels: bool("OPENCODE_ENABLE_EXPERIMENTAL_MODELS"),
   enableQuestionTool: bool("OPENCODE_ENABLE_QUESTION_TOOL"),
-  experimentalBackgroundSubagents: Config.boolean("OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS").pipe(
-    Config.withDefault(true),
-  ),
+
   experimentalLspTool: enabledByExperimental("OPENCODE_EXPERIMENTAL_LSP_TOOL"),
   experimentalPlanMode: enabledByExperimental("OPENCODE_EXPERIMENTAL_PLAN_MODE"),
   experimentalWorkspaces: enabledByExperimental("OPENCODE_EXPERIMENTAL_WORKSPACES"),

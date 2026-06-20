@@ -1,33 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test"
-import { Effect, Layer } from "effect"
-import { Flag } from "../../src/flag/flag"
-import { SessionRunState } from "../../src/session/run-state"
-import { Session } from "../../src/session"
-import { SessionID } from "../../src/session/schema"
-import { SessionPrompt } from "../../src/session/prompt"
-import { Bus } from "../../src/bus"
-import { SessionStatus } from "../../src/session/status"
+import { describe, expect, test } from "bun:test"
 import { Log } from "../../src/util/log"
 
 Log.init({ print: false })
 
-const originalFlag = Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS
-
-afterEach(() => {
-  // @ts-expect-error override readonly flag for testing
-  Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = originalFlag
-})
-
 describe("SessionPrompt.background count", () => {
-  test("returns 0 when flag disabled", () => {
-    // @ts-expect-error override readonly flag for testing
-    Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = false
-
-    // The background function returns 0 immediately when flag is off
-    // We verify this by checking the logic path
-    expect(Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS).toBe(false)
-  })
-
   test("route response schema includes children field", async () => {
     const src = await Bun.file(new URL("../../src/server/routes/session.ts", import.meta.url)).text()
     const start = src.indexOf('"/:sessionID/background"')

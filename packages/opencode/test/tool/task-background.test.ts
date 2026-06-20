@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
@@ -6,7 +6,6 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, SessionID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Config } from "../../src/config/config"
-import { Flag } from "../../src/flag/flag"
 import { TaskTool, parameters, type TaskPromptOps } from "../../src/tool/task"
 import { tmpdir } from "../fixture/fixture"
 import { Effect, Layer } from "effect"
@@ -24,18 +23,8 @@ const ref = {
   modelID: ModelID.make("test-model"),
 }
 
-const originalFlag = Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS
-
-afterEach(() => {
-  // @ts-expect-error override readonly flag for testing
-  Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = originalFlag
-})
-
 describe("tool.task background", () => {
-  test("parameters schema includes background field when flag enabled", async () => {
-    // @ts-expect-error override readonly flag for testing
-    Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = true
-
+  test("parameters schema includes background field", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
@@ -46,76 +35,9 @@ describe("tool.task background", () => {
     })
   })
 
-  test("parameters schema excludes background field when flag disabled", async () => {
-    // @ts-expect-error override readonly flag for testing
-    Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = false
-
-    await using tmp = await tmpdir()
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const tool = await initTask()
-        expect(tool.parameters.shape).not.toHaveProperty("background")
-      },
-    })
-  })
-
-  test("background=true throws when flag is disabled", async () => {
-    // @ts-expect-error override readonly flag for testing
-    Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = false
-
-    await using tmp = await tmpdir()
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const sessionID = SessionID.make("ses_bg_disabled")
-        const messageID = MessageID.make("msg_bg_disabled")
-
-        const get = spyOn(Session, "get").mockResolvedValue({ id: sessionID } as any)
-        const create = spyOn(Session, "create").mockResolvedValue({ id: SessionID.make("ses_sub_bg") } as any)
-        const msg = spyOn(MessageV2, "get").mockReturnValue({
-          info: { role: "assistant", modelID: ref.modelID, providerID: ref.providerID },
-        } as any)
-        const parts = spyOn(SessionPrompt, "resolvePromptParts").mockResolvedValue([{ type: "text", text: "work" }])
-
-        try {
-          const tool = await initTask()
-          await expect(
-            tool.execute(
-              {
-                description: "bg task",
-                prompt: "do work",
-                subagent_type: "general",
-                background: true,
-              } as any,
-              {
-                sessionID,
-                messageID,
-                agent: "build",
-                abort: new AbortController().signal,
-                messages: [],
-                metadata: () => {},
-                ask: async () => {},
-                extra: { bypassAgentCheck: true },
-              },
-            ),
-          ).rejects.toThrow("Background subagents require OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true")
-        } finally {
-          get.mockRestore()
-          create.mockRestore()
-          msg.mockRestore()
-          parts.mockRestore()
-        }
-      },
-    })
-  })
-
   test("background=true no longer requires promptOps", async () => {
     // After simplification, background tasks don't need promptOps
     // They just emit events and show toasts on completion
-    // @ts-expect-error override readonly flag for testing
-    Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = true
-
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
@@ -252,9 +174,6 @@ describe("tool.task background", () => {
   })
 
   test("metadata includes background:true when background param set", async () => {
-    // @ts-expect-error override readonly flag for testing
-    Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = true
-
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,

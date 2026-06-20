@@ -19,7 +19,6 @@ describe("RuntimeFlags", () => {
     expect(flags.enableParallel).toBe(false)
     expect(flags.enableExperimentalModels).toBe(false)
     expect(flags.enableQuestionTool).toBe(false)
-    expect(flags.experimentalBackgroundSubagents).toBe(true)
     expect(flags.experimentalLspTool).toBe(false)
     expect(flags.experimentalPlanMode).toBe(false)
     expect(flags.experimentalWorkspaces).toBe(false)
@@ -65,7 +64,6 @@ describe("RuntimeFlags", () => {
       enableParallel: false,
       enableExperimentalModels: false,
       enableQuestionTool: false,
-      experimentalBackgroundSubagents: false,
       experimentalLspTool: false,
       experimentalPlanMode: false,
       experimentalWorkspaces: false,
@@ -93,6 +91,5 @@ describe("RuntimeFlags", () => {
     expect(flags.experimentalWorkspaces).toBe(false)
     // other experimental flags still inherit umbrella=true
     expect(flags.experimentalPlanMode).toBe(true)
-    expect(flags.experimentalBackgroundSubagents).toBe(true)
   })
 })

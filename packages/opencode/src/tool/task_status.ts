@@ -4,7 +4,7 @@ import { BackgroundJob } from "@/background/job"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionID } from "@/session/schema"
 import { SessionStatus } from "@/session/status"
-import { Flag } from "@/flag/flag"
+
 import { makeRuntime } from "@/effect/run-service"
 import z from "zod"
 
@@ -46,10 +46,6 @@ export const TaskStatusTool: Tool.Info & { id: "task_status" } = {
     description: DESCRIPTION,
     parameters,
     async execute(params: z.infer<typeof parameters>, _ctx: Tool.Context) {
-      if (!Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS) {
-        throw new Error("task_status requires OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true")
-      }
-
       const taskID = SessionID.make(params.task_id)
       const timeout = params.timeout_ms ?? DEFAULT_TIMEOUT
 

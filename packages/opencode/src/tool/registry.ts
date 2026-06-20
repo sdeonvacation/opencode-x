@@ -187,7 +187,7 @@ export namespace ToolRegistry {
           EditTool,
           WriteTool,
           task,
-          ...(Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS ? [TaskStatusTool] : []),
+          TaskStatusTool,
           webfetch,
           todo,
           websearch,

@@ -1,7 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Instance } from "../../src/project/instance"
 import { MessageID, SessionID } from "../../src/session/schema"
-import { Flag } from "../../src/flag/flag"
 import { TaskStatusTool } from "../../src/tool/task_status"
 import { BackgroundJob } from "../../src/background/job"
 import { makeRuntime } from "../../src/effect/run-service"
@@ -9,18 +8,9 @@ import { Effect } from "effect"
 import { tmpdir } from "../fixture/fixture"
 
 const bgRuntime = makeRuntime(BackgroundJob.Service, BackgroundJob.defaultLayer)
-const originalFlag = Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS
-
-afterEach(() => {
-  // @ts-expect-error override readonly flag for testing
-  Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = originalFlag
-})
 
 describe("tool.task_status", () => {
   test("returns completed background job output", async () => {
-    // @ts-expect-error override readonly flag for testing
-    Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = true
-
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
@@ -54,9 +44,6 @@ describe("tool.task_status", () => {
   })
 
   test("wait=true times out while the background job is running", async () => {
-    // @ts-expect-error override readonly flag for testing
-    Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = true
-
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,

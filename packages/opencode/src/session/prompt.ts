@@ -65,9 +65,6 @@ import { CacheDebugLog } from "./cache-debug-log"
 import { Instance } from "@/project/instance"
 import type { TaskPromptOps } from "@/tool/task"
 
-import { Flag } from "../flag/flag"
-import { BackgroundJob } from "@/background/job"
-import { TuiEvent } from "@/cli/cmd/tui/event"
 import { DreamTrigger } from "./dream-trigger"
 import { DetachedNotes } from "./detached-notes"
 
@@ -147,7 +144,6 @@ export namespace SessionPrompt {
 
       // fork: background-detach (#FORK) — begin
       const background = Effect.fn("SessionPrompt.background")(function* (sessionID: SessionID) {
-        if (!Flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS) return 0
         const runner = yield* state.peek(sessionID)
         if (!runner) return 0
         const st = runner.state
@@ -155,21 +151,39 @@ export namespace SessionPrompt {
 
         // Find running children
         const kids = yield* sessions.children(sessionID)
-        const running: Array<{ childID: SessionID; description: string; runner: typeof runner }> = []
-        const pending: Array<{ childID: SessionID; description: string }> = []
+        type ChildEntry = { childID: SessionID; description: string; run: Effect.Effect<string, unknown> }
+        const children: ChildEntry[] = []
         for (const child of kids) {
           if (child.time.archived) continue
           const r = yield* state.peek(child.id)
           if (r && (r.state._tag === "Running" || r.state._tag === "ShellThenRun")) {
-            running.push({ childID: child.id, description: child.title ?? child.id, runner: r })
-          } else if (!r || r.state._tag !== "Idle") {
-            // Child exists but runner not started or not yet running — still in-flight
-            pending.push({ childID: child.id, description: child.title ?? child.id })
+            // Running child — await its Deferred
+            const done = r.state._tag === "Running" ? r.state.run.done : r.state.run.done
+            const run = Deferred.await(done).pipe(
+              Effect.map((msg: any) => msg.parts.findLast((p: any) => p.type === "text")?.text ?? ""),
+            )
+            children.push({ childID: child.id, description: child.title ?? child.id, run })
+          } else if (r && r.state._tag !== "Idle") {
+            // Pending child (runner exists but not yet running) — poll until it starts
+            const run = Effect.gen(function* () {
+              let polled: typeof runner | undefined
+              for (let i = 0; i < 600; i++) {
+                polled = yield* state.peek(child.id)
+                if (polled && (polled.state._tag === "Running" || polled.state._tag === "ShellThenRun")) break
+                if (polled && polled.state._tag === "Idle") return ""
+                yield* Effect.sleep("500 millis")
+              }
+              if (!polled || (polled.state._tag !== "Running" && polled.state._tag !== "ShellThenRun")) return ""
+              const done = polled.state._tag === "Running" ? polled.state.run.done : polled.state.run.done
+              const msg = yield* Deferred.await(done)
+              const last = msg.parts.findLast((p: any) => p.type === "text") as { text: string } | undefined
+              return last?.text ?? ""
+            })
+            children.push({ childID: child.id, description: child.title ?? child.id, run })
           }
         }
 
-        const all = [...running, ...pending]
-        if (all.length === 0) return 0
+        if (children.length === 0) return 0
 
         // Get parent model/agent for auto-resume
         const msgs = MessageV2.page({ sessionID, limit: 5 })
@@ -181,198 +195,24 @@ export namespace SessionPrompt {
         const agent = lastAssist && lastAssist.info.role === "assistant" ? lastAssist.info.agent : "build"
         const variant = lastAssist && lastAssist.info.role === "assistant" ? lastAssist.info.variant : undefined
 
-        // Protect all children from cancel cascade (including pending ones)
-        for (const child of all) {
-          DetachedNotes.protect(child.childID)
-        }
-
-        // Register parent state for tracking
-        DetachedNotes.registerParent(
-          sessionID,
-          all.map((c) => ({ childID: c.childID, description: c.description })),
-          model,
-          agent,
-          variant,
-        )
-
-        // Register BackgroundJob watcher per child
-        const autoResume = Instance.bind(
-          async (parentID: SessionID, childID: SessionID, result: DetachedNotes.ChildResult) => {
-            DetachedNotes.unprotect(childID)
-            await Bus.publish(TuiEvent.BackgroundTaskUpdate, {
-              sessionID: parentID,
-              taskID: childID,
-              title: result.description,
-              state: result.state,
-            })
-            const outcome = DetachedNotes.childCompleted(parentID, childID, result)
-            if (!outcome) return
-            if (!outcome.allDone) return
-
-            // All children done — auto-resume parent with full results
-            const lines: string[] = ["[Background subagents completed]", ""]
-            for (const r of outcome.results) {
-              const tag = r.state === "completed" ? "completed" : r.state === "cancelled" ? "cancelled" : "error"
-              const content = r.result ?? r.error ?? "(no output)"
-              lines.push(`Task "${r.description}" (${tag}):`)
-              lines.push(content)
-              lines.push("")
-            }
-            lines.push(
-              "The above are results from subagents that were pushed to background. Process them and continue.",
-            )
-            const text = lines.join("\n")
-
-            await Bus.publish(TuiEvent.ToastShow, {
-              title: "Background subagents complete",
-              message: `${outcome.results.length} subagent(s) finished.`,
-              variant: "success",
-              duration: 5000,
-            })
-
-            // Auto-fire synthetic prompt to parent (hidden from TUI)
-            try {
-              await SessionPrompt.prompt({
-                sessionID: parentID,
-                model: { providerID: model.providerID, modelID: model.modelID },
-                variant,
-                agent,
-                parts: [{ type: "text", text, synthetic: true }],
-              })
-            } catch {
-              // Fallback: queue note for next manual prompt
-              DetachedNotes.queue(parentID, "completed", text)
-            }
-          },
-        )
-
-        for (const child of running) {
-          const childSt = child.runner.state
-          if (childSt._tag !== "Running" && childSt._tag !== "ShellThenRun") continue
-          const childDone = childSt._tag === "Running" ? childSt.run.done : childSt.run.done
-
-          const run = Deferred.await(childDone).pipe(
-            Effect.map((msg) => {
-              const parts = msg.parts
-              return parts.findLast((p) => p.type === "text")?.text ?? ""
-            }),
-            Effect.tap((summary) =>
-              Effect.promise(() =>
-                autoResume(sessionID, child.childID, {
-                  childID: child.childID,
-                  description: child.description,
-                  result: summary,
-                  state: "completed",
-                }),
-              ),
-            ),
-            Effect.catchCause((cause: Cause.Cause<any>) => {
-              const squashed = Cause.squash(cause)
-              const cancelled = squashed && (squashed as any)._tag === "RunnerCancelled"
-              return Effect.promise(() =>
-                autoResume(sessionID, child.childID, {
-                  childID: child.childID,
-                  description: child.description,
-                  error: cancelled ? "cancelled" : String(squashed),
-                  state: cancelled ? "cancelled" : "error",
-                }),
-              ).pipe(Effect.as(""))
-            }),
-          )
-
-          yield* Effect.promise(() =>
-            bgRuntime.runPromise((svc) =>
-              svc.start({
-                id: child.childID,
-                type: "session.background",
-                title: child.description,
-                metadata: { sessionID, childID: child.childID },
-                run,
-              }),
-            ),
-          )
-        }
-
-        // Monitor pending children (runner not started yet) — poll until runner appears
-        for (const child of pending) {
-          const run = Effect.gen(function* () {
-            // Poll until runner starts (500ms intervals, max 5 min)
-            let r: typeof runner | undefined
-            for (let i = 0; i < 600; i++) {
-              r = yield* state.peek(child.childID)
-              if (r && (r.state._tag === "Running" || r.state._tag === "ShellThenRun")) break
-              if (r && r.state._tag === "Idle") return ""
-              yield* Effect.sleep("500 millis")
-            }
-            if (!r || (r.state._tag !== "Running" && r.state._tag !== "ShellThenRun")) return ""
-            const done = r.state._tag === "Running" ? r.state.run.done : r.state.run.done
-            const msg = yield* Deferred.await(done)
-            return msg.parts.findLast((p) => p.type === "text")?.text ?? ""
-          }).pipe(
-            Effect.tap((summary) =>
-              Effect.promise(() =>
-                autoResume(sessionID, child.childID, {
-                  childID: child.childID,
-                  description: child.description,
-                  result: summary,
-                  state: "completed",
-                }),
-              ),
-            ),
-            Effect.catchCause((cause: Cause.Cause<any>) => {
-              const squashed = Cause.squash(cause)
-              const cancelled = squashed && (squashed as any)._tag === "RunnerCancelled"
-              return Effect.promise(() =>
-                autoResume(sessionID, child.childID, {
-                  childID: child.childID,
-                  description: child.description,
-                  error: cancelled ? "cancelled" : String(squashed),
-                  state: cancelled ? "cancelled" : "error",
-                }),
-              ).pipe(Effect.as(""))
-            }),
-          )
-
-          yield* Effect.promise(() =>
-            bgRuntime.runPromise((svc) =>
-              svc.start({
-                id: child.childID,
-                type: "session.background",
-                title: child.description,
-                metadata: { sessionID, childID: child.childID },
-                run,
-              }),
-            ),
-          )
-        }
-
-        // Publish "running" events for badge counter
-        for (const child of all) {
-          yield* Effect.promise(() =>
-            Bus.publish(TuiEvent.BackgroundTaskUpdate, {
-              sessionID,
-              taskID: child.childID,
-              title: child.description,
-              state: "running",
-            }),
-          )
-        }
-
-        // Now cancel the parent's run (children are protected)
-        DetachedNotes.markDetaching(sessionID)
-        yield* state.cancel(sessionID)
-        DetachedNotes.clearDetaching(sessionID)
-
-        yield* Effect.promise(() =>
-          Bus.publish(TuiEvent.ToastShow, {
-            title: "Detached to background",
-            message: `${running.length} subagent(s) running in background.`,
-            variant: "info",
-            duration: 5000,
+        // Delegate to PushToBackgroundExecutor
+        const mod = yield* Effect.promise(() => import("@/orchestration/executor/push-to-bg"))
+        const result = yield* Effect.promise(() =>
+          mod.executePushToBackground({
+            parentSessionID: sessionID,
+            children,
+            model,
+            agent,
+            variant,
+            cancelParent: async () => {
+              DetachedNotes.markDetaching(sessionID)
+              await Effect.runPromise(state.cancel(sessionID))
+              DetachedNotes.clearDetaching(sessionID)
+            },
           }),
         )
 
-        return running.length
+        return result.count
       })
       // fork: background-detach (#FORK) — end
 
@@ -2482,10 +2322,6 @@ export namespace SessionPrompt {
     ),
   )
   const { runPromise } = makeRuntime(Service, defaultLayer)
-
-  // fork: background-detach (#FORK) — begin
-  const bgRuntime = makeRuntime(BackgroundJob.Service, BackgroundJob.defaultLayer)
-  // fork: background-detach (#FORK) — end
 
   export const PromptInput = z.object({
     sessionID: SessionID.zod,
