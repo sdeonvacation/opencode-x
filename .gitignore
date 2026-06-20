@@ -39,3 +39,4 @@ packages/opencode/src/provider/models-snapshot.js
 # Added by code-review-graph
 .code-review-graph/
 /.claude
+/.opencode
