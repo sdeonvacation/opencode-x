@@ -94,6 +94,7 @@ export function init() {
       setStore(
         produce((s) => {
           s.queue.shift()
+          if (s.queue[0]) s.queue[0].created = Date.now()
         }),
       )
     }
