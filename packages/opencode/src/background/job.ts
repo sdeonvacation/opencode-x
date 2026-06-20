@@ -233,14 +233,23 @@ export const layer = Layer.effect(
     })
 
     const wait: Interface["wait"] = Effect.fn("BackgroundJob.wait")(function* (input) {
-      const job = (yield* SynchronizedRef.get((yield* InstanceState.get(state)).jobs)).get(input.id)
+      const s = yield* InstanceState.get(state)
+      const job = (yield* SynchronizedRef.get(s.jobs)).get(input.id)
       if (!job) return { timedOut: false }
       if (job.info.status !== "running") return { info: snapshot(job), timedOut: false }
       if (input.timeout === undefined) return { info: yield* Deferred.await(job.done), timedOut: false }
       if (input.timeout <= 0) return { info: snapshot(job), timedOut: true }
-      const info = yield* Deferred.await(job.done).pipe(Effect.timeoutOption(input.timeout))
-      if (info._tag === "Some") return { info: info.value, timedOut: false }
-      return { info: snapshot(job), timedOut: true }
+      const poll = Effect.gen(function* () {
+        while (true) {
+          yield* Effect.sleep(500)
+          const current = (yield* SynchronizedRef.get(s.jobs)).get(input.id)
+          if (!current || current.info.status !== "running") return snapshot(current ?? job)
+        }
+      })
+      const result = yield* Effect.race(Deferred.await(job.done), poll).pipe(Effect.timeoutOption(input.timeout))
+      if (result._tag === "Some") return { info: result.value, timedOut: false }
+      const current = (yield* SynchronizedRef.get(s.jobs)).get(input.id)
+      return { info: current ? snapshot(current) : snapshot(job), timedOut: true }
     })
 
     const cancel: Interface["cancel"] = Effect.fn("BackgroundJob.cancel")(function* (id) {
