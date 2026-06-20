@@ -50,6 +50,20 @@ mock.module("@/config/config", () => ({
   },
 }))
 
+mock.module("@/agent/agent", () => ({
+  Agent: {
+    list: mock(() =>
+      Promise.resolve([
+        { name: "coder", mode: "primary", description: "Primary coding agent" },
+        { name: "tester", mode: "secondary", description: "Run and debug tests" },
+        { name: "debugger", mode: "secondary", description: "Debug failures" },
+      ]),
+    ),
+    get: mock(() => Promise.resolve({ name: "coder", mode: "primary" })),
+    defaultAgent: mock(() => Promise.resolve("coder")),
+  },
+}))
+
 mock.module("@/util/log", () => ({
   Log: {
     create: () => ({

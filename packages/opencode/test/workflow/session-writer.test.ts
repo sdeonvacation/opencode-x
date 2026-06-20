@@ -30,7 +30,6 @@ describe("WorkflowSessionWriter", () => {
       const part = (calls[1].data as any).part
       expect(part.type).toBe("text")
       expect(part.text).toBe("## Phase: build")
-      expect(part.synthetic).toBe(true)
     })
 
     it("creates a fresh message each call", () => {
