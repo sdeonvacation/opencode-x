@@ -27,6 +27,18 @@ import { NamedError } from "@opencode-ai/util/error"
 import { Goal } from "../../goal/goal"
 import { Usage } from "../../session/usage"
 import { WorkflowRuntime } from "@/workflow/runtime"
+import { WorkflowRuntimeRef } from "@/workflow/runtime-ref"
+import { spawnSubagent } from "@/orchestration/task-spawn"
+import { BackgroundJob } from "@/background/job"
+import { TuiEvent } from "@/cli/cmd/tui/event"
+import { Instance } from "@/project/instance"
+import { makeRuntime } from "@/effect/run-service"
+import { Config } from "@/config/config"
+import { Effect } from "effect"
+import { SyncEvent } from "@/sync"
+import { ulid } from "ulid"
+
+const bgRuntime = makeRuntime(BackgroundJob.Service, BackgroundJob.defaultLayer)
 
 const log = Log.create({ service: "server" })
 
@@ -1240,12 +1252,146 @@ export const SessionRoutes = lazy(() =>
     .post(
       "/:sessionID/workflow/start",
       validator("param", z.object({ sessionID: SessionID.zod })),
-      validator("json", z.object({ name: z.string(), args: z.record(z.string(), z.unknown()).optional() })),
+      validator(
+        "json",
+        z.object({
+          name: z.string(),
+          args: z.record(z.string(), z.unknown()).optional(),
+          max_concurrent_agents: z.number().int().positive().optional(),
+        }),
+      ),
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         const body = c.req.valid("json")
-        const id = await WorkflowRuntime.start({ name: body.name, args: body.args, session: sessionID })
-        return c.json({ id })
+        try {
+          const ref = WorkflowRuntimeRef.get()
+          if (!ref) return c.json({ error: "Workflow engine not initialized" }, 400)
+
+          const cfg = await Config.get()
+          const agent = await Agent.get("build")
+
+          const subagent = await spawnSubagent(undefined, {
+            parentSessionID: sessionID,
+            agent,
+            description: `workflow:${body.name}`,
+            canTask: false,
+            canTodo: false,
+            taskPermissionID: "workflow",
+            maxDepth: cfg.experimental?.max_subagent_depth ?? 3,
+            maxDescendants: 50,
+          })
+
+          const session = subagent.session
+          const timeout = cfg.experimental?.workflow_agent_timeout_ms ?? 600_000
+
+          // Write synthetic tool part into parent session so TUI can render/navigate
+          const now = Date.now()
+          const msgID = MessageID.ascending()
+          const msg: MessageV2.Assistant = {
+            id: msgID,
+            sessionID,
+            role: "assistant",
+            time: { created: now, completed: now },
+            parentID: MessageID.make("00000000000000000000000000"),
+            modelID: ModelID.make("workflow"),
+            providerID: ProviderID.make("workflow"),
+            mode: "workflow",
+            agent: "build",
+            path: { cwd: ".", root: "." },
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          }
+          SyncEvent.run(MessageV2.Event.Updated, { sessionID, info: msg })
+
+          const part: MessageV2.ToolPart = {
+            id: PartID.ascending(),
+            sessionID,
+            messageID: msgID,
+            type: "tool",
+            callID: ulid(),
+            tool: "workflow",
+            state: {
+              status: "completed",
+              input: { script: body.name, description: `workflow:${body.name}`, subagent_type: "workflow" },
+              output: "Workflow launched in background",
+              title: `workflow:${body.name}`,
+              metadata: { sessionId: session.id, background: true },
+              time: { start: now, end: now },
+            },
+          }
+          SyncEvent.run(MessageV2.Event.PartUpdated, { sessionID, part, time: now })
+
+          const run = Instance.bind(async (): Promise<string> => {
+            return WorkflowRuntime.executeInSession({
+              sessionID: session.id,
+              parentSessionID: sessionID,
+              name: body.name,
+              args: body.args,
+              timeout,
+              concurrent: body.max_concurrent_agents,
+            })
+          })
+
+          const inject = Instance.bind(async (state: "completed" | "error", text: string) => {
+            await Bus.publish(TuiEvent.BackgroundTaskUpdate, {
+              sessionID,
+              taskID: session.id,
+              title: `workflow:${body.name}`,
+              state,
+            })
+            await Bus.publish(TuiEvent.ToastShow, {
+              title: state === "completed" ? "Workflow complete" : "Workflow failed",
+              message:
+                state === "completed" ? `Workflow "${body.name}" finished.` : `Workflow "${body.name}" failed: ${text}`,
+              variant: state === "completed" ? "success" : "error",
+              duration: 5000,
+            })
+          })
+
+          const makeRun = () =>
+            Effect.tryPromise({
+              try: () => run(),
+              catch: (err) => err,
+            }).pipe(
+              Effect.tap((text) => Effect.promise(() => inject("completed", text)).pipe(Effect.ignore)),
+              Effect.catch((cause: unknown) =>
+                Effect.gen(function* () {
+                  const msg = cause instanceof Error ? cause.message : String(cause)
+                  yield* Effect.promise(() => inject("error", msg)).pipe(Effect.ignore)
+                  return yield* Effect.fail(cause)
+                }),
+              ),
+            )
+
+          await bgRuntime.runPromise((svc) =>
+            svc.start({
+              id: session.id,
+              type: "workflow",
+              title: `workflow:${body.name}`,
+              metadata: {
+                sessionId: session.id,
+                background: true,
+              },
+              run: makeRun(),
+            }),
+          )
+
+          await Bus.publish(TuiEvent.BackgroundTaskUpdate, {
+            sessionID,
+            taskID: session.id,
+            title: `workflow:${body.name}`,
+            state: "running",
+          })
+
+          if (subagent.spawned) subagent.spawnInfo.release()
+
+          return c.json({ id: session.id })
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          if (msg.includes("Parse error") || msg.includes("not found") || msg.includes("not initialized"))
+            return c.json({ error: msg }, 400)
+          throw err
+        }
       },
     )
     .get("/:sessionID/workflow/list", validator("param", z.object({ sessionID: SessionID.zod })), async (c) => {

@@ -110,6 +110,7 @@ export namespace ToolRegistry {
       const websearch = yield* WebSearchTool
       const research = yield* ResearchTool
       const swarm = yield* SwarmTool
+      const workflow = yield* WorkflowTool
 
       const state = yield* InstanceState.make<State>(
         Effect.fn("ToolRegistry.state")(function* (ctx) {
@@ -199,7 +200,7 @@ export namespace ToolRegistry {
           ...(cfg.experimental?.persistent_memory !== false ? [MemoryPersistTool] : []),
           ...(cfg.experimental?.swarm !== false ? [swarm] : []),
           ...(cfg.experimental?.deep_research !== false ? [research] : []),
-          ...(cfg.experimental?.workflow !== false ? [WorkflowTool] : []),
+          ...(cfg.experimental?.workflow !== false ? [workflow] : []),
           ...s.custom,
         ]
       })

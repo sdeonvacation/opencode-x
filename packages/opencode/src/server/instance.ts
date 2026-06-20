@@ -10,6 +10,7 @@ import { Log } from "../util/log"
 import { Format } from "../format"
 import { TuiRoutes } from "./routes/tui"
 import { Instance } from "../project/instance"
+import { WorkflowGenerate } from "../workflow/generate"
 import { Vcs } from "../project/vcs"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
@@ -62,33 +63,15 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
     .route("/", EventRoutes())
     .route("/mcp", McpRoutes())
     .route("/tui", TuiRoutes())
-    .post(
-      "/workflow/create",
-      validator("json", z.object({ name: z.string(), description: z.string(), steps: z.array(z.string()) })),
-      async (c) => {
-        const { name, description, steps } = c.req.valid("json")
-        if (!/^[a-zA-Z0-9_-]+$/.test(name)) return c.json({ error: "Invalid name" }, 400)
-        const phases = steps.map((s, i) => {
-          const phase = i === 0 ? "start" : `step-${i + 1}`
-          return `await phase("${phase}")\nawait agent("${s}", {\n  prompt: "Execute ${s} step"\n})`
-        })
-        const script = [
-          "/// meta",
-          `/// name: "${name}"`,
-          `/// description: "${description}"`,
-          `/// max_agents: ${steps.length}`,
-          "/// end meta",
-          "",
-          ...phases.flatMap((p) => [p, ""]),
-          `log("info", "${name} complete")`,
-          "",
-        ].join("\n")
-        const dir = path.join(Instance.directory, ".opencode", "workflows")
-        await fs.mkdir(dir, { recursive: true })
-        await fs.writeFile(path.join(dir, `${name}.js`), script)
-        return c.json({ path: path.join(dir, `${name}.js`) })
-      },
-    )
+    .post("/workflow/create", validator("json", z.object({ name: z.string(), prompt: z.string() })), async (c) => {
+      const { name, prompt } = c.req.valid("json")
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) return c.json({ error: "Invalid name" }, 400)
+      const script = await WorkflowGenerate.generate(name, prompt)
+      const dir = path.join(Instance.directory, ".opencode", "workflows")
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(path.join(dir, `${name}.js`), script)
+      return c.json({ path: path.join(dir, `${name}.js`) })
+    })
     .get("/workflow/scripts", async (c) => {
       const scripts: string[] = []
       const dirs = [path.join(Instance.directory, ".opencode", "workflows"), path.join(Global.Path.config, "workflows")]

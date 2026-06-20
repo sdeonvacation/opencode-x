@@ -1580,7 +1580,7 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
           )
         }}
       </For>
-      <Show when={props.parts.some((x) => x.type === "tool" && x.tool === "task")}>
+      <Show when={props.parts.some((x) => x.type === "tool" && (x.tool === "task" || x.tool === "workflow"))}>
         <box paddingTop={1} paddingLeft={3}>
           <text fg={theme.text}>
             {keybind.print("session_child_first")}
@@ -1894,7 +1894,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "edit"}>
           <Edit {...toolprops} />
         </Match>
-        <Match when={props.part.tool === "task"}>
+        <Match when={props.part.tool === "task" || props.part.tool === "workflow"}>
           <Task {...toolprops} />
         </Match>
         <Match when={props.part.tool === "apply_patch"}>
@@ -2402,7 +2402,10 @@ function Task(props: ToolProps<typeof TaskTool>) {
 
     const taskParts = Object.values(sync.data.part)
       .flat()
-      .filter((p): p is ToolPart => p.type === "tool" && p.tool === "task" && p.sessionID === ctx.sessionID)
+      .filter(
+        (p): p is ToolPart =>
+          p.type === "tool" && (p.tool === "task" || p.tool === "workflow") && p.sessionID === ctx.sessionID,
+      )
       .sort((a, b) => ((a.state as any).time?.start ?? 0) - ((b.state as any).time?.start ?? 0))
 
     const myIndex = taskParts.findIndex((p) => p.id === props.part.id)
@@ -2446,8 +2449,11 @@ function Task(props: ToolProps<typeof TaskTool>) {
     const id = sessionId()
     if (!id) return false
     const status = sync.data.session_status[id]
-    // no status entry yet means the child session hasn't reported idle — treat as running
-    return !status || status.type !== "idle"
+    if (status) return status.type !== "idle"
+    // No live status (post-restart) — infer from child session messages
+    const last = messages().findLast((x) => x.role === "assistant")
+    if (last?.time.completed) return false
+    return true
   })
 
   const bgTok = createMemo(() => {

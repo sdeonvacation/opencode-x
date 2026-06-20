@@ -164,33 +164,22 @@ export function createWorkflowCommand(deps: WorkflowCommandDeps): CommandOption 
       return
     }
 
-    const description = await DialogPrompt.show(deps.dialog, "Description", {
-      placeholder: "What does this workflow do?",
+    const prompt = await DialogPrompt.show(deps.dialog, "What should this workflow do?", {
+      placeholder: "e.g. Run tests, debug failures, then run tests again until they pass",
     })
-    if (!description?.trim()) {
-      deps.dialog.clear()
-      return
-    }
-
-    const stepsRaw = await DialogPrompt.show(deps.dialog, "Steps (comma-separated agent names)", {
-      placeholder: "e.g. reviewer, coder, tester",
-    })
-    if (!stepsRaw?.trim()) {
+    if (!prompt?.trim()) {
       deps.dialog.clear()
       return
     }
 
     deps.dialog.clear()
+    deps.toast.show({ message: "Generating workflow...", variant: "info" })
 
-    const steps = stepsRaw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
     try {
       await api("/workflow/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), description: description.trim(), steps }),
+        body: JSON.stringify({ name: name.trim(), prompt: prompt.trim() }),
       })
       deps.toast.show({ message: `Created: ${name.trim()}.js`, variant: "success" })
     } catch (e) {

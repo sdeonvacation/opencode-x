@@ -6,13 +6,19 @@ import { WorkflowPersistence } from "./persistence"
 import { WorkflowRunID } from "./schema"
 import { WorkflowEvent } from "./events"
 import { WorkflowWorkspace } from "./workspace"
+import { WorkflowSessionWriter } from "./session-writer"
 import { WorkflowRuntimeRef } from "./runtime-ref"
 import { Bus } from "@/bus"
+import { TuiEvent } from "@/cli/cmd/tui/event"
 import { spawnSubagent } from "@/orchestration/task-spawn"
 import { Agent } from "@/agent/agent"
 import { SessionPrompt } from "@/session/prompt"
 import { MessageID } from "@/session/schema"
+import { withTimeout } from "@/util/timeout"
+import { Log } from "@/util/log"
 import type { SessionID } from "../session/schema"
+
+const log = Log.create({ service: "workflow.runtime" })
 
 export namespace WorkflowRuntime {
   export type Config = {
@@ -32,7 +38,7 @@ export namespace WorkflowRuntime {
   }
 
   let cfg: Config | undefined
-  const active = new Map<string, { abort: AbortController }>()
+  const active = new Map<string, { abort: AbortController; parentSessionID?: SessionID; childSessionID?: string }>()
   let slots = 0
 
   export function init(config: Config) {
@@ -124,6 +130,14 @@ export namespace WorkflowRuntime {
       name: status(id)?.name ?? "unknown",
       status: "cancelled",
     })
+    if (entry.parentSessionID && entry.childSessionID) {
+      Bus.publish(TuiEvent.BackgroundTaskUpdate, {
+        sessionID: entry.parentSessionID,
+        taskID: entry.childSessionID,
+        title: `workflow:${status(id)?.name ?? "unknown"}`,
+        state: "error",
+      })
+    }
     active.delete(id)
     slots--
   }
@@ -261,6 +275,17 @@ export namespace WorkflowRuntime {
           })
         },
       },
+      {
+        name: "bash",
+        fn: async (cmd: unknown) => {
+          const command = String(cmd)
+          const proc = Bun.spawn(["sh", "-c", command], { cwd: cfg!.dir, stdout: "pipe", stderr: "pipe" })
+          const stdout = await new Response(proc.stdout).text()
+          const stderr = await new Response(proc.stderr).text()
+          await proc.exited
+          return { exitCode: proc.exitCode, stdout, stderr }
+        },
+      },
       ...fileHooks(cfg!.dir),
     ]
 
@@ -303,15 +328,26 @@ export namespace WorkflowRuntime {
     ]
   }
 
-  async function runAgent(name: string, opts: unknown, session: SessionID, signal: AbortSignal): Promise<string> {
+  async function runAgent(
+    name: string,
+    opts: unknown,
+    session: SessionID,
+    signal: AbortSignal,
+    onSpawn?: (childSessionID: string) => void,
+  ): Promise<{ result: string; childSessionID: string }> {
     const options = (typeof opts === "object" && opts !== null ? opts : {}) as Record<string, unknown>
     const prompt = String(options.prompt ?? `Execute: ${name}`)
 
     // Resolve agent — use name from workflow step, fall back to default
-    let agentInfo: Awaited<ReturnType<typeof Agent.get>>
-    try {
-      agentInfo = await Agent.get(name)
-    } catch {
+    let agentInfo: Awaited<ReturnType<typeof Agent.get>> | undefined = await Agent.get(name)
+    if (!agentInfo) {
+      // Agent.get uses dictionary key lookup which may miss config-loaded agents
+      // Try finding by name from the full list
+      const all = await Agent.list()
+      agentInfo = all.find((a) => a.name === name)
+    }
+    if (!agentInfo) {
+      log.warn("agent not found, falling back to default", { name, available: (await Agent.list()).map((a) => a.name) })
       const fallback = await Agent.defaultAgent()
       agentInfo = await Agent.get(fallback)
     }
@@ -323,12 +359,13 @@ export namespace WorkflowRuntime {
       description: `workflow:${name}`,
       canTask: false,
       canTodo: false,
-      taskPermissionID: "workflow",
+      taskPermissionID: "task",
       maxDepth: cfg!.depth,
       maxDescendants: 50,
     })
 
     const child = subagent.session
+    onSpawn?.(child.id)
 
     // Send prompt and wait for response
     const result = await new Promise<string>((resolve, reject) => {
@@ -354,6 +391,277 @@ export namespace WorkflowRuntime {
 
     // Release spawn slot
     if (subagent.spawned) subagent.spawnInfo.release()
+
+    return { result, childSessionID: child.id }
+  }
+
+  // --- Session-based execution (used by workflow tool) ---
+
+  export type ExecuteInSessionInput = {
+    sessionID: SessionID
+    parentSessionID?: SessionID
+    name: string
+    args?: Record<string, unknown>
+    timeout: number
+    concurrent?: number
+  }
+
+  export async function executeInSession(input: ExecuteInSessionInput): Promise<string> {
+    if (!cfg) throw new Error("WorkflowRuntime not initialized")
+
+    const script = resolveScript(input.name)
+    const parsed = WorkflowMeta.parse(script.source)
+    if ("message" in parsed) throw new Error(`Parse error: ${parsed.message}`)
+
+    const id = WorkflowRunID.generate()
+    const timeout = input.timeout
+
+    WorkflowPersistence.recordStart({
+      id,
+      session: input.parentSessionID ?? input.sessionID,
+      name: input.name,
+      script: script.source,
+      args: input.args ?? null,
+      timeout,
+      parent: undefined,
+    })
+
+    Bus.publish(WorkflowEvent.Started, { runID: id, name: input.name, sessionID: String(input.sessionID) })
+
+    const ctrl = new AbortController()
+    active.set(id, { abort: ctrl, parentSessionID: input.parentSessionID, childSessionID: input.sessionID })
+    if (slots >= 10) throw new Error("Too many concurrent workflows, try later")
+    slots++
+
+    WorkflowSessionWriter.reset()
+    WorkflowSessionWriter.setCwd(cfg.dir)
+
+    try {
+      await executeWithSession(id, parsed.body, input, ctrl.signal)
+      WorkflowPersistence.recordTerminal(WorkflowRunID.make(id), "completed")
+      WorkflowSessionWriter.writeStatus(input.sessionID, "completed")
+      Bus.publish(WorkflowEvent.Finished, { runID: id, name: input.name, status: "completed" })
+      return `Workflow "${input.name}" completed successfully.`
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      WorkflowPersistence.recordTerminal(WorkflowRunID.make(id), "failed", msg)
+      WorkflowSessionWriter.writeStatus(input.sessionID, "failed", msg)
+      Bus.publish(WorkflowEvent.Finished, { runID: id, name: input.name, status: "failed", error: msg })
+      throw err
+    } finally {
+      active.delete(id)
+      slots--
+    }
+  }
+
+  async function executeWithSession(id: string, body: string, input: ExecuteInSessionInput, signal: AbortSignal) {
+    const rid = WorkflowRunID.make(id)
+    const journal = WorkflowPersistence.loadJournal(rid)
+    const completed = new Set<string>()
+    for (const entry of journal) {
+      if (entry.type === "agent_complete") completed.add(entry.data.name as string)
+    }
+
+    const hooks: Sandbox.Hook[] = [
+      {
+        name: "agent",
+        fn: async (name: unknown, opts: unknown) => {
+          const agent = String(name)
+          const options = (typeof opts === "object" && opts !== null ? opts : {}) as Record<string, unknown>
+          const prompt = String(options.prompt ?? `Execute: ${agent}`)
+          if (signal.aborted) throw new Error("Workflow cancelled")
+          if (completed.has(agent)) return { result: "skipped", cached: true }
+
+          WorkflowPersistence.appendJournal(rid, { type: "agent_start", timestamp: Date.now(), data: { name: agent } })
+          Bus.publish(WorkflowEvent.AgentStarted, { runID: id, agent, prompt })
+
+          const start = Date.now()
+          let runningPart: { partID: any; callID: string } | undefined
+          try {
+            const { result, childSessionID } = await runAgent(agent, opts, input.sessionID, signal, (childID) => {
+              runningPart = WorkflowSessionWriter.writeAgentRunning(input.sessionID, {
+                childSessionID: childID,
+                name: agent,
+                prompt,
+              })
+            })
+            WorkflowPersistence.appendJournal(rid, {
+              type: "agent_complete",
+              timestamp: Date.now(),
+              data: { name: agent, result: { text: result } },
+            })
+            WorkflowSessionWriter.writeAgentTask(input.sessionID, {
+              partID: runningPart?.partID,
+              callID: runningPart?.callID,
+              childSessionID,
+              name: agent,
+              prompt,
+              output: result.length > 2000 ? result.slice(0, 2000) + "..." : result,
+              status: "completed",
+              duration: Date.now() - start,
+            })
+            return { result }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            WorkflowPersistence.appendJournal(rid, {
+              type: "agent_failed",
+              timestamp: Date.now(),
+              data: { name: agent, error: msg },
+            })
+            WorkflowSessionWriter.writeAgentTask(input.sessionID, {
+              partID: runningPart?.partID,
+              callID: runningPart?.callID,
+              childSessionID: "",
+              name: agent,
+              prompt,
+              output: `ERROR: ${msg}`,
+              status: "error",
+              duration: Date.now() - start,
+            })
+            Bus.publish(WorkflowEvent.AgentFailed, { runID: id, agent, error: msg })
+            return { error: msg }
+          }
+        },
+      },
+      {
+        name: "phase",
+        fn: async (name: unknown) => {
+          const phase = String(name)
+          WorkflowPersistence.recordPhase(rid, phase)
+          WorkflowSessionWriter.writePhase(input.sessionID, phase)
+          Bus.publish(WorkflowEvent.Phase, { runID: id, phase })
+        },
+      },
+      {
+        name: "log",
+        fn: async (level: unknown, message: unknown) => {
+          const lvl = String(level) as "info" | "warn" | "error"
+          const msg = String(message)
+          WorkflowSessionWriter.appendLog(input.sessionID, lvl, msg)
+          Bus.publish(WorkflowEvent.Log, { runID: id, level: lvl, message: msg })
+          WorkflowPersistence.appendJournal(rid, {
+            type: "log",
+            timestamp: Date.now(),
+            data: { level: lvl, message: msg },
+          })
+        },
+      },
+      {
+        name: "bash",
+        fn: async (cmd: unknown) => {
+          const command = String(cmd)
+          const start = Date.now()
+          const proc = Bun.spawn(["sh", "-c", command], { cwd: cfg!.dir, stdout: "pipe", stderr: "pipe" })
+          const stdout = await new Response(proc.stdout).text()
+          const stderr = await new Response(proc.stderr).text()
+          await proc.exited
+          const output = stdout + (stderr ? `\n${stderr}` : "")
+          const duration = Date.now() - start
+          WorkflowSessionWriter.writeTool(input.sessionID, {
+            tool: "bash",
+            args: { command },
+            output,
+            title: command,
+            duration,
+          })
+          return { exitCode: proc.exitCode, stdout, stderr }
+        },
+      },
+      ...sessionFileHooks(input.sessionID, cfg!.dir),
+    ]
+
+    const args = input.args ?? {}
+    const stripped = body.replace(/\bawait\s+/g, "")
+    const script = `const args = ${JSON.stringify(args)};\n${stripped}`
+
+    if (isBusy()) {
+      Bus.publish(WorkflowEvent.Waiting, { runID: id, name: input.name })
+    }
+
+    await Sandbox.evaluate(script, {
+      memory: 64 * 1024 * 1024,
+      deadline: input.timeout,
+      seed: id,
+      hooks,
+    })
+  }
+
+  function sessionFileHooks(sessionID: SessionID, dir: string): Sandbox.Hook[] {
+    const fh = WorkflowWorkspace.makeFileHooks(dir)
+    return [
+      {
+        name: "readFile",
+        fn: async (p: unknown) => {
+          const path = String(p)
+          const start = Date.now()
+          const content = await fh.readFile(path)
+          WorkflowSessionWriter.writeTool(sessionID, {
+            tool: "read",
+            args: { path },
+            output: String(content).slice(0, 2000),
+            title: path,
+            duration: Date.now() - start,
+          })
+          return content
+        },
+      },
+      {
+        name: "writeFile",
+        fn: async (p: unknown, c: unknown) => {
+          const path = String(p)
+          const content = String(c)
+          const start = Date.now()
+          await fh.writeFile(path, content)
+          WorkflowSessionWriter.writeTool(sessionID, {
+            tool: "write",
+            args: { path, content: content.slice(0, 200) },
+            output: `Written ${content.length} bytes`,
+            title: path,
+            duration: Date.now() - start,
+          })
+        },
+      },
+      { name: "exists", fn: async (p: unknown) => fh.exists(String(p)) },
+      { name: "glob", fn: async (p: unknown) => fh.glob(String(p)) },
+    ]
+  }
+
+  async function runAgentInline(
+    prompt: string,
+    sessionID: SessionID,
+    signal: AbortSignal,
+    timeout: number,
+  ): Promise<string> {
+    const result = await new Promise<string>((resolve, reject) => {
+      const abort = () => {
+        SessionPrompt.cancel(sessionID)
+        reject(new Error("Workflow cancelled"))
+      }
+      signal.addEventListener("abort", abort, { once: true })
+
+      withTimeout(
+        SessionPrompt.prompt({
+          messageID: MessageID.ascending(),
+          sessionID,
+          parts: [{ type: "text", text: prompt }],
+        }),
+        timeout,
+      )
+        .then((msg) => {
+          const last = msg.parts.findLast((p: { type: string }) => p.type === "text")
+          const text = last && "text" in last ? String((last as { text: string }).text) : ""
+          resolve(text)
+        })
+        .catch((err) => {
+          if (err instanceof Error && err.message.includes("Operation timed out")) {
+            SessionPrompt.cancel(sessionID)
+            reject(new Error(`Agent step timed out after ${timeout}ms`))
+            return
+          }
+          reject(err)
+        })
+        .finally(() => signal.removeEventListener("abort", abort))
+    })
 
     return result
   }
