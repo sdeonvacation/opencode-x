@@ -42,7 +42,6 @@ export namespace WorkflowSessionWriter {
       messageID: msgID,
       type: "text",
       text: `## Phase: ${phase}`,
-      synthetic: true,
     }
     SyncEvent.run(MessageV2.Event.PartUpdated, { sessionID, part, time: Date.now() })
   }
@@ -57,7 +56,6 @@ export namespace WorkflowSessionWriter {
       messageID: current!.messageID,
       type: "text",
       text: `[${level}] ${message}`,
-      synthetic: true,
     }
     SyncEvent.run(MessageV2.Event.PartUpdated, { sessionID, part, time: Date.now() })
   }
@@ -106,7 +104,6 @@ export namespace WorkflowSessionWriter {
       messageID: msgID,
       type: "text",
       text,
-      synthetic: true,
     }
     SyncEvent.run(MessageV2.Event.PartUpdated, { sessionID, part, time: Date.now() })
   }

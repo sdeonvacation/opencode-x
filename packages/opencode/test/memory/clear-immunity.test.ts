@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect, afterAll } from "bun:test"
 import path from "path"
 import { Memory } from "../../src/memory/memory"
 import { Instance } from "../../src/project/instance"
@@ -6,6 +6,7 @@ import { Log } from "../../src/util/log"
 
 const projectRoot = path.join(__dirname, "../..")
 Log.init({ print: false })
+afterAll(() => Instance.disposeAll())
 
 describe("memory clear immunity", () => {
   test("memory survives message deletion (/clear simulation)", async () => {

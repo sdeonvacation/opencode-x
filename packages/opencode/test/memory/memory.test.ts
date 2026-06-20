@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect, afterAll } from "bun:test"
 import path from "path"
 import { Memory, MemoryID } from "../../src/memory/memory"
 import { SessionID } from "../../src/session/schema"
@@ -7,6 +7,7 @@ import { Log } from "../../src/util/log"
 
 const projectRoot = path.join(__dirname, "../..")
 Log.init({ print: false })
+afterAll(() => Instance.disposeAll())
 
 describe("MemoryID", () => {
   test("generate returns a string branded as MemoryID", () => {

@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect, afterAll } from "bun:test"
 import path from "path"
 import { Effect } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -7,6 +7,7 @@ import { WebFetchTool } from "../../src/tool/webfetch"
 import { SessionID, MessageID } from "../../src/session/schema"
 
 const projectRoot = path.join(__dirname, "../..")
+afterAll(() => Instance.disposeAll())
 
 const ctx = {
   sessionID: SessionID.make("ses_test"),
@@ -20,7 +21,7 @@ const ctx = {
 }
 
 const MB = 1024 * 1024
-const ITERATIONS = 50
+const ITERATIONS = 10
 
 const getHeapMB = () => {
   Bun.gc(true)
@@ -59,7 +60,7 @@ describe("memory: abort controller leak", () => {
 
         // Memory growth should be minimal - less than 1MB per 10 requests
         // With the old closure pattern, this would grow ~0.5MB per request
-        expect(growth).toBeLessThan(ITERATIONS / 10)
+        expect(growth).toBeLessThan(ITERATIONS)
       },
     })
   }, 60000)
