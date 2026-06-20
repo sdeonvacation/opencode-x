@@ -32,9 +32,23 @@ If any answer is "no" — skip it. Prefer fewer, high-quality skills over many t
 2. Filter: skip anything a persistent memory already covers adequately
 3. For surviving candidates: write detailed skills with exact commands, code templates, file paths, and gotcha warnings
 
-## Skill File Format
+## Skill Location
 
-Create skills at ~/.config/opencode/skills/<name>/SKILL.md:
+Choose the output location based on whether the skill is project-specific or universal:
+
+**Project-specific** → `.agents/skills/<name>/SKILL.md` (relative to project root)
+- References project-specific file paths, configs, or tooling
+- Only useful when working in this particular codebase
+- Examples: "opencode-x proxy param gating", "this repo's release process"
+
+**Universal** → `~/.config/opencode/skills/<name>/SKILL.md`
+- Applies to any project using the same tech stack
+- No hardcoded project paths — uses generic patterns
+- Examples: "Effect-ts service pattern", "Drizzle migration workflow"
+
+Create the directory if it doesn't exist. When in doubt, prefer project-local.
+
+## Skill File Format
 
 ```markdown
 ---
@@ -67,7 +81,7 @@ Why this workflow exists and what goes wrong without it.
 
 - Maximum 3 new skills per run
 - Only extract patterns verified from actual sessions
-- Do NOT duplicate existing skills in ~/.config/opencode/skills/
+- Do NOT duplicate existing skills (check both .agents/skills/ and ~/.config/opencode/skills/)
 - Do NOT create skills that just restate a persistent memory
 - Each skill must contain specific file paths, commands, or code templates — not generic advice
 - Use kebab-case for skill directory names

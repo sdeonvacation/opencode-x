@@ -13,15 +13,20 @@ const DEFAULT_MAX_CONTEXT_CHARS = 100_000
 const DEFAULT_MAX_SESSIONS = 20
 const DEFAULT_MAX_MESSAGES = 100
 
+// Strip @file references so resolvePromptParts won't attach them
+function escape(text: string): string {
+  return text.replace(/(?<![\w`])@(?=\.?[^\s`,.]*\.[^\s`,.]+)/g, "")
+}
+
 function extractText(msg: MessageV2.WithParts): string {
   if (msg.info.role === "user" && msg.info.summary) {
     const s = msg.info.summary
     const parts = [s.title, s.body].filter(Boolean)
-    if (parts.length > 0) return parts.join(": ")
+    if (parts.length > 0) return escape(parts.join(": "))
   }
   return msg.parts
     .filter((p): p is MessageV2.TextPart => p.type === "text" && !("synthetic" in p && p.synthetic))
-    .map((p) => p.text)
+    .map((p) => escape(p.text))
     .join("\n")
 }
 
