@@ -29,7 +29,7 @@ function inspectMessage(message: MessageV2.WithParts): InspectResult | undefined
 
 const parameters = z.object({
   task_id: z.string().describe("The task_id returned by the task tool"),
-  wait: z.boolean().optional().describe("When true, wait until the task reaches a terminal state or timeout"),
+  wait: z.boolean().default(false).describe("When true, wait until the task reaches a terminal state or timeout"),
   timeout_ms: z
     .number()
     .positive()
