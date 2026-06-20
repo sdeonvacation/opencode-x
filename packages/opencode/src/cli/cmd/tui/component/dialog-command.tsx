@@ -41,7 +41,7 @@ function init() {
     const all = registrations().flatMap((x) => x())
     return all.map((x) => ({
       ...x,
-      footer: x.keybind ? keybind.print(x.keybind) : undefined,
+      footer: x.keybind ? keybind.print(x.keybind) : x.footer,
     }))
   })
 

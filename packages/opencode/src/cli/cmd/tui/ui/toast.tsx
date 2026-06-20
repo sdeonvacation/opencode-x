@@ -1,5 +1,5 @@
-import { createContext, useContext, type ParentProps, Show } from "solid-js"
-import { createStore } from "solid-js/store"
+import { createContext, useContext, createSignal, onCleanup, type ParentProps, Show } from "solid-js"
+import { createStore, produce } from "solid-js/store"
 import { useTheme } from "@tui/context/theme"
 import { useTerminalDimensions } from "@opentui/solid"
 import { SplitBorder } from "../component/border"
@@ -9,10 +9,33 @@ import { TuiEvent } from "../event"
 
 export type ToastOptions = z.infer<typeof TuiEvent.ToastShow.properties>
 
+interface ToastItem {
+  id: string
+  title?: string
+  message: string
+  variant: "info" | "success" | "warning" | "error"
+  duration: number
+  created: number
+}
+
+const MAX_QUEUE = 5
+
 export function Toast() {
   const toast = useToast()
   const { theme } = useTheme()
   const dimensions = useTerminalDimensions()
+  const [tick, setTick] = createSignal(Date.now())
+
+  const interval = setInterval(() => setTick(Date.now()), 100)
+  onCleanup(() => clearInterval(interval))
+
+  const remaining = () => {
+    const item = toast.currentToast
+    if (!item) return 0
+    const elapsed = tick() - item.created
+    const ratio = 1 - elapsed / item.duration
+    return Math.max(0, Math.min(1, ratio))
+  }
 
   return (
     <Show when={toast.currentToast}>
@@ -41,42 +64,72 @@ export function Toast() {
           <text fg={theme.text} wrapMode="word" width="100%">
             {current().message}
           </text>
+          <box
+            width={`${Math.round(remaining() * 100)}%`}
+            height={1}
+            backgroundColor={theme[current().variant]}
+            marginTop={1}
+          />
+          <Show when={toast.depth > 1}>
+            <text fg={theme.textMuted} marginTop={0}>
+              [+{toast.depth - 1}]
+            </text>
+          </Show>
         </box>
       )}
     </Show>
   )
 }
 
-function init() {
-  const [store, setStore] = createStore({
-    currentToast: null as ToastOptions | null,
-  })
+let counter = 0
 
-  let timeoutHandle: NodeJS.Timeout | null = null
+/** @internal exported for unit tests */
+export function init() {
+  const [store, setStore] = createStore({ queue: [] as ToastItem[] })
+
+  const interval = setInterval(() => {
+    const head = store.queue[0]
+    if (!head) return
+    if (head.created + head.duration < Date.now()) {
+      setStore(
+        produce((s) => {
+          s.queue.shift()
+        }),
+      )
+    }
+  }, 100)
+  if (typeof interval === "object" && "unref" in interval) (interval as NodeJS.Timeout).unref()
 
   const toast = {
     show(options: ToastOptions) {
-      const parsedOptions = TuiEvent.ToastShow.properties.parse(options)
-      const { duration, ...currentToast } = parsedOptions
-      setStore("currentToast", currentToast)
-      if (timeoutHandle) clearTimeout(timeoutHandle)
-      timeoutHandle = setTimeout(() => {
-        setStore("currentToast", null)
-      }, duration).unref()
+      const parsed = TuiEvent.ToastShow.properties.parse(options)
+      const item: ToastItem = {
+        id: String(Date.now()) + "-" + counter++,
+        title: parsed.title,
+        message: parsed.message,
+        variant: parsed.variant,
+        duration: parsed.duration ?? 5000,
+        created: Date.now(),
+      }
+      setStore(
+        produce((s) => {
+          if (s.queue.length >= MAX_QUEUE) s.queue.shift()
+          s.queue.push(item)
+        }),
+      )
     },
-    error: (err: any) => {
-      if (err instanceof Error)
-        return toast.show({
-          variant: "error",
-          message: err.message,
-        })
-      toast.show({
-        variant: "error",
-        message: "An unknown error has occurred",
-      })
+    error(err: any) {
+      if (err instanceof Error) return toast.show({ variant: "error", message: err.message })
+      toast.show({ variant: "error", message: "An unknown error has occurred" })
     },
-    get currentToast(): ToastOptions | null {
-      return store.currentToast
+    dismissAll() {
+      setStore("queue", [])
+    },
+    get currentToast(): ToastItem | null {
+      return store.queue[0] ?? null
+    },
+    get depth(): number {
+      return store.queue.length
     },
   }
   return toast

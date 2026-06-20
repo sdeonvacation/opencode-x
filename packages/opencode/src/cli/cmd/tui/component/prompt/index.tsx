@@ -477,81 +477,7 @@ export function Prompt(props: PromptProps) {
         },
         onSelect: async (dialog) => {
           dialog.clear()
-
-          // replace summarized text parts with the actual text
-          const text = store.prompt.parts
-            .filter((p) => p.type === "text")
-            .reduce((acc, p) => {
-              if (!p.source) return acc
-              return acc.replace(p.source.text.value, p.text)
-            }, store.prompt.input)
-
-          const nonTextParts = store.prompt.parts.filter((p) => p.type !== "text")
-
-          const value = text
-          const content = await Editor.open({ value, renderer })
-          if (!content) return
-
-          input.setText(content)
-
-          // Update positions for nonTextParts based on their location in new content
-          // Filter out parts whose virtual text was deleted
-          // this handles a case where the user edits the text in the editor
-          // such that the virtual text moves around or is deleted
-          const updatedNonTextParts = nonTextParts
-            .map((part) => {
-              let virtualText = ""
-              if (part.type === "file" && part.source?.text) {
-                virtualText = part.source.text.value
-              } else if (part.type === "agent" && part.source) {
-                virtualText = part.source.value
-              }
-
-              if (!virtualText) return part
-
-              const newStart = content.indexOf(virtualText)
-              // if the virtual text is deleted, remove the part
-              if (newStart === -1) return null
-
-              const newEnd = newStart + virtualText.length
-
-              if (part.type === "file" && part.source?.text) {
-                return {
-                  ...part,
-                  source: {
-                    ...part.source,
-                    text: {
-                      ...part.source.text,
-                      start: newStart,
-                      end: newEnd,
-                    },
-                  },
-                }
-              }
-
-              if (part.type === "agent" && part.source) {
-                return {
-                  ...part,
-                  source: {
-                    ...part.source,
-                    start: newStart,
-                    end: newEnd,
-                  },
-                }
-              }
-
-              return part
-            })
-            .filter((part) => part !== null)
-
-          setStore("prompt", {
-            input: content,
-            // keep only the non-text parts because the text parts were
-            // already expanded inline
-            parts: updatedNonTextParts,
-          })
-          restoreExtmarksFromParts(updatedNonTextParts)
-          input.cursorOffset = Bun.stringWidth(content)
+          await openEditor()
         },
       },
       {
@@ -950,6 +876,73 @@ export function Prompt(props: PromptProps) {
     input.clear()
   }
   const exit = useExit()
+
+  async function openEditor() {
+    const text = store.prompt.parts
+      .filter((p) => p.type === "text")
+      .reduce((acc, p) => {
+        if (!p.source) return acc
+        return acc.replace(p.source.text.value, p.text)
+      }, store.prompt.input)
+
+    const nonTextParts = store.prompt.parts.filter((p) => p.type !== "text")
+    const content = await Editor.open({ value: text, renderer })
+    if (!content) return
+
+    input.setText(content)
+
+    const updatedNonTextParts = nonTextParts
+      .map((part) => {
+        let virtualText = ""
+        if (part.type === "file" && part.source?.text) {
+          virtualText = part.source.text.value
+        } else if (part.type === "agent" && part.source) {
+          virtualText = part.source.value
+        }
+
+        if (!virtualText) return part
+
+        const newStart = content.indexOf(virtualText)
+        if (newStart === -1) return null
+
+        const newEnd = newStart + virtualText.length
+
+        if (part.type === "file" && part.source?.text) {
+          return {
+            ...part,
+            source: {
+              ...part.source,
+              text: {
+                ...part.source.text,
+                start: newStart,
+                end: newEnd,
+              },
+            },
+          }
+        }
+
+        if (part.type === "agent" && part.source) {
+          return {
+            ...part,
+            source: {
+              ...part.source,
+              start: newStart,
+              end: newEnd,
+            },
+          }
+        }
+
+        return part
+      })
+      .filter((part) => part !== null)
+
+    setStore("prompt", {
+      input: content,
+      parts: updatedNonTextParts,
+    })
+    restoreExtmarksFromParts(updatedNonTextParts)
+    input.cursorOffset = Bun.stringWidth(content)
+  }
 
   function pasteText(text: string, virtualText: string) {
     const currentOffset = input.cursorOffset

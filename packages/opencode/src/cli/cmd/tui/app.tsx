@@ -624,6 +624,16 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
     },
     {
+      title: "Search transcript",
+      value: "session.search",
+      keybind: "session_search",
+      category: "Session",
+      hidden: true,
+      onSelect: () => {
+        // handled locally via keybind in session route
+      },
+    },
+    {
       title: "Suspend terminal",
       value: "terminal.suspend",
       keybind: "terminal_suspend",

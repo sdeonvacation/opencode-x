@@ -94,12 +94,14 @@ import {
   type ThinkingMode,
 } from "../../context/thinking"
 import { getScrollAcceleration } from "../../util/scroll"
+import { Hyperlink } from "../../util/hyperlink"
 import { TuiPluginRuntime } from "../../plugin"
 import { DialogGoUpsell } from "../../component/dialog-go-upsell"
 import { SessionRetry } from "@/session/retry"
 import { getRevertDiffFiles } from "../../util/revert-diff"
 import { within } from "../../util/selection-boundary"
 import { TuiEvent } from "../../event"
+import { SearchOverlay } from "@tui/component/search"
 
 addDefaultParsers(parsers.parsers)
 
@@ -204,6 +206,8 @@ export function Session() {
   const [sidebar, setSidebar] = kv.signal<"auto" | "hide">("sidebar", "auto")
   const [sidebarOpen, setSidebarOpen] = createSignal(false)
   const [conceal, setConceal] = createSignal(true)
+  const [searchActive, setSearchActive] = createSignal(false)
+  const [searchMatch, setSearchMatch] = createSignal<string | null>(null)
   const thinking = useThinkingMode()
   const thinkingMode = thinking.mode
   const showThinking = createMemo(() => true)
@@ -432,6 +436,14 @@ export function Session() {
     if (!session()?.parentID) return
     if (keybind.match("app_exit", evt)) {
       exit()
+    }
+  })
+
+  useKeyboard((evt) => {
+    if (searchActive()) return
+    if (promptRef.current?.focused) return
+    if (keybind.match("session_search", evt)) {
+      setSearchActive(true)
     }
   })
 
@@ -1331,16 +1343,36 @@ export function Session() {
                       />
                     </Match>
                     <Match when={message.role === "assistant"}>
-                      <AssistantMessage
-                        last={lastAssistant()?.id === message.id}
-                        message={message as AssistantMessage}
-                        parts={sync.data.part[message.id] ?? []}
-                      />
+                      <box
+                        id={message.id}
+                        border={["left"]}
+                        borderColor={theme.backgroundPanel}
+                        customBorderChars={SplitBorder.customBorderChars}
+                      >
+                        <AssistantMessage
+                          last={lastAssistant()?.id === message.id}
+                          message={message as AssistantMessage}
+                          parts={sync.data.part[message.id] ?? []}
+                        />
+                      </box>
                     </Match>
                   </Switch>
                 )}
               </For>
             </scrollbox>
+            <Show when={searchActive()}>
+              <SearchOverlay
+                messages={messages}
+                parts={(id) => sync.data.part[id] ?? []}
+                onClose={() => {
+                  setSearchMatch(null)
+                  setSearchActive(false)
+                }}
+                onMatch={setSearchMatch}
+                scroll={scroll!}
+                width={contentWidth()}
+              />
+            </Show>
             <box flexShrink={0}>
               <Show when={permissions().length > 0}>
                 <PermissionPrompt request={permissions()[0]} />
@@ -1734,7 +1766,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
               syntaxStyle={syntax()}
               streaming={active()}
               internalBlockMode="top-level"
-              content={props.part.text.trim()}
+              content={Hyperlink.linkify(props.part.text.trim())}
               tableOptions={{ style: "grid" }}
               conceal={ctx.conceal()}
               fg={theme.markdownText}
@@ -1779,7 +1811,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
                     syntaxStyle={syntax()}
                     streaming={active()}
                     internalBlockMode="top-level"
-                    content={seg().text.trim()}
+                    content={Hyperlink.linkify(seg().text.trim())}
                     tableOptions={{ style: "grid" }}
                     conceal={ctx.conceal()}
                     fg={theme.markdownText}
