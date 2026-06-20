@@ -10,6 +10,8 @@ import { afterAll } from "bun:test"
 const dir = path.join(os.tmpdir(), "opencode-test-data-" + process.pid)
 await fs.mkdir(dir, { recursive: true })
 afterAll(async () => {
+  const { disposeAllRuntimes } = await import("../src/effect/run-service")
+  await disposeAllRuntimes()
   const { Database } = await import("../src/storage/db")
   Database.close()
   const busy = (error: unknown) =>

@@ -20,7 +20,7 @@ while (!passing && attempt < MAX_ATTEMPTS) {
     log("error", "Tester agent encountered an error: " + testResult.error)
     phase("debug-attempt-" + attempt)
     agent("debugger", {
-      prompt: "IMPORTANT: You MUST make actual code changes to fix this problem. Do NOT just report findings — edit files.\n\nThe test runner failed with this error:\n\n" + testResult.error + "\n\nRead the relevant source files, identify the root cause, and use your edit/write tools to fix the code. Verify your fix compiles."
+      prompt: "The test suite has failures. Here is the output:\n\n" + testResult.result + "\n\n Fix the failing tests. Decide carefully on whether the test is incorrect or there is a genuine production bug. Verify your fixes compile with typecheck."
     })
   } else if (testResult.result.startsWith("SUITE_GREEN")) {
     passing = true
@@ -29,7 +29,7 @@ while (!passing && attempt < MAX_ATTEMPTS) {
     log("warn", "Tests failing on attempt " + attempt + ". Invoking debugger to fix issues.")
     phase("debug-attempt-" + attempt)
     agent("debugger", {
-      prompt: "IMPORTANT: You MUST make actual code changes to fix these failures. Do NOT just analyze or report — edit files.\n\nThe test suite has failures. Here is the output:\n\n" + testResult.result + "\n\nPick the highest-impact failures first (most common root cause), read the source files, and use your edit/write tools to fix the code. Do not modify test files unless they are clearly wrong. Verify your fixes compile with typecheck."
+      prompt: "The test suite has failures. Here is the output:\n\n" + testResult.result + "\n\n Fix the failing tests. Decide carefully on whether the test is incorrect or there is a genuine production bug. Verify your fixes compile with typecheck."
     })
   }
 }

@@ -48,26 +48,7 @@ const { Instance } = await import("../../src/project/instance")
 const { tmpdir } = await import("../fixture/fixture")
 
 test("headers are passed to transports when oauth is enabled (default)", async () => {
-  await using tmp = await tmpdir({
-    init: async (dir) => {
-      await Bun.write(
-        `${dir}/opencode.json`,
-        JSON.stringify({
-          $schema: "https://opencode.ai/config.json",
-          mcp: {
-            "test-server": {
-              type: "remote",
-              url: "https://example.com/mcp",
-              headers: {
-                Authorization: "Bearer test-token",
-                "X-Custom-Header": "custom-value",
-              },
-            },
-          },
-        }),
-      )
-    },
-  })
+  await using tmp = await tmpdir()
 
   await Instance.provide({
     directory: tmp.path,

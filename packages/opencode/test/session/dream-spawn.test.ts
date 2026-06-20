@@ -1,21 +1,15 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
+import path from "path"
 import type { SessionID } from "../../src/session/schema"
 import type { Agent } from "../../src/agent/agent"
+import { Instance } from "../../src/project/instance"
 
 const spawns: Array<{ parentID: string; description: string; maxDepth: number; canTask: boolean }> = []
+const projectRoot = path.join(__dirname, "../..")
 
-mock.module("../../src/session/index", () => ({
-  Session: {
-    list: function* () {},
-  },
-}))
-
-mock.module("../../src/session/message-v2", () => ({
-  MessageV2: {
-    page: () => ({ items: [], more: false }),
-  },
-}))
-
+// Only mock task-spawn — no other mocks to avoid poisoning sibling test files.
+// Session.list/MessageV2.page use the in-memory DB (empty = no sessions = empty context).
+// SessionPrompt.prompt (dynamic import in kick()) will fail but DreamSpawn catches it.
 mock.module("../../src/orchestration/task-spawn", () => ({
   spawnSubagent: async (_existing: unknown, input: any) => {
     spawns.push({
@@ -26,38 +20,6 @@ mock.module("../../src/orchestration/task-spawn", () => ({
     })
     return { session: { id: "child-1" }, spawnInfo: {}, spawned: true }
   },
-}))
-
-mock.module("../../src/session/prompt", () => ({
-  SessionPrompt: {
-    prompt: async () => ({ parts: [] }),
-  },
-}))
-
-mock.module("../../src/util/log", () => ({
-  Log: {
-    create: () => ({
-      info: () => {},
-      error: () => {},
-      warn: () => {},
-      debug: () => {},
-    }),
-  },
-}))
-
-mock.module("../../src/storage/db", () => ({
-  Database: { use: () => [], close: () => {} },
-  like: () => undefined,
-  desc: () => undefined,
-  asc: () => undefined,
-}))
-
-mock.module("../../src/flag/flag", () => ({
-  Flag: { OPENCODE_EXPERIMENTAL_DREAM: true },
-}))
-
-mock.module("../../src/session/session.sql", () => ({
-  SessionTable: { title: "title", time_created: "time_created" },
 }))
 
 const { DreamSpawn } = await import("../../src/session/dream-spawn")
@@ -76,7 +38,10 @@ beforeEach(() => {
 describe("session/dream-spawn", () => {
   describe("dream", () => {
     test("spawns subagent with correct input", async () => {
-      await DreamSpawn.dream("sess-1" as SessionID, agent, {} as any)
+      await Instance.provide({
+        directory: projectRoot,
+        fn: () => DreamSpawn.dream("sess-1" as SessionID, agent, {} as any),
+      })
       expect(spawns).toHaveLength(1)
       expect(spawns[0].parentID).toBe("sess-1")
       expect(spawns[0].description).toBe("Auto Dream")
@@ -88,7 +53,10 @@ describe("session/dream-spawn", () => {
   describe("distill", () => {
     test("spawns subagent with correct input", async () => {
       const distillAgent: Agent.Info = { name: "distill", mode: "subagent", permission: [], options: {} }
-      await DreamSpawn.distill("sess-3" as SessionID, distillAgent, {} as any)
+      await Instance.provide({
+        directory: projectRoot,
+        fn: () => DreamSpawn.distill("sess-3" as SessionID, distillAgent, {} as any),
+      })
       expect(spawns).toHaveLength(1)
       expect(spawns[0].parentID).toBe("sess-3")
       expect(spawns[0].description).toBe("Auto Distill")
@@ -104,8 +72,10 @@ describe("session/dream-spawn", () => {
         },
       }))
       const { DreamSpawn: DS } = await import("../../src/session/dream-spawn")
-      // Should not throw
-      await DS.dream("sess-2" as SessionID, agent, {} as any)
+      await Instance.provide({
+        directory: projectRoot,
+        fn: () => DS.dream("sess-2" as SessionID, agent, {} as any),
+      })
     })
   })
 })

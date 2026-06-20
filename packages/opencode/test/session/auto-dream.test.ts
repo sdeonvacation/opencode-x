@@ -146,7 +146,7 @@ describe("session/auto-dream", () => {
 
     test("exports task prompts", () => {
       expect(AutoDream.DREAM_TASK).toContain("dream consolidation agent")
-      expect(AutoDream.DISTILL_TASK).toContain("distill agent")
+      expect(AutoDream.DISTILL_TASK).toContain("complex workflows worth extracting into skills")
     })
 
     test("exports title constants", () => {

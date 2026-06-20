@@ -58,19 +58,19 @@ export namespace WireDiagnostics {
     private readonly filePath: string
     private _closed = false
     private _errorLogged = false
-    private _dirReady: Promise<void>
+    private _chain: Promise<void>
 
     constructor(sessionID: string) {
       const ts = Math.floor(Date.now() / 1000)
       const dir = path.join(Global.Path.data, "wire-diagnostics")
       this.filePath = path.join(dir, `${sessionID}-${ts}.jsonl`)
-      this._dirReady = fs.mkdir(dir, { recursive: true }).then(() => undefined)
+      this._chain = fs.mkdir(dir, { recursive: true }).then(() => undefined)
     }
 
     log(event: RequestEvent): void {
       if (this._closed || this._errorLogged) return
-      // Fire-and-forget: chain onto the dir-ready promise so mkdir completes first.
-      this._dirReady
+      // Chain sequentially so writes preserve call order.
+      this._chain = this._chain
         .then(() => {
           if (this._closed || this._errorLogged) return
           return fs.appendFile(this.filePath, JSON.stringify(event) + "\n")
