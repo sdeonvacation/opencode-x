@@ -53,6 +53,7 @@ export namespace Hook {
     sessionID?: string
     model?: string
     prompt?: string
+    transcript_path?: string
   }
 
   export const HookDenied = NamedError.create(
@@ -303,6 +304,7 @@ export namespace Hook {
       tool_input: payload.input ?? {},
       tool_response: payload.result,
       prompt: payload.prompt,
+      transcript_path: payload.transcript_path,
     })
     const proc = Bun.spawn(["sh", "-c", def.command], {
       env,

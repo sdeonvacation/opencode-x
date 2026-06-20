@@ -1,5 +1,6 @@
 import path from "path"
 import os from "os"
+import { appendFile } from "fs/promises"
 import z from "zod"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
@@ -58,6 +59,7 @@ import { PromptSplit } from "./prompt-split"
 import { Goal } from "../goal/goal"
 import { GoalLoop } from "../goal/goal-loop"
 import { Hook } from "../hook/hook"
+import { Global } from "../global"
 import { PersistentMemory } from "../memory/persistent"
 import { makeRuntime } from "@/effect/run-service"
 import { SessionRunState } from "./run-state"
@@ -1181,7 +1183,16 @@ export namespace SessionPrompt {
               .map((p) => p.text)
               .join("\n")
             const exit = yield* Effect.exit(
-              Hook.dispatch("UserPromptSubmit", { sessionID: input.sessionID, prompt: text }, rules, cfg),
+              Hook.dispatch(
+                "UserPromptSubmit",
+                {
+                  sessionID: input.sessionID,
+                  prompt: text,
+                  transcript_path: path.join(Global.Path.transcripts, input.sessionID + ".jsonl"),
+                },
+                rules,
+                cfg,
+              ),
             )
             if (Exit.isFailure(exit)) {
               const err = Cause.squash(exit.cause)
@@ -1416,6 +1427,21 @@ export namespace SessionPrompt {
                     cost: usage.cost,
                   })
                   await Session.updateMessage(assistant)
+                  // Append Claude Code-compatible JSONL entry for hook transcript_path compat
+                  await appendFile(
+                    path.join(Global.Path.transcripts, input.sessionID + ".jsonl"),
+                    JSON.stringify({
+                      type: "assistant",
+                      message: {
+                        model: model.id,
+                        usage: {
+                          output_tokens: usage.tokens.output,
+                          cache_read_input_tokens: usage.tokens.cache.read,
+                        },
+                      },
+                    }) + "\n",
+                    "utf8",
+                  ).catch(() => {})
                 }
               }
             } catch (err) {

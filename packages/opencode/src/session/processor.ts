@@ -31,6 +31,9 @@ import { Checkpoint } from "./checkpoint"
 import { SnapshotGate } from "./snapshot-gate" // [fork-perf] Phase 4
 import { ReactiveCompact } from "./llm/reactive-compact" // [fork-perf] Phase 5
 import { DetachedNotes } from "./detached-notes"
+import { appendFile } from "fs/promises"
+import { Global } from "@/global"
+import path from "path"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -663,6 +666,21 @@ export namespace SessionProcessor {
                 ...(rid ? { response_id: rid } : {}),
               })
               yield* session.updateMessage(ctx.assistantMessage)
+              // Append Claude Code-compatible JSONL entry for hook transcript_path compat
+              appendFile(
+                path.join(Global.Path.transcripts, ctx.sessionID + ".jsonl"),
+                JSON.stringify({
+                  type: "assistant",
+                  message: {
+                    model: ctx.model.id,
+                    usage: {
+                      output_tokens: usage.tokens.output,
+                      cache_read_input_tokens: usage.tokens.cache.read,
+                    },
+                  },
+                }) + "\n",
+                "utf8",
+              ).catch(() => {})
               if (ctx.snapshot) {
                 // [fork-perf] Phase 4: gated snapshot patch — returns undefined when no FS tool fired
                 const patch = yield* SnapshotGate.patch(ctx, snapshot, cfg.experimental?.skip_snapshot_no_fs !== false)
