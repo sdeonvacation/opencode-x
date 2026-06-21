@@ -478,7 +478,17 @@ export namespace LSP {
 
             // Try to add folder to existing multi-root client (same server type)
             if (!internal) {
-              const candidate = s.clients.find((x) => x.serverID === server.id && x.multiRoot)
+              let candidate = s.clients.find((x) => x.serverID === server.id && x.multiRoot)
+
+              // Race guard: await any in-flight spawn of same server type
+              if (!candidate) {
+                const inflight = [...s.spawning.entries()].find(([key]) => key.endsWith(server.id))
+                if (inflight) {
+                  const spawned = await inflight[1]
+                  if (spawned?.multiRoot) candidate = spawned
+                }
+              }
+
               if (candidate) {
                 await candidate.addFolder(root)
                 result.push(candidate)
