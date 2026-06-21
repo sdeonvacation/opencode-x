@@ -40,3 +40,6 @@ packages/opencode/src/provider/models-snapshot.js
 .code-review-graph/
 /.claude
 /.opencode
+/product-intro/renders
+/product-intro/.hyperframes
+/product-intro/.thumbnails

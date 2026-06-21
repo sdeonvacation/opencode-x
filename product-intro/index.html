@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <script src="three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #07070d;
+        font-family: "Inter", sans-serif;
+      }
+
+      /* Three.js background */
+      #three-bg {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        display: block;
+      }
+
+      /* Shader overlay */
+      #shader-fx {
+        position: absolute;
+        inset: 0;
+        z-index: 200;
+        pointer-events: none;
+        display: block;
+      }
+
+      /* Scene base */
+      .scene {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        z-index: 10;
+      }
+      .scene:not(#scene-open) {
+        opacity: 0;
+      }
+      #scene-open,
+      #scene-end {
+        background: radial-gradient(
+          ellipse 100% 100% at 50% 50%,
+          rgba(7, 7, 13, 0.88) 0%,
+          rgba(7, 7, 13, 0.75) 60%,
+          transparent 100%
+        );
+      }
+
+      /* ===== CSS ANIMATIONS ===== */
+      @keyframes scanline {
+        0% {
+          transform: translateY(-100%);
+        }
+        100% {
+          transform: translateY(1080px);
+        }
+      }
+      @keyframes gridPulse {
+        0%,
+        100% {
+          opacity: 0.03;
+        }
+        50% {
+          opacity: 0.08;
+        }
+      }
+      @keyframes glowBreathe {
+        0%,
+        100% {
+          opacity: 0.4;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.7;
+          transform: scale(1.05);
+        }
+      }
+      @keyframes dataFlow {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(200%);
+        }
+      }
+
+      /* Ambient grid (CSS animation) */
+      .ambient-grid {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        background-image:
+          linear-gradient(rgba(0, 229, 255, 0.02) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(0, 229, 255, 0.02) 1px, transparent 1px);
+        background-size: 80px 80px;
+        animation: gridPulse 4s ease-in-out infinite;
+      }
+
+      /* Scanline (CSS animation) */
+      .scanline {
+        position: absolute;
+        left: 0;
+        width: 100%;
+        height: 3px;
+        z-index: 150;
+        background: linear-gradient(90deg, transparent, rgba(0, 229, 255, 0.4), transparent);
+        animation: scanline 3s linear infinite;
+      }
+
+      /* Noise overlay */
+      .noise {
+        position: absolute;
+        inset: 0;
+        z-index: 160;
+        pointer-events: none;
+        opacity: 0.035;
+        background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      }
+
+      /* ===== SCENE STYLES ===== */
+
+      /* Scene: Opening */
+      #scene-open .hero-img {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) perspective(1200px) rotateY(-4deg);
+        width: 1100px;
+        border-radius: 12px;
+        box-shadow:
+          0 0 80px rgba(0, 229, 255, 0.2),
+          0 40px 100px rgba(0, 0, 0, 0.6);
+      }
+      #scene-open .title-bar {
+        position: absolute;
+        bottom: 180px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 22px;
+        color: #9b9bb0;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+      #scene-open .glow-orb {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 600px;
+        height: 600px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(0, 229, 255, 0.15) 0%, transparent 70%);
+        animation: glowBreathe 3s ease-in-out infinite;
+      }
+
+      /* Feature scenes shared */
+      .feature-scene {
+        display: flex;
+        align-items: center;
+        padding: 0 140px;
+        gap: 80px;
+        background: radial-gradient(
+          ellipse 120% 100% at 30% 50%,
+          rgba(7, 7, 13, 0.92) 0%,
+          rgba(7, 7, 13, 0.7) 50%,
+          transparent 80%
+        );
+      }
+      .feature-text {
+        flex: 1;
+        max-width: 700px;
+      }
+      .feature-text h2 {
+        font-size: 72px;
+        font-weight: 700;
+        color: #e8e8f0;
+        line-height: 1.1;
+        margin-bottom: 16px;
+      }
+      .feature-text .cmd {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 28px;
+        color: #00e5ff;
+        margin-bottom: 12px;
+        opacity: 0.9;
+      }
+      .feature-text p {
+        font-family: "Inter", sans-serif;
+        font-size: 28px;
+        color: #9b9bb0;
+        line-height: 1.4;
+      }
+      .feature-graphic {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        height: 500px;
+      }
+
+      /* Goal graphic - infinity loop */
+      .goal-loop {
+        position: relative;
+        width: 360px;
+        height: 200px;
+      }
+      .goal-loop svg {
+        width: 100%;
+        height: 100%;
+      }
+      .goal-orbit {
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #00e5ff;
+        box-shadow: 0 0 20px #00e5ff;
+        top: 50%;
+        left: 0;
+        transform: translate(-50%, -50%);
+      }
+      #lottie-goal {
+        position: absolute;
+        width: 200px;
+        height: 200px;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        opacity: 0.6;
+      }
+
+      /* Swarm graphic - node grid */
+      .swarm-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 24px;
+        width: 400px;
+      }
+      .swarm-node {
+        width: 72px;
+        height: 72px;
+        border-radius: 12px;
+        border: 2px solid #7c3aed;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(124, 58, 237, 0.08);
+        position: relative;
+      }
+      .swarm-node::after {
+        content: "";
+        position: absolute;
+        inset: -4px;
+        border-radius: 16px;
+        border: 1px solid rgba(124, 58, 237, 0.3);
+        opacity: 0;
+      }
+      .swarm-node .dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #7c3aed;
+      }
+
+      /* Dream graphic - neural */
+      .dream-neural {
+        position: relative;
+        width: 400px;
+        height: 400px;
+      }
+      .dream-node {
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #f72585;
+        box-shadow: 0 0 16px rgba(247, 37, 133, 0.5);
+      }
+      .dream-core {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        background: radial-gradient(circle, #f72585, #7c3aed);
+        box-shadow: 0 0 40px rgba(247, 37, 133, 0.4);
+      }
+      .dream-line {
+        position: absolute;
+        height: 2px;
+        background: linear-gradient(90deg, #f72585, transparent);
+        transform-origin: left center;
+      }
+
+      /* Worktree graphic - branches */
+      .worktree-visual {
+        position: relative;
+        width: 400px;
+        height: 360px;
+      }
+      .wt-branch {
+        position: absolute;
+        height: 4px;
+        border-radius: 2px;
+        background: linear-gradient(90deg, #00e5ff, rgba(0, 229, 255, 0.2));
+      }
+      .wt-node {
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #00e5ff;
+        box-shadow: 0 0 12px rgba(0, 229, 255, 0.5);
+      }
+      .wt-label {
+        position: absolute;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 16px;
+        color: #9b9bb0;
+      }
+
+      /* Workflow graphic */
+      .workflow-pipe {
+        position: relative;
+        width: 450px;
+        height: 200px;
+      }
+      .wf-stage {
+        position: absolute;
+        width: 80px;
+        height: 80px;
+        border-radius: 16px;
+        border: 2px solid #ffc300;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 195, 0, 0.05);
+      }
+      .wf-stage .inner {
+        width: 12px;
+        height: 12px;
+        border-radius: 4px;
+        background: #ffc300;
+      }
+      .wf-arrow {
+        position: absolute;
+        height: 3px;
+        background: linear-gradient(90deg, #ffc300, rgba(255, 195, 0, 0.3));
+      }
+
+      /* Skills/bg graphic */
+      .skills-stack {
+        position: relative;
+        width: 380px;
+        height: 300px;
+      }
+      .skill-card {
+        position: absolute;
+        width: 280px;
+        height: 80px;
+        border-radius: 12px;
+        border: 1px solid rgba(0, 229, 255, 0.3);
+        background: rgba(18, 18, 31, 0.9);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        gap: 16px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 18px;
+        color: #e8e8f0;
+      }
+      .skill-card .icon {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        background: rgba(0, 229, 255, 0.15);
+      }
+
+      /* Token graphic */
+      .token-visual {
+        position: relative;
+        width: 420px;
+        height: 300px;
+      }
+      .token-bar {
+        position: absolute;
+        left: 0;
+        height: 32px;
+        border-radius: 6px;
+        background: linear-gradient(90deg, #00e5ff, #7c3aed);
+      }
+      .token-label {
+        position: absolute;
+        right: -60px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 16px;
+        color: #9b9bb0;
+      }
+      .token-saved {
+        position: absolute;
+        font-family: "Inter", sans-serif;
+        font-size: 48px;
+        font-weight: 700;
+        color: #00e5ff;
+      }
+
+      /* End card */
+      #scene-end .end-content {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 24px;
+      }
+      #scene-end .end-logo {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 64px;
+        font-weight: 700;
+        color: #e8e8f0;
+        letter-spacing: -2px;
+      }
+      #scene-end .end-tagline {
+        font-size: 36px;
+        color: #9b9bb0;
+        font-family: "Inter", sans-serif;
+      }
+      #scene-end .end-url {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 24px;
+        color: #00e5ff;
+        margin-top: 16px;
+        padding: 12px 32px;
+        border: 1px solid rgba(0, 229, 255, 0.3);
+        border-radius: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div data-hf-id="hf-wlnq" data-composition-id="opencode-intro" data-width="1920" data-height="1080" data-start="0" data-duration="25" style="position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #07070d">
+      <!-- Three.js particle background -->
+      <canvas data-hf-id="hf-q2fe" id="three-bg"></canvas>
+
+      <!-- CSS ambient layers -->
+      <div data-hf-id="hf-0h3w" class="ambient-grid" data-layout-ignore=""></div>
+      <div data-hf-id="hf-6esc" class="scanline" data-layout-ignore=""></div>
+      <div data-hf-studio-original-rotation-transform-origin="" data-hf-studio-original-inline-rotate="none" data-hf-studio-original-rotate="" data-hf-studio-rotation="true" data-hf-studio-original-inline-translate="none" data-hf-studio-original-translate="" data-hf-studio-path-offset="true" style="--hf-studio-offset-x: -1px; --hf-studio-offset-y: 29px; translate: var(--hf-studio-offset-x, 0px) var(--hf-studio-offset-y, 0px); --hf-studio-rotation: -1deg; rotate: var(--hf-studio-rotation, 0deg); transform-origin: center center" data-hf-id="hf-2ztv" class="noise" data-layout-ignore=""></div>
+
+      <!-- WebGL shader overlay -->
+      <canvas data-hf-id="hf-6ero" id="shader-fx"></canvas>
+
+      <!-- ===== SCENE: OPENING ===== -->
+      <div data-hf-id="hf-35ab" id="scene-open" class="scene">
+        <div data-hf-id="hf-0p4j" class="glow-orb"></div>
+        <img data-hf-id="hf-rit7" class="hero-img" src="intro-screenshot.png" crossorigin="anonymous">
+        <div data-hf-id="hf-hkdv" class="title-bar">the alpha coding agent</div>
+      </div>
+
+      <!-- ===== SCENE: GOAL ===== -->
+      <div data-hf-id="hf-k02n" id="scene-goal" class="scene feature-scene">
+        <div data-hf-id="hf-l0c6" class="feature-text">
+          <div data-hf-id="hf-axm6" class="cmd">/goal</div>
+          <h2 data-hf-id="hf-2mly">Loop Engineering</h2>
+          <p data-hf-id="hf-5hrl">Set autonomous objectives. Agent self-steers until done.</p>
+        </div>
+        <div data-hf-id="hf-3iv9" class="feature-graphic">
+          <div data-hf-id="hf-wh6g" class="goal-loop">
+            <svg data-hf-id="hf-zy1i" viewBox="0 0 360 200" fill="none">
+              <path data-hf-id="hf-izsi" d="M90 100c0-44 36-80 80-80s80 36 80 80-36 80-80 80" stroke="#00e5ff" stroke-width="3" opacity="0.6" />
+              <path data-hf-id="hf-aqak" d="M270 100c0 44-36 80-80 80s-80-36-80-80 36-80 80-80" stroke="#7c3aed" stroke-width="3" opacity="0.6" />
+              <path data-hf-id="hf-3s6f" d="M50 100 C50 30 130 30 180 100 C230 170 310 170 310 100 C310 30 230 30 180 100 C130 170 50 170 50 100Z" stroke="#00e5ff" stroke-width="2.5" stroke-linecap="round" />
+            </svg>
+            <div data-hf-id="hf-ryqu" class="goal-orbit"></div>
+          </div>
+          <div data-hf-id="hf-6e90" id="lottie-goal"></div>
+        </div>
+      </div>
+
+      <!-- ===== SCENE: SWARM ===== -->
+      <div data-hf-id="hf-nnne" id="scene-swarm" class="scene feature-scene">
+        <div data-hf-id="hf-h5ju" class="feature-text">
+          <div data-hf-id="hf-269j" class="cmd">/swarm</div>
+          <h2 data-hf-id="hf-kpgb">Swarm Execution</h2>
+          <p data-hf-id="hf-m1lj">Batch-parallel N subagents. Same template, different inputs.</p>
+        </div>
+        <div data-hf-id="hf-13mh" class="feature-graphic">
+          <div data-hf-id="hf-smj9" class="swarm-grid">
+            <div data-hf-id="hf-qzlt" class="swarm-node"><div data-hf-id="hf-lu65" class="dot"></div></div>
+            <div data-hf-id="hf-tk9h" class="swarm-node"><div data-hf-id="hf-ww7l" class="dot"></div></div>
+            <div data-hf-id="hf-ur6k" class="swarm-node"><div data-hf-id="hf-y34o" class="dot"></div></div>
+            <div data-hf-id="hf-ucvj" class="swarm-node"><div data-hf-id="hf-xotn" class="dot"></div></div>
+            <div data-hf-id="hf-vjsm" class="swarm-node"><div data-hf-id="hf-vpai" class="dot"></div></div>
+            <div data-hf-id="hf-v5hl" class="swarm-node"><div data-hf-id="hf-vazh" class="dot"></div></div>
+            <div data-hf-id="hf-wceo" class="swarm-node"><div data-hf-id="hf-whwk" class="dot"></div></div>
+            <div data-hf-id="hf-vy3n" class="swarm-node"><div data-hf-id="hf-w3lj" class="dot"></div></div>
+            <div data-hf-id="hf-qs4a" class="swarm-node"><div data-hf-id="hf-0gyu" class="dot"></div></div>
+            <div data-hf-id="hf-qdt9" class="swarm-node"><div data-hf-id="hf-02nt" class="dot"></div></div>
+            <div data-hf-id="hf-eagv" class="swarm-node"><div data-hf-id="hf-pt6b" class="dot"></div></div>
+            <div data-hf-id="hf-eorw" class="swarm-node"><div data-hf-id="hf-q7hc" class="dot"></div></div>
+            <div data-hf-id="hf-dhut" class="swarm-node"><div data-hf-id="hf-p0k9" class="dot"></div></div>
+            <div data-hf-id="hf-dw5u" class="swarm-node"><div data-hf-id="hf-peva" class="dot"></div></div>
+            <div data-hf-id="hf-fvoz" class="swarm-node"><div data-hf-id="hf-o7y7" class="dot"></div></div>
+            <div data-hf-id="hf-ga00" class="swarm-node"><div data-hf-id="hf-om98" class="dot"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== SCENE: DREAM ===== -->
+      <div data-hf-id="hf-ri5b" id="scene-dream" class="scene feature-scene">
+        <div data-hf-id="hf-hjuv" class="feature-text">
+          <div data-hf-id="hf-fd1u" class="cmd">dream &amp; distill</div>
+          <h2 data-hf-id="hf-ff81">Persistent Memory</h2>
+          <p data-hf-id="hf-59uh">Consolidate learnings. Extract skills. Never forget.</p>
+        </div>
+        <div data-hf-id="hf-2ajk" class="feature-graphic">
+          <div data-hf-id="hf-nisv" class="dream-neural">
+            <div data-hf-id="hf-y29j" class="dream-core"></div>
+            <div data-hf-id="hf-fgzj" class="dream-node" style="top: 15%; left: 20%"></div>
+            <div data-hf-id="hf-exnr" class="dream-node" style="top: 25%; left: 70%"></div>
+            <div data-hf-id="hf-2mpc" class="dream-node" style="top: 60%; left: 10%"></div>
+            <div data-hf-id="hf-mffm" class="dream-node" style="top: 70%; left: 80%"></div>
+            <div data-hf-id="hf-4w5i" class="dream-node" style="top: 85%; left: 40%"></div>
+            <div data-hf-id="hf-ezuo" class="dream-node" style="top: 40%; left: 85%"></div>
+            <div data-hf-id="hf-d2aj" class="dream-line" style="top: 50%; left: 30%; width: 80px; transform: rotate(-30deg)"></div>
+            <div data-hf-id="hf-8xv9" class="dream-line" style="top: 50%; left: 55%; width: 100px; transform: rotate(20deg)"></div>
+            <div data-hf-id="hf-z8ao" class="dream-line" style="top: 50%; left: 20%; width: 120px; transform: rotate(45deg)"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== SCENE: WORKTREES (sub-composition) ===== -->
+      <div data-hf-id="hf-euwe" id="scene-wt" class="scene feature-scene" style="opacity: 0">
+        <div data-hf-id="hf-hy5w" class="feature-text">
+          <div data-hf-id="hf-ojxu" class="cmd">--worktree &lt;name&gt;</div>
+          <h2 data-hf-id="hf-mlha">Worktree Isolation</h2>
+          <p data-hf-id="hf-8iej">Parallel agents, zero conflicts. Patch-back on complete.</p>
+        </div>
+        <div data-hf-id="hf-a07d" class="feature-graphic" style="position: relative; overflow: hidden">
+          <div data-hf-id="hf-s2kp" id="wt-terminal" data-composition-id="code-snippet-apple-terminal-basic" data-composition-src="compositions/code-snippet-apple-terminal-basic.html" data-start="11.5" data-duration="2.5" data-track-index="2" data-width="1920" data-height="1080" style="
+              position: absolute;
+              top: 50%;
+              left: 50%;
+              width: 1920px;
+              height: 1080px;
+              transform: translate(-50%, -50%) scale(0.42);
+              transform-origin: center center;
+            "></div>
+        </div>
+      </div>
+
+      <!-- ===== SCENE: WORKFLOW ===== -->
+      <div data-hf-id="hf-pw7t" id="scene-wf" class="scene feature-scene">
+        <div data-hf-id="hf-icgx" class="feature-text">
+          <div data-hf-id="hf-29nk" class="cmd">/workflow</div>
+          <h2 data-hf-id="hf-icwk">Deterministic Pipelines</h2>
+          <p data-hf-id="hf-meez">QuickJS sandbox. Multi-agent orchestration with replay.</p>
+        </div>
+        <div data-hf-id="hf-zwpe" class="feature-graphic">
+          <div data-hf-id="hf-ss6s" class="workflow-pipe">
+            <div data-hf-id="hf-52wh" class="wf-stage" style="top: 60px; left: 0">
+              <div data-hf-id="hf-lm34" class="inner"></div>
+            </div>
+            <div data-hf-id="hf-6ycg" class="wf-arrow" style="top: 99px; left: 90px; width: 60px"></div>
+            <div data-hf-id="hf-xpbm" class="wf-stage" style="top: 60px; left: 160px">
+              <div data-hf-id="hf-bug8" class="inner"></div>
+            </div>
+            <div data-hf-id="hf-0n8q" class="wf-arrow" style="top: 99px; left: 250px; width: 60px"></div>
+            <div data-hf-id="hf-kdfo" class="wf-stage" style="top: 60px; left: 320px">
+              <div data-hf-id="hf-anj5" class="inner"></div>
+            </div>
+            <div data-hf-id="hf-kwni" class="wf-arrow" style="top: 99px; left: 410px; width: 40px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== SCENE: SKILLS + BG ===== -->
+      <div data-hf-id="hf-kzjc" id="scene-skills" class="scene feature-scene">
+        <div data-hf-id="hf-iqry" class="feature-text">
+          <div data-hf-id="hf-3bzn" class="cmd">skills · plugins · push-to-bg</div>
+          <h2 data-hf-id="hf-ioj2">Extends Claude Code</h2>
+          <p data-hf-id="hf-vhqm">
+            Native Claude Code skills, agents &amp; plugins. /btw, spinner verbs, usage tracking.
+          </p>
+        </div>
+        <div data-hf-id="hf-zied" class="feature-graphic">
+          <div data-hf-id="hf-6a91" class="skills-stack">
+            <div data-hf-id="hf-0yws" class="skill-card" style="top: 0; left: 0">
+              <div data-hf-id="hf-eto3" class="icon"></div>
+              /btw
+            </div>
+            <div data-hf-id="hf-dy03" class="skill-card" style="top: 90px; left: 40px">
+              <div data-hf-id="hf-dez7" class="icon"></div>
+              spinner verbs
+            </div>
+            <div data-hf-id="hf-xx1c" class="skill-card" style="top: 180px; left: 80px">
+              <div data-hf-id="hf-d0o6" class="icon"></div>
+              usage tracking
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== SCENE: TOKEN INTELLIGENCE ===== -->
+      <div data-hf-id="hf-b6wt" id="scene-token" class="scene feature-scene">
+        <div data-hf-id="hf-j52z" class="feature-text">
+          <div data-hf-id="hf-zmmp" class="cmd">cache · compress</div>
+          <h2 data-hf-id="hf-tvhf">Token Intelligence</h2>
+          <p data-hf-id="hf-lrd9">Cache stability. Tool output compression.</p>
+        </div>
+        <div data-hf-id="hf-0pbg" class="feature-graphic">
+          <div data-hf-id="hf-pwxw" class="token-visual">
+            <div data-hf-id="hf-8nrv" class="token-bar" style="top: 40px; width: 380px; opacity: 0.3"></div>
+            <div data-hf-id="hf-9u8a" class="token-bar" style="top: 40px; width: 0px" id="token-bar-1"></div>
+            <div data-hf-id="hf-yaum" class="token-bar" style="top: 100px; width: 380px; opacity: 0.3"></div>
+            <div data-hf-id="hf-h3ww" class="token-bar" style="top: 100px; width: 0px" id="token-bar-2"></div>
+            <div data-hf-id="hf-yiic" class="token-bar" style="top: 160px; width: 380px; opacity: 0.3"></div>
+            <div data-hf-id="hf-v2dh" class="token-bar" style="top: 160px; width: 0px" id="token-bar-3"></div>
+            <div data-hf-id="hf-ocb8" class="token-saved" style="top: 220px; left: 0" id="token-pct">0%</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== SCENE: END ===== -->
+      <div data-hf-id="hf-f2ni" id="scene-end" class="scene">
+        <div data-hf-id="hf-dpzr" class="end-content">
+          <div data-hf-id="hf-tdy5" class="end-logo">opencode-x</div>
+          <div data-hf-id="hf-c4pf" class="end-tagline">Ship faster. Own the loop.</div>
+          <div data-hf-id="hf-p8be" class="end-url">github.com/sdeonvacation/opencode-x</div>
+        </div>
+      </div>
+
+      <!-- Audio track -->
+      <audio style="backdrop-filter: none" data-hf-id="hf-fca9" id="el-music" data-start="0" data-duration="24.33" data-track-index="0" src="music.mp3" data-volume="1"></audio>
+    </div>
+
+    <!-- ===== THREE.JS PARTICLE FIELD ===== -->
+    <script>
+      ;(function () {
+        if (typeof THREE === "undefined") return
+
+        const canvas = document.getElementById("three-bg")
+        const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true })
+        renderer.setSize(1920, 1080, false)
+        renderer.setPixelRatio(1)
+
+        const scene = new THREE.Scene()
+        const camera = new THREE.PerspectiveCamera(60, 1920 / 1080, 0.1, 1000)
+        camera.position.set(0, 0, 30)
+
+        // Seeded PRNG (mulberry32)
+        function mulberry32(a) {
+          return function () {
+            a |= 0
+            a = (a + 0x6d2b79f5) | 0
+            var t = Math.imul(a ^ (a >>> 15), 1 | a)
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+          }
+        }
+        const rand = mulberry32(42)
+
+        // Particle system
+        const count = 150
+        const positions = new Float32Array(count * 3)
+        const sizes = new Float32Array(count)
+        for (let i = 0; i < count; i++) {
+          positions[i * 3] = (rand() - 0.5) * 80
+          positions[i * 3 + 1] = (rand() - 0.5) * 50
+          positions[i * 3 + 2] = (rand() - 0.5) * 40 - 10
+          sizes[i] = rand() * 2 + 0.5
+        }
+
+        const geo = new THREE.BufferGeometry()
+        geo.setAttribute("position", new THREE.BufferAttribute(positions, 3))
+        geo.setAttribute("size", new THREE.BufferAttribute(sizes, 1))
+
+        const mat = new THREE.PointsMaterial({
+          color: 0x00e5ff,
+          size: 1.2,
+          transparent: true,
+          opacity: 0.35,
+          blending: THREE.AdditiveBlending,
+          sizeAttenuation: true,
+        })
+        const particles = new THREE.Points(geo, mat)
+        scene.add(particles)
+
+        // Secondary particles (purple)
+        const count2 = 60
+        const pos2 = new Float32Array(count2 * 3)
+        for (let i = 0; i < count2; i++) {
+          pos2[i * 3] = (rand() - 0.5) * 60
+          pos2[i * 3 + 1] = (rand() - 0.5) * 40
+          pos2[i * 3 + 2] = (rand() - 0.5) * 30 - 15
+        }
+        const geo2 = new THREE.BufferGeometry()
+        geo2.setAttribute("position", new THREE.BufferAttribute(pos2, 3))
+        const mat2 = new THREE.PointsMaterial({
+          color: 0x7c3aed,
+          size: 1.0,
+          transparent: true,
+          opacity: 0.2,
+          blending: THREE.AdditiveBlending,
+          sizeAttenuation: true,
+        })
+        scene.add(new THREE.Points(geo2, mat2))
+
+        function renderAt(time) {
+          particles.rotation.y = time * 0.03
+          particles.rotation.x = Math.sin(time * 0.15) * 0.05
+          camera.position.x = Math.sin(time * 0.1) * 2
+          camera.position.y = Math.cos(time * 0.08) * 1.5
+          renderer.render(scene, camera)
+        }
+
+        window.addEventListener("hf-seek", function (e) {
+          renderAt(e.detail.time)
+        })
+        renderAt(0)
+      })()
+    </script>
+
+    <!-- ===== WEBGL SHADER OVERLAY ===== -->
+    <script>
+      ;(function () {
+        const canvas = document.getElementById("shader-fx")
+        canvas.width = 1920
+        canvas.height = 1080
+        const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: false })
+        if (!gl) return
+
+        const vs = `attribute vec2 a_pos; varying vec2 v_uv;
+    void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0, 1); }`
+        const fs = `precision mediump float; varying vec2 v_uv;
+    uniform float u_time; uniform float u_intensity; uniform float u_type;
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+    float hash2(vec2 p) { return fract(sin(dot(p, vec2(269.5,183.3))) * 43758.5453); }
+    void main() {
+      float noise = hash(v_uv * 100.0 + u_time * 3.0);
+      float scanline = sin(v_uv.y * 800.0 + u_time * 20.0) * 0.015;
+      float grain = noise * 0.03 * u_intensity;
+
+      // Type 0: base grain
+      // Type 1: GLITCH - RGB split + horizontal tear
+      // Type 2: LIGHT LEAK - warm bloom from edge
+      // Type 3: IRIS - radial vignette close
+
+      float r = 0.0, g = 0.0, b = 0.0, a = 0.0;
+
+      if (u_type > 0.5 && u_type < 1.5) {
+        // GLITCH: RGB channel split + horizontal displacement
+        float tear = step(0.98, hash(vec2(floor(v_uv.y * 40.0), u_time * 10.0)));
+        float shift = u_intensity * 0.04 * (hash2(vec2(u_time, floor(v_uv.y * 20.0))) - 0.5);
+        r = u_intensity * 0.8 * step(0.5, hash(v_uv * 50.0 + u_time));
+        g = 0.0;
+        b = u_intensity * 0.6 * step(0.6, hash(v_uv * 70.0 - u_time * 2.0));
+        float flash = u_intensity * u_intensity * 0.4;
+        a = (r + b + tear * 0.8 + flash + grain + scanline) * u_intensity;
+        r += flash; g += flash; b += flash;
+      } else if (u_type > 1.5 && u_type < 2.5) {
+        // LIGHT LEAK: warm glow from top-right
+        vec2 leakCenter = vec2(0.85, 0.15);
+        float dist = length(v_uv - leakCenter);
+        float leak = smoothstep(0.8, 0.0, dist) * u_intensity;
+        r = leak * 1.0;
+        g = leak * 0.7;
+        b = leak * 0.3;
+        a = leak * 0.7 + grain * 0.5;
+      } else if (u_type > 2.5) {
+        // IRIS: radial black vignette closing in
+        float dist = length(v_uv - 0.5) * 2.0;
+        float iris = smoothstep(1.0 - u_intensity * 0.9, 1.0 - u_intensity * 0.4, dist);
+        r = 0.0; g = 0.0; b = 0.0;
+        a = iris * u_intensity + grain * 0.3;
+      } else {
+        // BASE: subtle grain + scanline
+        a = (scanline + grain) * u_intensity;
+      }
+
+      gl_FragColor = vec4(r, g, b, a);
+    }`
+
+        function compile(type, src) {
+          const s = gl.createShader(type)
+          gl.shaderSource(s, src)
+          gl.compileShader(s)
+          return s
+        }
+        const prog = gl.createProgram()
+        gl.attachShader(prog, compile(gl.VERTEX_SHADER, vs))
+        gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fs))
+        gl.linkProgram(prog)
+        gl.useProgram(prog)
+
+        const buf = gl.createBuffer()
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf)
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW)
+        const loc = gl.getAttribLocation(prog, "a_pos")
+        gl.enableVertexAttribArray(loc)
+        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
+
+        const uTime = gl.getUniformLocation(prog, "u_time")
+        const uIntensity = gl.getUniformLocation(prog, "u_intensity")
+        const uType = gl.getUniformLocation(prog, "u_type")
+
+        // 3 dramatic transitions + minor ones
+        var dramatic = [
+          { t: 3.8, type: 1, dur: 0.5 }, // GLITCH: Open → Goal
+          { t: 11.3, type: 2, dur: 0.6 }, // LIGHT LEAK: Dream → Worktree
+          { t: 20.3, type: 3, dur: 0.7 }, // IRIS: Token → End
+        ]
+        var minor = [6.3, 8.8, 13.8, 15.8, 17.8]
+
+        function renderAt(time) {
+          var intensity = 0.12 // base grain
+          var type = 0
+
+          // Check dramatic transitions
+          for (var i = 0; i < dramatic.length; i++) {
+            var d = Math.abs(time - dramatic[i].t)
+            if (d < dramatic[i].dur) {
+              var str = 1.0 - d / dramatic[i].dur
+              if (str > intensity) {
+                intensity = str
+                type = dramatic[i].type
+              }
+            }
+          }
+          // Check minor transitions (base glitch burst)
+          for (var j = 0; j < minor.length; j++) {
+            var dm = Math.abs(time - minor[j])
+            if (dm < 0.2 && type === 0) {
+              intensity = Math.max(intensity, (1.0 - dm / 0.2) * 0.5)
+            }
+          }
+
+          gl.uniform1f(uTime, time)
+          gl.uniform1f(uIntensity, intensity)
+          gl.uniform1f(uType, type)
+          gl.enable(gl.BLEND)
+          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+        }
+
+        window.addEventListener("hf-seek", function (e) {
+          renderAt(e.detail.time)
+        })
+        renderAt(0)
+      })()
+    </script>
+
+    <!-- ===== LOTTIE (Goal orbiting ring) ===== -->
+    <script>
+      ;(function () {
+        var animData = {
+          v: "5.7.4",
+          fr: 30,
+          ip: 0,
+          op: 90,
+          w: 200,
+          h: 200,
+          layers: [
+            {
+              ty: 4,
+              nm: "ring",
+              sr: 1,
+              ks: {
+                o: { a: 0, k: 80 },
+                r: {
+                  a: 1,
+                  k: [
+                    { i: { x: [0.4], y: [1] }, o: { x: [0.6], y: [0] }, t: 0, s: [0] },
+                    { t: 90, s: [360] },
+                  ],
+                },
+                p: { a: 0, k: [100, 100] },
+                a: { a: 0, k: [0, 0] },
+                s: { a: 0, k: [100, 100] },
+              },
+              shapes: [
+                {
+                  ty: "gr",
+                  it: [
+                    { ty: "el", s: { a: 0, k: [160, 160] }, p: { a: 0, k: [0, 0] } },
+                    {
+                      ty: "st",
+                      c: { a: 0, k: [0, 0.898, 1, 1] },
+                      o: { a: 0, k: 60 },
+                      w: { a: 0, k: 2 },
+                      lc: 2,
+                      d: [
+                        { n: "d", nm: "dash", v: { a: 0, k: 20 } },
+                        { n: "g", nm: "gap", v: { a: 0, k: 15 } },
+                        {
+                          n: "o",
+                          nm: "offset",
+                          v: {
+                            a: 1,
+                            k: [
+                              { t: 0, s: [0] },
+                              { t: 90, s: [100] },
+                            ],
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      ty: "tr",
+                      p: { a: 0, k: [0, 0] },
+                      a: { a: 0, k: [0, 0] },
+                      s: { a: 0, k: [100, 100] },
+                      r: { a: 0, k: 0 },
+                      o: { a: 0, k: 100 },
+                    },
+                  ],
+                },
+              ],
+              ip: 0,
+              op: 90,
+            },
+          ],
+        }
+
+        var anim = lottie.loadAnimation({
+          container: document.getElementById("lottie-goal"),
+          renderer: "svg",
+          loop: false,
+          autoplay: false,
+          animationData: animData,
+        })
+
+        window.__hfLottie = window.__hfLottie || []
+        window.__hfLottie.push(anim)
+      })()
+    </script>
+
+    <!-- ===== GSAP MASTER TIMELINE ===== -->
+    <script>
+      ;(function () {
+        window.__timelines = window.__timelines || {}
+        var tl = gsap.timeline({ paused: true })
+
+        // === SCENE: OPENING (0-4s) ===
+        tl.from("#scene-open .glow-orb", { scale: 0, opacity: 0, duration: 1.0, ease: "expo.out" }, 0.1)
+        tl.from("#scene-open .hero-img", { y: 80, opacity: 0, scale: 0.9, duration: 0.9, ease: "power3.out" }, 0.3)
+        tl.from("#scene-open .title-bar", { y: 20, opacity: 0, duration: 0.5, ease: "power2.out" }, 0.8)
+        // Ken Burns zoom on screenshot (starts after entrance completes at 1.2s)
+        tl.to("#scene-open .hero-img", { scale: 1.04, duration: 2.5, ease: "none" }, 1.3)
+
+        // === TRANSITION: Open → Goal (3.8s) — shader glitch handles visual ===
+        tl.set("#scene-open", { opacity: 0 }, 3.8)
+        tl.set("#scene-goal", { opacity: 1 }, 3.8)
+
+        // === SCENE: GOAL (4-6.5s) ===
+        tl.from("#scene-goal .cmd", { x: -30, opacity: 0, duration: 0.3, ease: "expo.out" }, 4.1)
+        tl.from("#scene-goal h2", { y: 40, opacity: 0, duration: 0.4, ease: "power3.out" }, 4.2)
+        tl.from("#scene-goal p", { y: 20, opacity: 0, duration: 0.3, ease: "power2.out" }, 4.4)
+        tl.from("#scene-goal .goal-loop", { scale: 0.7, opacity: 0, duration: 0.5, ease: "back.out(1.4)" }, 4.2)
+        tl.from("#scene-goal .goal-orbit", { scale: 0, duration: 0.3, ease: "elastic.out(1, 0.5)" }, 4.5)
+        // Orbit animation (sine wave path without MotionPath plugin)
+        tl.to("#scene-goal .goal-orbit", { x: 180, y: -60, duration: 0.5, ease: "sine.inOut" }, 4.5)
+        tl.to("#scene-goal .goal-orbit", { x: 340, y: 0, duration: 0.5, ease: "sine.inOut" }, 5.0)
+        tl.to("#scene-goal .goal-orbit", { x: 180, y: 60, duration: 0.5, ease: "sine.inOut" }, 5.5)
+        tl.to("#scene-goal .goal-orbit", { x: 0, y: 0, duration: 0.5, ease: "sine.inOut" }, 6.0)
+        tl.from("#lottie-goal", { opacity: 0, scale: 0.5, duration: 0.4, ease: "power2.out" }, 4.3)
+
+        // === TRANSITION: Goal → Swarm (6.3s) ===
+        tl.to("#scene-goal", { opacity: 0, duration: 0.25, ease: "power4.in" }, 6.3)
+        tl.set("#scene-swarm", { opacity: 1 }, 6.5)
+
+        // === SCENE: SWARM (6.5-9s) ===
+        tl.from("#scene-swarm .cmd", { x: -30, opacity: 0, duration: 0.25, ease: "expo.out" }, 6.6)
+        tl.from("#scene-swarm h2", { y: 40, opacity: 0, duration: 0.35, ease: "power3.out" }, 6.7)
+        tl.from("#scene-swarm p", { y: 20, opacity: 0, duration: 0.3, ease: "power2.out" }, 6.9)
+        tl.from(".swarm-node", { scale: 0, opacity: 0, duration: 0.2, stagger: 0.04, ease: "back.out(2)" }, 6.7)
+        // Pulse effect on nodes
+        tl.to(
+          ".swarm-node .dot",
+          { scale: 1.5, opacity: 0.5, duration: 0.3, stagger: 0.03, ease: "power2.out", yoyo: true, repeat: 1 },
+          7.5,
+        )
+
+        // === TRANSITION: Swarm → Dream (8.8s) ===
+        tl.to("#scene-swarm", { opacity: 0, duration: 0.25, ease: "power4.in" }, 8.8)
+        tl.set("#scene-dream", { opacity: 1 }, 9.0)
+
+        // === SCENE: DREAM (9-11.5s) ===
+        tl.from("#scene-dream .cmd", { x: -30, opacity: 0, duration: 0.25, ease: "expo.out" }, 9.1)
+        tl.from("#scene-dream h2", { y: 40, opacity: 0, duration: 0.35, ease: "power3.out" }, 9.2)
+        tl.from("#scene-dream p", { y: 20, opacity: 0, duration: 0.3, ease: "power2.out" }, 9.4)
+        tl.from(".dream-core", { scale: 0, opacity: 0, duration: 0.5, ease: "elastic.out(1, 0.6)" }, 9.2)
+        tl.from(".dream-node", { scale: 0, opacity: 0, duration: 0.3, stagger: 0.06, ease: "power3.out" }, 9.3)
+        // Nodes converge toward core
+        tl.to(".dream-node", { x: "+=20", y: "+=10", duration: 1.5, stagger: 0.1, ease: "sine.inOut" }, 9.8)
+        tl.from(".dream-line", { scaleX: 0, opacity: 0, duration: 0.4, stagger: 0.1, ease: "power2.out" }, 9.6)
+
+        // === TRANSITION: Dream → Worktree (11.3s) — shader light-leak handles visual ===
+        tl.set("#scene-dream", { opacity: 0 }, 11.3)
+        tl.set("#scene-wt", { opacity: 1 }, 11.3)
+
+        // === SCENE: WORKTREE (11.5-14s) ===
+        tl.set("#scene-wt", { opacity: 1 }, 11.5)
+        tl.from("#scene-wt .cmd", { x: -30, opacity: 0, duration: 0.25, ease: "expo.out" }, 11.6)
+        tl.from("#scene-wt h2", { y: 40, opacity: 0, duration: 0.35, ease: "power3.out" }, 11.7)
+        tl.from("#scene-wt p", { y: 20, opacity: 0, duration: 0.3, ease: "power2.out" }, 11.9)
+
+        // === TRANSITION: Worktree → Workflow (13.8s) ===
+        tl.to("#scene-wt", { opacity: 0, duration: 0.25, ease: "power4.in" }, 13.8)
+        tl.set("#scene-wf", { opacity: 1 }, 14.0)
+
+        // === SCENE: WORKFLOW (14-16s) ===
+        tl.from("#scene-wf .cmd", { x: -30, opacity: 0, duration: 0.25, ease: "expo.out" }, 14.1)
+        tl.from("#scene-wf h2", { y: 40, opacity: 0, duration: 0.35, ease: "power3.out" }, 14.2)
+        tl.from("#scene-wf p", { y: 20, opacity: 0, duration: 0.3, ease: "power2.out" }, 14.4)
+        tl.from(".wf-stage", { scale: 0, opacity: 0, duration: 0.3, stagger: 0.12, ease: "back.out(1.8)" }, 14.2)
+        tl.from(
+          ".wf-arrow",
+          { scaleX: 0, transformOrigin: "left center", duration: 0.25, stagger: 0.1, ease: "power3.out" },
+          14.5,
+        )
+        // Flow pulse through pipeline
+        tl.to(
+          ".wf-stage .inner",
+          {
+            backgroundColor: "#fff",
+            scale: 1.3,
+            duration: 0.15,
+            stagger: 0.15,
+            ease: "power2.out",
+            yoyo: true,
+            repeat: 1,
+          },
+          15.0,
+        )
+
+        // === TRANSITION: Workflow → Skills (15.8s) ===
+        tl.to("#scene-wf", { opacity: 0, duration: 0.25, ease: "power4.in" }, 15.8)
+        tl.set("#scene-skills", { opacity: 1 }, 16.0)
+
+        // === SCENE: SKILLS (16-18s) ===
+        tl.from("#scene-skills .cmd", { x: -30, opacity: 0, duration: 0.25, ease: "expo.out" }, 16.1)
+        tl.from("#scene-skills h2", { y: 40, opacity: 0, duration: 0.35, ease: "power3.out" }, 16.2)
+        tl.from("#scene-skills p", { y: 20, opacity: 0, duration: 0.3, ease: "power2.out" }, 16.4)
+        tl.from(".skill-card", { x: -60, opacity: 0, duration: 0.35, stagger: 0.12, ease: "power3.out" }, 16.2)
+        // Push to background effect - cards shift back
+        tl.to(
+          ".skill-card",
+          { x: 20, opacity: 0.6, scale: 0.95, duration: 0.5, stagger: 0.08, ease: "power2.inOut" },
+          17.2,
+        )
+
+        // === TRANSITION: Skills → Token (17.8s) ===
+        tl.to("#scene-skills", { opacity: 0, duration: 0.25, ease: "power4.in" }, 17.8)
+        tl.set("#scene-token", { opacity: 1 }, 18.0)
+
+        // === SCENE: TOKEN INTELLIGENCE (18-20.5s) ===
+        tl.from("#scene-token .cmd", { x: -30, opacity: 0, duration: 0.25, ease: "expo.out" }, 18.1)
+        tl.from("#scene-token h2", { y: 40, opacity: 0, duration: 0.35, ease: "power3.out" }, 18.2)
+        tl.from("#scene-token p", { y: 20, opacity: 0, duration: 0.3, ease: "power2.out" }, 18.4)
+        // Bars fill then compress
+        tl.to("#token-bar-1", { width: 340, duration: 0.4, ease: "power2.out" }, 18.3)
+        tl.to("#token-bar-2", { width: 280, duration: 0.4, ease: "power2.out" }, 18.5)
+        tl.to("#token-bar-3", { width: 200, duration: 0.4, ease: "power2.out" }, 18.7)
+        // Compress animation
+        tl.to("#token-bar-1", { width: 140, duration: 0.5, ease: "power3.inOut" }, 19.2)
+        tl.to("#token-bar-2", { width: 100, duration: 0.5, ease: "power3.inOut" }, 19.3)
+        tl.to("#token-bar-3", { width: 70, duration: 0.5, ease: "power3.inOut" }, 19.4)
+        // Counter
+        var counter = { val: 0 }
+        tl.to(
+          counter,
+          {
+            val: 67,
+            duration: 0.8,
+            ease: "power2.out",
+            onUpdate: function () {
+              document.getElementById("token-pct").textContent = Math.round(counter.val) + "% saved"
+            },
+          },
+          19.2,
+        )
+
+        // === TRANSITION: Token → End (20.3s) — shader iris handles visual ===
+        tl.set("#scene-token", { opacity: 0 }, 20.3)
+        tl.set("#scene-end", { opacity: 1 }, 20.3)
+
+        // === SCENE: END (20.5-25s) ===
+        tl.from("#scene-end .end-logo", { scale: 0.8, opacity: 0, duration: 0.6, ease: "expo.out" }, 20.7)
+        tl.from("#scene-end .end-tagline", { y: 30, opacity: 0, duration: 0.5, ease: "power3.out" }, 21.0)
+        tl.from("#scene-end .end-url", { y: 20, opacity: 0, duration: 0.4, ease: "power2.out" }, 21.3)
+        // Breathe on end card
+        tl.to("#scene-end .end-logo", { scale: 1.02, duration: 3.0, ease: "sine.inOut", yoyo: true, repeat: 1 }, 21.5)
+        // Final fade
+        tl.to("#scene-end .end-content", { opacity: 0.8, duration: 1.0, ease: "power2.in" }, 24.0)
+
+        window.__timelines["opencode-intro"] = tl
+      })()
+    </script>
+  </body>
+</html>
