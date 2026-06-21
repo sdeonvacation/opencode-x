@@ -199,7 +199,7 @@ export namespace ToolRegistry {
           ...(cfg.experimental?.goal_system !== false ? [GoalCompleteTool] : []),
           ...(cfg.experimental?.persistent_memory !== false ? [MemoryPersistTool] : []),
           ...(cfg.experimental?.swarm !== false ? [swarm] : []),
-          ...(cfg.experimental?.deep_research !== false ? [research] : []),
+          ...(cfg.experimental?.deep_research === true ? [research] : []),
           ...(cfg.experimental?.workflow !== false ? [workflow] : []),
           ...s.custom,
         ]

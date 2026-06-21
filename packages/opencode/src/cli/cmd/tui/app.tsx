@@ -9,6 +9,7 @@ import { createWorktreeCommand } from "@tui/command/worktree-command"
 import { createConfigCommand } from "@tui/command/config-command"
 import { createUsageCommand } from "@tui/command/usage-command"
 import { createWorkflowCommand } from "@tui/command/workflow-command"
+import { createResearchCommand } from "@tui/command/research-command"
 import { useTerminalTitle } from "@tui/component/terminal-title"
 import { RouteProvider, useRoute } from "@tui/context/route"
 import {
@@ -581,6 +582,9 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     createConfigCommand({ sdk: { url: sdk.url, fetch: sdk.fetch }, toast, dialog }),
     createUsageCommand({ sdk: { url: sdk.url, fetch: sdk.fetch }, toast, dialog, route }),
     createWorkflowCommand({ dialog, toast, sdk: { url: sdk.url, fetch: sdk.fetch }, route }),
+    ...((sync.data.config.experimental as any)?.deep_research === true
+      ? [createResearchCommand({ dialog, toast, sdk, route })]
+      : []),
     {
       title: "Exit the app",
       value: "app.exit",

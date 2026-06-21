@@ -10,7 +10,7 @@ export type ResearchCommandDeps = {
   sdk: {
     client: {
       session: {
-        complete: (input: { sessionID: string; parts: { type: "text"; text: string }[] }) => Promise<unknown>
+        prompt: (input: { sessionID: string; parts: { type: "text"; text: string }[] }) => Promise<unknown>
       }
     }
   }
@@ -42,7 +42,7 @@ export function createResearchCommand(deps: ResearchCommandDeps): CommandOption 
 
       deps.dialog.clear()
       deps.sdk.client.session
-        .complete({
+        .prompt({
           sessionID: session.sessionID,
           parts: [{ type: "text", text: `Use the research tool to investigate: ${question.trim()}` }],
         })
