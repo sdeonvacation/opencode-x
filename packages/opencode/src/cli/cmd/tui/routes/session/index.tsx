@@ -94,7 +94,6 @@ import {
   type ThinkingMode,
 } from "../../context/thinking"
 import { getScrollAcceleration } from "../../util/scroll"
-import { Hyperlink } from "../../util/hyperlink"
 import { TuiPluginRuntime } from "../../plugin"
 import { DialogGoUpsell } from "../../component/dialog-go-upsell"
 import { SessionRetry } from "@/session/retry"
@@ -1766,7 +1765,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
               syntaxStyle={syntax()}
               streaming={active()}
               internalBlockMode="top-level"
-              content={Hyperlink.linkify(props.part.text.trim())}
+              content={props.part.text.trim()}
               tableOptions={{ style: "grid" }}
               conceal={ctx.conceal()}
               fg={theme.markdownText}
@@ -1811,7 +1810,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
                     syntaxStyle={syntax()}
                     streaming={active()}
                     internalBlockMode="top-level"
-                    content={Hyperlink.linkify(seg().text.trim())}
+                    content={seg().text.trim()}
                     tableOptions={{ style: "grid" }}
                     conceal={ctx.conceal()}
                     fg={theme.markdownText}
