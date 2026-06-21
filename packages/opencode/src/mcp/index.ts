@@ -247,6 +247,7 @@ export namespace MCP {
     defs: Record<string, MCPToolDef[]>
     discovered: Record<string, any>
     timers: Set<ReturnType<typeof setTimeout>>
+    ready: boolean
   }
 
   export interface Interface {
@@ -512,6 +513,10 @@ export namespace MCP {
           if (s.clients[name] !== client || s.status[name]?.status !== "connected") return
 
           s.defs[name] = listed
+          // Skip publishing during initial connection — the init caller already
+          // has the tool definitions and a premature event would cause the TUI
+          // to re-fetch status before the InstanceState is fully ready.
+          if (!s.ready) return
           await Effect.runPromise(bus.publish(ToolsChanged, { server: name }).pipe(Effect.ignore))
         })
       }
@@ -673,6 +678,7 @@ export namespace MCP {
             defs: {},
             discovered: config,
             timers: new Set(),
+            ready: false,
           }
 
           yield* Effect.forEach(
@@ -704,6 +710,8 @@ export namespace MCP {
               }),
             { concurrency: "unbounded" },
           )
+
+          s.ready = true
 
           yield* Effect.addFinalizer(() =>
             Effect.gen(function* () {
