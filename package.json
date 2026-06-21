@@ -124,12 +124,11 @@
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
     "@effect/platform-node-shared": "4.0.0-beta.43",
-    "@opentui/core": "0.2.10"
+    "@opentui/core": "0.4.1"
   },
   "patchedDependencies": {
     "@standard-community/standard-openapi@0.2.9": "patches/@standard-community%2Fstandard-openapi@0.2.9.patch",
     "solid-js@1.9.10": "patches/solid-js@1.9.10.patch",
-    "@opentui/core@0.2.10": "patches/@opentui+core@0.2.10.patch",
     "gcp-metadata@8.1.2": "patches/gcp-metadata@8.1.2.patch"
   }
 }

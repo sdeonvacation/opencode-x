@@ -70,7 +70,7 @@ export function DialogPrompt(props: DialogPromptProps) {
         </text>
       </box>
       <box gap={1}>
-        {props.description}
+        {props.description?.()}
         <textarea
           onSubmit={() => {
             if (props.busy) return

@@ -2,7 +2,7 @@ import { useDialog } from "@tui/ui/dialog"
 import { DialogSelect } from "@tui/ui/dialog-select"
 import { useRoute } from "@tui/context/route"
 import { useSync } from "@tui/context/sync"
-import { createMemo, createResource, createSignal, onMount } from "solid-js"
+import { createMemo, createResource, createSignal, onMount, type JSX } from "solid-js"
 import { Locale } from "@/util/locale"
 import { useProject } from "@tui/context/project"
 import { useKeybind } from "../context/keybind"
@@ -93,7 +93,7 @@ export function DialogSessionList() {
         workspaceStatus = project.workspace.status(x.workspaceID) || "error"
       }
 
-      let footer = ""
+      let footer: string | JSX.Element = ""
       if (Flag.OPENCODE_EXPERIMENTAL_WORKSPACES) {
         if (x.workspaceID) {
           let desc = "unknown"
