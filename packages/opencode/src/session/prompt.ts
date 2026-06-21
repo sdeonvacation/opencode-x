@@ -1810,7 +1810,7 @@ export namespace SessionPrompt {
                 handle.message.compaction = { total: sw.total, savings: sw.savings, msgs: sw.msgs }
               }
 
-              if (cfg.experimental?.proactive_prune && lastFinished?.tokens) {
+              if (cfg.experimental?.proactive_prune !== false && lastFinished?.tokens) {
                 const used =
                   lastFinished.tokens.input + lastFinished.tokens.cache.read + lastFinished.tokens.cache.write
                 const limit = model.limit?.context ?? 200_000
@@ -1827,10 +1827,11 @@ export namespace SessionPrompt {
               }
 
               // Tool result budget (Phase 1A)
-              if (cfg.experimental?.tool_result_budget) {
+              const _toolBudget = cfg.experimental?.tool_result_budget ?? 50_000
+              if (_toolBudget) {
                 const _cdbTbBefore = msgs.length
                 const _cdbTbFpBefore = MessageV2.msgsFingerprint(msgs)
-                msgs = applyToolBudget(msgs, cfg.experimental.tool_result_budget)
+                msgs = applyToolBudget(msgs, _toolBudget)
                 if (_cacheDebugLog && msgs.length !== _cdbTbBefore) {
                   _cacheDebugLog.log({
                     type: "prune",
@@ -1848,7 +1849,11 @@ export namespace SessionPrompt {
               }
 
               // MicroCompact at 75% (Phase 1C) — mutual exclusion with proactive_prune
-              if (cfg.experimental?.microcompact && !cfg.experimental?.proactive_prune && lastFinished?.tokens) {
+              if (
+                cfg.experimental?.microcompact !== false &&
+                cfg.experimental?.proactive_prune === false &&
+                lastFinished?.tokens
+              ) {
                 const used =
                   lastFinished.tokens.input + lastFinished.tokens.cache.read + lastFinished.tokens.cache.write
                 const limit = model.limit?.context ?? 200_000
@@ -1885,7 +1890,7 @@ export namespace SessionPrompt {
               }
 
               // Context collapse at 97% (Phase 1B)
-              if (cfg.experimental?.context_collapse && lastFinished?.tokens) {
+              if (cfg.experimental?.context_collapse !== false && lastFinished?.tokens) {
                 const used =
                   lastFinished.tokens.input + lastFinished.tokens.cache.read + lastFinished.tokens.cache.write
                 const limit = model.limit?.context ?? 200_000

@@ -217,14 +217,15 @@ export const TaskTool = Tool.defineEffect(
           },
         }
 
-        const shouldIsolate = params.isolation && cfg.experimental?.worktree_isolation && Instance.project.vcs === "git"
+        const shouldIsolate =
+          params.isolation && cfg.experimental?.worktree_isolation !== false && Instance.project.vcs === "git"
 
         // Create executor with middleware chain
         const executor = createExecutor({
           mode,
           isolation: !!shouldIsolate,
           vcs: Instance.project.vcs,
-          worktreeEnabled: cfg.experimental?.worktree_isolation,
+          worktreeEnabled: cfg.experimental?.worktree_isolation !== false,
           guardInput,
           backgroundMeta:
             mode === "background"
