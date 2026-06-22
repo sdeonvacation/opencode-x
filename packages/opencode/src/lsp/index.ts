@@ -372,9 +372,11 @@ export namespace LSP {
             idleTimer = setTimeout(
               () => {
                 idleTimer = undefined
-                Effect.runPromise(ScopedCache.invalidate(state.cache, directory)).catch((error) => {
-                  log.error("failed to invalidate idle lsp state", { error, directory })
-                })
+                Effect.runPromise(ScopedCache.invalidate(state.cache, directory))
+                  .then(() => Bus.publish(Event.Updated, {}))
+                  .catch((error) => {
+                    log.error("failed to invalidate idle lsp state", { error, directory })
+                  })
               },
               30 * 60 * 1000,
             )

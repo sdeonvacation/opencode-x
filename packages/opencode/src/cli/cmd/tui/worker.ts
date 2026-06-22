@@ -93,13 +93,7 @@ export const rpc = {
     await Instance.provide({
       directory: input.directory,
       init: InstanceBootstrap,
-      fn: async () => {
-        try {
-          await upgrade().catch(() => {})
-        } finally {
-          await Instance.dispose()
-        }
-      },
+      fn: () => upgrade().catch(() => {}),
     })
   },
   async reload() {

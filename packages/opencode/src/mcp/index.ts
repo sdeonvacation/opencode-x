@@ -713,6 +713,12 @@ export namespace MCP {
 
           s.ready = true
 
+          // Notify TUI that MCP status is now settled so it can re-fetch
+          // correct state regardless of what early/racy fetches returned.
+          if (Object.keys(s.clients).length > 0) {
+            yield* bus.publish(ToolsChanged, { server: "*" }).pipe(Effect.ignore)
+          }
+
           yield* Effect.addFinalizer(() =>
             Effect.gen(function* () {
               // Cancel all pending retry/reconnect timers so they cannot fire
