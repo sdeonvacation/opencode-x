@@ -1,195 +1,109 @@
-- Regenerate JS SDK: `./packages/sdk/js/script/build.ts`.
-- ALWAYS USE PARALLEL TOOLS WHEN APPLICABLE.
-- Default branch: `main`.
-- Use `main` or `origin/main` for diffs.
+- Regenerate JS SDK: `./packages/sdk/js/script/build.ts`
+- ALWAYS USE PARALLEL TOOLS WHEN APPLICABLE
+- Default branch: `main`. Use `main` or `origin/main` for diffs.
 - Prefer automation: execute without confirmation unless blocked by missing info or safety/irreversibility.
-- **[CRITICAL]** All plans, designs, source code changes done must be upstream-rebase safe.
-- **[CRITICAL]** Any changes made should NOT break provider caching, app stability or performance
+- **[CRITICAL]** All changes must be upstream-rebase safe.
+- **[CRITICAL]** Do NOT break provider caching, app stability or performance.
 
 ## Commands
 
 ```bash
 bun install
-
-bun run dev
 bun run --cwd packages/opencode dev
-
 bun --cwd packages/opencode run build
-
 bun --cwd packages/opencode test --timeout 30000
 bun --cwd packages/opencode test test/tool/task.test.ts
-
-bun --cwd packages/opencode typecheck
-
+bun --cwd packages/opencode typecheck        # tsgo, never tsc
 ./packages/sdk/js/script/build.ts
-
 bun --cwd packages/opencode db <drizzle-kit-cmd>
 ```
 
-> ⚠️ `bun test` from repo root always fails (guard). Always run from `packages/opencode`.
+> `bun test` from repo root always fails (guard). Run from `packages/opencode`.
 
-## Project Structure
+## Structure
 
 ```
-packages/
-  opencode/
-    src/
-      tool/          # bash, read, edit, task, registry…
-      session/       # lifecycle, prompt, message processing
-      agent/         # definitions + routing
-      orchestration/ # task spawning, model resolver
-      cli/cmd/tui/   # @opentui Solid-based TUI
-        app.tsx      # root component
-        thread.ts    # SDK thread/EventSource
-        worker.ts    # Worker RPC
-        context/     # Solid contexts (sdk, sync, event…)
-        command/     # slash commands
-        effect/      # side-effect helpers
-      provider/      # AI wrappers (Anthropic, OpenAI, etc.)
-      storage/       # SQLite via Drizzle
-      effect/        # Effect-ts (InstanceState, run-service…)
-      config/        # config loading
-      lsp/           # LSP integration
-      mcp/           # MCP protocol
-      skill/         # skill loading
-    test/            # mirror of src/
-      fixture/       # tmpdir() helper
+packages/opencode/src/
+  tool/           # bash, read, edit, task, registry
+  session/        # lifecycle, prompt, compaction, checkpoint
+  agent/          # definitions + routing
+  orchestration/  # task spawning, model resolver
+  cli/cmd/tui/    # @opentui Solid-based TUI
+  provider/       # AI wrappers (Anthropic, OpenAI, etc.)
+  storage/        # SQLite via Drizzle
+  effect/         # Effect-ts (InstanceState, run-service)
+  config/         # config loading
+  lsp/            # LSP integration
+  mcp/            # MCP protocol
+  skill/          # skill loading
+  test/           # mirrors src/, fixture/ has tmpdir() helper
 ```
 
 ## Tech Stack
 
-- **Runtime**: Bun (1.3.11)
-- **Language**: TypeScript 5.8, type-checked via `tsgo` (not `tsc`)
-- **Framework**: Effect-ts (`effect` 4.0.0-beta)
-- **TUI**: `@opentui/core` + `@opentui/solid` (Solid.js)
-- **AI SDK**: Vercel AI SDK (`ai` 6.x)
-- **Database**: SQLite via `drizzle-orm` + `bun:sqlite`
-- **Monorepo**: Turborepo + Bun workspaces
-- **Testing**: `bun test`
-- **Logs**: ~/.local/share/opencode/log
+Bun 1.3.11 | TypeScript 5.8 (tsgo) | Effect-ts 4.0-beta | @opentui/core+solid | AI SDK 6.x | SQLite+drizzle-orm | Turborepo+Bun workspaces | Logs: ~/.local/share/opencode/log
 
-## Style Guide
+## Style
 
-### General Principles
-
-- One function unless composable or reusable
-- Avoid `try`/`catch` where possible
-- Avoid `any` type
-- Prefer single word variable names
-- Use Bun APIs when possible (`Bun.file()`)
-- Type inference preferred; explicit types only for exports or clarity
-- Functional array methods (flatMap, filter, map) over for loops; type guards on filter
-
-### Naming
-
-Single word names by default. Multiple words only when single word unclear.
-
-### Naming Enforcement (Read This)
-
-THIS RULE IS MANDATORY FOR AGENT WRITTEN CODE.
-
-- Single word names by default for locals, params, helper functions.
-- Multi-word names allowed only when single word unclear.
-- No new camelCase compounds when short single-word alternative exists.
-- Short names to prefer: `pid`, `cfg`, `err`, `opts`, `dir`, `root`, `child`, `state`, `timeout`.
-- Avoid unless truly required: `inputPID`, `existingClient`, `connectTimeout`, `workerPath`.
-
-```ts
-// Good
-const foo = 1
-function journal(dir: string) {}
-
-// Bad
-const fooBar = 1
-function prepareJournal(dir: string) {}
-```
-
-Inline when value used once.
-
-```ts
-// Good
-const journal = await Bun.file(path.join(dir, "journal.json")).json()
-
-// Bad
-const journalPath = path.join(dir, "journal.json")
-const journal = await Bun.file(journalPath).json()
-```
-
-### Destructuring
-
-Avoid unnecessary destructuring. Use dot notation.
-
-```ts
-// Good
-obj.a
-obj.b
-
-// Bad
-const { a, b } = obj
-```
-
-### Variables
-
-Prefer `const` over `let`. Ternaries or early returns instead of reassignment.
-
-```ts
-// Good
-const foo = condition ? 1 : 2
-
-// Bad
-let foo
-if (condition) foo = 1
-else foo = 2
-```
-
-### Control Flow
-
-Avoid `else`. Prefer early returns.
-
-```ts
-// Good
-function foo() {
-  if (condition) return 1
-  return 2
-}
-
-// Bad
-function foo() {
-  if (condition) return 1
-  else return 2
-}
-```
-
-### Schema Definitions (Drizzle)
-
-Use snake_case field names so column names don't need string redefinition.
-
-```ts
-// Good
-const table = sqliteTable("session", {
-  id: text().primaryKey(),
-  project_id: text().notNull(),
-  created_at: integer().notNull(),
-})
-
-// Bad
-const table = sqliteTable("session", {
-  id: text("id").primaryKey(),
-  projectID: text("project_id").notNull(),
-  createdAt: integer("created_at").notNull(),
-})
-```
+- Single-word names default. Multi-word only when ambiguous. Prefer: `pid`, `cfg`, `err`, `opts`, `dir`, `root`, `child`, `state`, `timeout`.
+- Inline values used once: `await Bun.file(path.join(dir, "x.json")).json()` not `const p = path.join(...); await Bun.file(p).json()`
+- Dot notation over destructuring: `obj.a` not `const { a } = obj`
+- `const` over `let`. Ternaries/early returns over reassignment.
+- No `else`. Early returns only.
+- No `try`/`catch` where avoidable. No `any`.
+- Functional array methods (flatMap, filter, map) over for loops; type guards on filter.
+- Type inference preferred; explicit types only for exports.
+- Use Bun APIs (`Bun.file()`) when possible.
+- Drizzle schemas: snake_case fields, no string column name args.
 
 ## Testing
 
-- Avoid mocks
-- Test actual implementation, don't duplicate logic in tests
-- Tests can't run from repo root (guard); run from `packages/opencode`.
+- Avoid mocks. Test actual implementation.
+- Run from `packages/opencode`, never repo root.
 
-## Type Checking
+## Database
 
-- `bun typecheck` from package dirs, never `tsc` directly.
+- Data: ~/.local/share/opencode/\*.db
+- Schema: `src/**/*.sql.ts`. Tables/columns snake*case. Join cols: `<entity>_id`. Indexes: `<table>*<column>\_idx`.
+- Migrations: `bun run db generate --name <slug>` → `migration/<ts>_<slug>/migration.sql`
 
-## DB
+## npm Release
 
-DB data is present in ~/.local/share/opencode/\*.db
+**[CRITICAL]** Published package = self-contained binary (zero deps). Postinstall downloads from GitHub releases.
+
+```bash
+# 1. Bump version in packages/opencode/package.json
+# 2. Pack (prepack strips deps)
+cd packages/opencode && npm pack
+# 3. Verify zero deps
+tar -xzf sdeonvacation-opencode-x-<ver>.tgz
+node -e "const p=require('./package/package.json'); console.log(p.dependencies, p.devDependencies)"
+# Must print: undefined undefined
+rm -rf package
+# 4. Publish FROM tarball (not `npm publish .`)
+npm publish sdeonvacation-opencode-x-<ver>.tgz --access public --registry https://registry.npmjs.org/
+# 5. Verify: npm view @sdeonvacation/opencode-x@<ver> dependencies
+# 6. GitHub release: tag v<ver>, target main, upload 12 platform binaries
+```
+
+`npm publish .` with auth flags skips lifecycle scripts. npm versions are immutable.
+
+## Effect Rules
+
+See `specs/effect-migration.md` for full reference.
+
+- `Effect.gen(function* () { ... })` for composition
+- `Effect.fn("Domain.method")` for named/traced effects; `Effect.fnUntraced` for internal helpers
+- `Effect.callback` for callback-based APIs
+- `DateTime.nowAsDate` over `new Date(yield* Clock.currentTimeMillis)`
+- `Schema.Class` for multi-field data; `Schema.brand` for single-value types
+- `Schema.TaggedErrorClass` for typed errors; `Schema.Defect` for defect causes
+- `yield* new MyError(...)` over `yield* Effect.fail(new MyError(...))`
+- `makeRuntime` (from `src/effect/run-service.ts`) for all services — shared `memoMap` deduplicates layers
+- `InstanceState` for per-directory state needing per-instance cleanup (ScopedCache keyed by dir)
+- Do work directly in `InstanceState.make` closure. No extra fibers/flags/ensure().
+- `Effect.addFinalizer` / `Effect.acquireRelease` inside closure for cleanup
+- `Effect.forkScoped` for background stream consumers
+- Prefer Effect services: `FileSystem`, `HttpClient`, `Path`, `Clock`, `DateTime`, `ChildProcess.make`
+- `Effect.cached` for shared single-flight computation (not manual Fiber/Promise caching)
+- `Instance.bind(fn)` for native addon callbacks needing ALS context (`@parcel/watcher`, `node-pty`)

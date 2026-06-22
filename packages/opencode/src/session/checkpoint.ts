@@ -11,8 +11,8 @@ import { MessageV2 } from "./message-v2"
 import { type SessionID, type MessageID, MessageID as MessageIDUtil, PartID as PartIDUtil } from "./schema"
 import { SessionID as SessionIDSchema } from "./schema"
 import { computeBoundary, COMPACTABLE_TOOL_NAMES } from "./checkpoint-boundary"
-import { checkpointPath, memoryPath, notesPath, globalMemoryPath, metaDir, tasksDir } from "./checkpoint-paths"
-import { readBudgeted, readBudgetedSectionAware, readDirBudgeted } from "./budgeted-read"
+import { checkpointPath, memoryPath, notesPath, metaDir, tasksDir } from "./checkpoint-paths"
+import { readBudgeted, readBudgetedSectionAware } from "./budgeted-read"
 import { composeWriterPrompt } from "./checkpoint-writer-prompt"
 import { CHECKPOINT_TEMPLATE, CHECKPOINT_SECTION_BUDGETS } from "./checkpoint-templates"
 import { SessionPrompt } from "./prompt"
@@ -39,7 +39,6 @@ export namespace Checkpoint {
   const REBUILD_CHECKPOINT_BUDGET = 8000
   const REBUILD_MEMORY_BUDGET = 4000
   const REBUILD_NOTES_BUDGET = 2000
-  const REBUILD_GLOBAL_MEMORY_BUDGET = 2000
   const DEFAULT_TIMEOUT = 300_000
 
   export interface Interface {
@@ -235,12 +234,11 @@ export namespace Checkpoint {
         sessionID: SessionID
         tail: MessageV2.WithParts[]
       }) {
-        const [ckpt, mem, notes, global] = yield* Effect.promise(() =>
+        const [ckpt, mem, notes] = yield* Effect.promise(() =>
           Promise.all([
             readBudgetedSectionAware(checkpointPath(input.sessionID), REBUILD_CHECKPOINT_BUDGET),
             readBudgeted(memoryPath(input.sessionID), REBUILD_MEMORY_BUDGET),
             readBudgeted(notesPath(input.sessionID), REBUILD_NOTES_BUDGET),
-            readDirBudgeted(globalMemoryPath(), REBUILD_GLOBAL_MEMORY_BUDGET),
           ]),
         )
 
@@ -254,11 +252,6 @@ export namespace Checkpoint {
         }
         if (notes.content) {
           sections.push(`<notes>\n${notes.content}${notes.truncated ? "\n[truncated]" : ""}\n</notes>`)
-        }
-        if (global.content) {
-          sections.push(
-            `<global-memory>\n${global.content}${global.truncated ? "\n[truncated]" : ""}\n</global-memory>`,
-          )
         }
 
         if (sections.length === 0) return ""

@@ -524,7 +524,7 @@ Rules:
         }
 
         // Checkpoint rebuild: inject context from checkpoint artifacts into session
-        if (result === "continue") {
+        if (result === "continue" && input.auto) {
           const hasCheckpoint = yield* Effect.promise(() => Checkpoint.hasCheckpoint({ sessionID: input.sessionID }))
           if (hasCheckpoint) {
             yield* Effect.promise(() => Checkpoint.waitForWriter({ sessionID: input.sessionID, timeout: 60_000 }))
