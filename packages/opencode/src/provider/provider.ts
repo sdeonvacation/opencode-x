@@ -1503,13 +1503,14 @@ export namespace Provider {
           const headerTimeout = options["headerTimeout"]
           delete options["headerTimeout"]
           const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
-          const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
 
           options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
             const fetchFn = customFetch ?? fetch
             const opts = init ?? {}
             const chunkAbortCtl =
               typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
+            const headerTimeoutCtl =
+              typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
             const signals: AbortSignal[] = []
 
             if (opts.signal) signals.push(opts.signal)
