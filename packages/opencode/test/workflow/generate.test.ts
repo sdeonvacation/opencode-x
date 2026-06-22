@@ -1,7 +1,8 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test"
-import { WorkflowGenerate } from "@/workflow/generate"
+import { describe, it, expect, mock, beforeEach, afterAll } from "bun:test"
+import { Provider } from "@/provider/provider"
+import { Agent } from "@/agent/agent"
 
-// Mock the dependencies
+// Mock generateText from ai (external package, safe to mock.module)
 const mockGenerateText = mock(() =>
   Promise.resolve({
     text: `/// meta
@@ -32,47 +33,38 @@ const mockModel = {
 
 const mockLanguage = { id: "mock-lang" }
 
-mock.module("@/provider/provider", () => ({
-  Provider: {
-    parseModel: (str: string) => {
-      const [providerID, ...rest] = str.split("/")
-      return { providerID, modelID: rest.join("/") }
-    },
-    getModel: mock(() => Promise.resolve(mockModel)),
-    defaultModel: mock(() => Promise.resolve({ providerID: "openai", modelID: "gpt-4o-mini" })),
-    getLanguage: mock(() => Promise.resolve(mockLanguage)),
-  },
-}))
+// Direct property mocks on namespace objects (avoids mock.module leaking on Linux)
+const origGetModel = Provider.getModel
+const origDefaultModel = Provider.defaultModel
+const origGetLanguage = Provider.getLanguage
+const origAgentList = Agent.list
+const origAgentGet = (Agent as any).get
+const origAgentDefault = (Agent as any).defaultAgent
 
-mock.module("@/config/config", () => ({
-  Config: {
-    get: mock(() => Promise.resolve({ small_model: "openai/gpt-4o-mini" })),
-  },
-}))
+Provider.getModel = mock(() => Promise.resolve(mockModel)) as any
+Provider.defaultModel = mock(() => Promise.resolve({ providerID: "openai", modelID: "gpt-4o-mini" })) as any
+Provider.getLanguage = mock(() => Promise.resolve(mockLanguage)) as any
+;(Agent as any).list = mock(() =>
+  Promise.resolve([
+    { name: "coder", mode: "primary", description: "Primary coding agent" },
+    { name: "tester", mode: "secondary", description: "Run and debug tests" },
+    { name: "debugger", mode: "secondary", description: "Debug failures" },
+  ]),
+)
+;(Agent as any).get = mock(() => Promise.resolve({ name: "coder", mode: "primary" }))
+;(Agent as any).defaultAgent = mock(() => Promise.resolve("coder"))
 
-mock.module("@/agent/agent", () => ({
-  Agent: {
-    list: mock(() =>
-      Promise.resolve([
-        { name: "coder", mode: "primary", description: "Primary coding agent" },
-        { name: "tester", mode: "secondary", description: "Run and debug tests" },
-        { name: "debugger", mode: "secondary", description: "Debug failures" },
-      ]),
-    ),
-    get: mock(() => Promise.resolve({ name: "coder", mode: "primary" })),
-    defaultAgent: mock(() => Promise.resolve("coder")),
-  },
-}))
+afterAll(() => {
+  Provider.getModel = origGetModel
+  Provider.defaultModel = origDefaultModel
+  Provider.getLanguage = origGetLanguage
+  ;(Agent as any).list = origAgentList
+  ;(Agent as any).get = origAgentGet
+  ;(Agent as any).defaultAgent = origAgentDefault
+})
 
-mock.module("@/util/log", () => ({
-  Log: {
-    create: () => ({
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-    }),
-  },
-}))
+// Import AFTER mocks are set up
+const { WorkflowGenerate } = await import("@/workflow/generate")
 
 describe("WorkflowGenerate", () => {
   beforeEach(() => {
@@ -140,18 +132,18 @@ describe("WorkflowGenerate", () => {
     const long = "a".repeat(200)
     const script = await WorkflowGenerate.generate("trunc", long)
     const desc = script.split("\n").find((l) => l.includes("/// description:"))!
-    // description should be truncated with ellipsis
     expect(desc.length).toBeLessThan(150)
     expect(desc).toContain("...")
   })
 
   it("throws when no model available", async () => {
-    const { Provider } = await import("@/provider/provider")
     const orig = Provider.getModel
-    ;(Provider as any).getModel = mock(() => Promise.reject(new Error("nope")))
-    ;(Provider as any).defaultModel = mock(() => Promise.reject(new Error("no default")))
+    const origDef = Provider.defaultModel
+    Provider.getModel = mock(() => Promise.reject(new Error("nope"))) as any
+    Provider.defaultModel = mock(() => Promise.reject(new Error("no default"))) as any
 
     await expect(WorkflowGenerate.generate("fail", "x")).rejects.toThrow()
-    ;(Provider as any).getModel = orig
+    Provider.getModel = orig
+    Provider.defaultModel = origDef
   })
 })

@@ -15,7 +15,7 @@ describe("RuntimeFlags", () => {
     expect(flags.disableExternalSkills).toBe(false)
     expect(flags.disableLspDownload).toBe(false)
     expect(flags.skipMigrations).toBe(false)
-    expect(flags.enableExa).toBe(false)
+    expect(flags.enableExa).toBe(true)
     expect(flags.enableParallel).toBe(false)
     expect(flags.enableExperimentalModels).toBe(false)
     expect(flags.enableQuestionTool).toBe(false)
