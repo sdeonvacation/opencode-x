@@ -558,7 +558,11 @@ export namespace Config {
       top_p: z.number().optional(),
       prompt: z.string().optional(),
       tools: z
-        .union([z.record(z.string(), z.boolean()), z.array(z.string())])
+        .union([
+          z.record(z.string(), z.boolean()),
+          z.array(z.string()),
+          z.string().transform((s) => s.split(",").map((t) => t.trim())),
+        ])
         .optional()
         .describe("@deprecated Use 'permission' field instead"),
       disable: z.boolean().optional(),
@@ -2133,6 +2137,26 @@ export namespace Config {
               }
             } catch {}
           })
+
+          // Merge agents from external directories (~/.claude/agents, ~/.agents/agents)
+          // Only inject names not already defined — opencode config always wins entirely
+          if (!Flag.OPENCODE_DISABLE_EXTERNAL_AGENTS) {
+            yield* Effect.promise(async () => {
+              for (const dir of [".claude", ".agents"]) {
+                const root = path.join(os.homedir(), dir)
+                try {
+                  const found = await loadAgent(root)
+                  for (const [name, agent] of Object.entries(found)) {
+                    if (result.agent![name]) {
+                      log.debug("external agent skipped (name conflict)", { name, source: root })
+                      continue
+                    }
+                    result.agent![name] = agent
+                  }
+                } catch {}
+              }
+            })
+          }
 
           if (process.env.OPENCODE_CONFIG_CONTENT) {
             const source = "OPENCODE_CONFIG_CONTENT"
