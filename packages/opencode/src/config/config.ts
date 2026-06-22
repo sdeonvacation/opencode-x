@@ -2119,24 +2119,26 @@ export namespace Config {
           }
 
           // Load agents from installed Claude Code plugins
-          yield* Effect.promise(async () => {
-            const manifest = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json")
-            try {
-              const text = await Bun.file(manifest).text()
-              const parsed = JSON.parse(text)
-              const plugins = parsed?.plugins
-              if (!plugins || typeof plugins !== "object") return
-              for (const [, entries] of Object.entries(plugins)) {
-                const entry = (entries as any[])?.[0]
-                const dir = entry?.installPath
-                if (!dir) continue
-                try {
-                  const found = await loadAgent(dir)
-                  result.agent = mergeDeep(result.agent!, found)
-                } catch {}
-              }
-            } catch {}
-          })
+          if (!Flag.OPENCODE_DISABLE_EXTERNAL_PLUGIN_AGENTS) {
+            yield* Effect.promise(async () => {
+              const manifest = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json")
+              try {
+                const text = await Bun.file(manifest).text()
+                const parsed = JSON.parse(text)
+                const plugins = parsed?.plugins
+                if (!plugins || typeof plugins !== "object") return
+                for (const [, entries] of Object.entries(plugins)) {
+                  const entry = (entries as any[])?.[0]
+                  const dir = entry?.installPath
+                  if (!dir) continue
+                  try {
+                    const found = await loadAgent(dir)
+                    result.agent = mergeDeep(result.agent!, found)
+                  } catch {}
+                }
+              } catch {}
+            })
+          }
 
           // Merge agents from external directories (~/.claude/agents, ~/.agents/agents)
           // Only inject names not already defined — opencode config always wins entirely
