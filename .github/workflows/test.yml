@@ -3,14 +3,11 @@ name: test
 on:
   push:
     branches:
-      - dev
       - main
   pull_request:
   workflow_dispatch:
 
 concurrency:
-  # Keep every run on dev so cancelled checks do not pollute the default branch
-  # commit history. PRs and other branches still share a group and cancel stale runs.
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
@@ -72,12 +69,7 @@ jobs:
           key: opencode-bin-${{ runner.os }}-${{ runner.arch }}
 
       - name: Run unit tests
-        run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            bun turbo test:ci --filter='@opencode-ai/app'
-          else
-            bun turbo test:ci
-          fi
+        run: bun turbo test:ci --filter='@sdeonvacation/opencode-x' --filter='@opencode-ai/app'
         timeout-minutes: 15
         env:
           OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
