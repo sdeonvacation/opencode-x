@@ -86,6 +86,7 @@ OpenCode-X natively loads and runs Claude Code artifacts. No migration needed.
 
 Disable with: `OPENCODE_DISABLE_CLAUDE_CODE=1`
 Disable external agents only: `OPENCODE_DISABLE_EXTERNAL_AGENTS=1`
+Disable plugin agents only: `OPENCODE_DISABLE_EXTERNAL_PLUGIN_AGENTS=1`
 Disable external skills only: `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`
 
 ---
@@ -577,20 +578,21 @@ TUI plugins in `~/.config/opencode/tui.json`:
 
 ## Environment Variables
 
-| Variable                           | Description                          |
-| ---------------------------------- | ------------------------------------ |
-| `OPENCODE_PERMISSION`              | JSON permission override             |
-| `OPENCODE_CONFIG`                  | Config file path                     |
-| `OPENCODE_CONFIG_DIR`              | Config directory                     |
-| `OPENCODE_DB`                      | Database location                    |
-| `OPENCODE_EXPERIMENTAL`            | Enable all experimental features     |
-| `OPENCODE_DISABLE_AUTOUPDATE`      | Disable auto-updates (CI)            |
-| `OPENCODE_DISABLE_AUTOCOMPACT`     | Disable auto-compaction              |
-| `OPENCODE_DISABLE_EXTERNAL_SKILLS` | Disable external skill directories   |
-| `OPENCODE_DISABLE_EXTERNAL_AGENTS` | Disable external agent directories   |
-| `OPENCODE_DISABLE_CLAUDE_CODE`     | Disable all Claude Code compat       |
-| `OPENCODE_DISABLE_DEFAULT_PLUGINS` | Disable default plugins              |
-| `OPENCODE_EXPERIMENTAL_DREAM`      | Set `false` to disable dream/distill |
+| Variable                                  | Description                                 |
+| ----------------------------------------- | ------------------------------------------- |
+| `OPENCODE_PERMISSION`                     | JSON permission override                    |
+| `OPENCODE_CONFIG`                         | Config file path                            |
+| `OPENCODE_CONFIG_DIR`                     | Config directory                            |
+| `OPENCODE_DB`                             | Database location                           |
+| `OPENCODE_EXPERIMENTAL`                   | Enable all experimental features            |
+| `OPENCODE_DISABLE_AUTOUPDATE`             | Disable auto-updates (CI)                   |
+| `OPENCODE_DISABLE_AUTOCOMPACT`            | Disable auto-compaction                     |
+| `OPENCODE_DISABLE_EXTERNAL_SKILLS`        | Disable external skill directories          |
+| `OPENCODE_DISABLE_EXTERNAL_AGENTS`        | Disable external agent directories          |
+| `OPENCODE_DISABLE_EXTERNAL_PLUGIN_AGENTS` | Disable agents from Claude Code plugin dirs |
+| `OPENCODE_DISABLE_CLAUDE_CODE`            | Disable all Claude Code compat              |
+| `OPENCODE_DISABLE_DEFAULT_PLUGINS`        | Disable default plugins                     |
+| `OPENCODE_EXPERIMENTAL_DREAM`             | Set `false` to disable dream/distill        |
 
 ---
 
