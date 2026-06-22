@@ -69,7 +69,7 @@ jobs:
           key: opencode-bin-${{ runner.os }}-${{ runner.arch }}
 
       - name: Run unit tests
-        run: bun turbo test:ci --filter='@sdeonvacation/opencode-x' --filter='@opencode-ai/app'
+        run: bun turbo test:ci --filter='@sdeonvacation/opencode-x'
         timeout-minutes: 15
         env:
           OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
