@@ -71,20 +71,21 @@ OpenCode X doesn't pretend to replace everything Claude Code offers. Here's what
 
 ### Where OpenCode X is genuinely better
 
-| Advantage                     | Detail                                                                                                                                                   |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Cost**                      | $0 subscription. You pay only API tokens at provider rates. Claude Code averages $150-250/mo per developer.                                              |
-| **Provider freedom**          | 75+ providers via Vercel AI SDK. Switch models mid-session. No lock-in.                                                                                  |
-| **Token compression**         | LLM-powered compression (EXTRACT/SUMMARIZE/FILTER) reduces tool output 30-60% before it hits your model. Claude Code passes raw output.                  |
-| **Context safety**            | 3-tier auto-recovery: Tool Result Budget (always) → MicroCompact (75%) → Context Collapse (97%) + reactive 413 retry. Claude Code has auto-compact only. |                                   |
-| **Cache stability**           | System prompt split into stable prefix (cached) + dynamic suffix. Memory/goals change without cache invalidation.                                        |
-| **Doom loop detection**       | Ring-buffer catches repeated identical tool calls. Configurable threshold. Claude Code doesn't expose this.                                              |
-| **Orchestration guardrails**  | Spawn depth (3), descendant caps (50), per-model concurrency semaphore, configurable loop threshold. All tunable.                                        |
-| **Hybrid routing**            | Automatic cloud/local model split. Compression, titles, compaction routed to cheap model. Reasoning stays on premium.                                    |
-| **Global LSP sharing**        | Single LSP instance across all agents + worktrees. Path translation, idle shutdown. No redundant spawns.                                                 |
-| **Snapshot gate**             | Skips git diff tracking on read-only turns. Zero overhead for non-edit steps.                                                                            |
-| **Part coalescer**            | Batches rapid streaming updates (300ms). Eliminates per-token DB writes.                                                                                 |
-| **Open source**               | MIT license. No telemetry. No account. Full source. Fork, modify, self-host.                                                                             |
+| Advantage                    | Detail                                                                                                                                                   |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Cost**                     | $0 subscription. You pay only API tokens at provider rates. Claude Code averages $150-250/mo per developer.                                              |
+| **Provider freedom**         | 75+ providers via Vercel AI SDK. Switch models mid-session. No lock-in.                                                                                  |
+| **Token compression**        | LLM-powered compression (EXTRACT/SUMMARIZE/FILTER) reduces tool output 30-60% before it hits your model. Claude Code passes raw output.                  |
+| **Context safety**           | 3-tier auto-recovery: Tool Result Budget (always) → MicroCompact (75%) → Context Collapse (97%) + reactive 413 retry. Claude Code has auto-compact only. |
+| **Cache stability**          | System prompt split into stable prefix (cached) + dynamic suffix. Memory/goals change without cache invalidation.                                        |
+| **Doom loop detection**      | Ring-buffer catches repeated identical tool calls. Configurable threshold. Claude Code doesn't expose this.                                              |
+| **Orchestration guardrails** | Spawn depth (3), descendant caps (50), per-model concurrency semaphore, configurable loop threshold. All tunable.                                        |
+| **Hybrid routing**           | Automatic cloud/local model split. Compression, titles, compaction routed to cheap model. Reasoning stays on premium.                                    |
+| **Global LSP sharing**       | Single LSP instance across all agents + worktrees. Path translation, idle shutdown. No redundant spawns.                                                 |
+| **MCP tool filtering**       | Per-server `tools` allowlist removes unused tools from prompt. Saves 2-8K tokens/call. Claude Code sends all tools always.                               |
+| **Snapshot gate**            | Skips git diff tracking on read-only turns. Zero overhead for non-edit steps.                                                                            |
+| **Part coalescer**           | Batches rapid streaming updates (300ms). Eliminates per-token DB writes.                                                                                 |
+| **Open source**              | MIT license. No telemetry. No account. Full source. Fork, modify, self-host.                                                                             |
 
 ### What Claude Code has that OpenCode X doesn't - yet :)
 
@@ -265,6 +266,24 @@ Configurable protections that Claude Code doesn't expose:
 Single LSP server per project, shared across all agent types — primary, subagents, background sessions, swarm workers, isolated worktrees. Path translation maps worktree paths to parent directory. 30-minute idle shutdown + auto-respawn.
 
 No redundant server spawns. Consistent diagnostics everywhere. Zero LSP overhead multiplication.
+
+### MCP Tool Filtering
+
+Each MCP server exposes all its tools by default, which can add thousands of tokens to every LLM call. Use the `tools` allowlist to expose only the tools you need:
+
+```json
+{
+  "mcp": {
+    "context-mode": {
+      "type": "local",
+      "command": ["node", "server.js"],
+      "tools": ["ctx_execute", "ctx_search", "ctx_batch_execute"]
+    }
+  }
+}
+```
+
+Tools not in the allowlist are never sent to the model. Omit `tools` to expose everything (default).
 
 ### Claude Code Compatibility
 

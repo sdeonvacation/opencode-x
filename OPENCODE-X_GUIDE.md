@@ -233,6 +233,42 @@ External tool servers connected via Model Context Protocol. Must be configured e
 
 Supports OAuth (auto-registration or pre-registered credentials). Restart opencode after config changes.
 
+### Tool Filtering
+
+By default, all tools from every connected MCP server are included in the LLM prompt. Each tool definition adds 200-2500 tokens of schema overhead. Use the `tools` allowlist to control which tools are exposed:
+
+```jsonc
+{
+  "mcp": {
+    "context-mode": {
+      "type": "local",
+      "command": ["node", "/path/to/context-mode/server.js"],
+      // Only these 5 tools are sent to the model (out of ~15 available)
+      "tools": ["ctx_batch_execute", "ctx_execute", "ctx_search", "ctx_fetch_and_index", "ctx_index"],
+    },
+    "code-review-graph": {
+      "type": "local",
+      "command": ["node", "/path/to/crg/server.js"],
+      // Expose all 8 tools (omitting "tools" key = no filter)
+    },
+  },
+}
+```
+
+**How it works:**
+
+- If `tools` is present: only listed tool names are exposed to the model. Unlisted tools are completely invisible.
+- If `tools` is omitted: all tools from that server are exposed (default behavior).
+- Filtering is per-server. You can allowlist on one server and expose everything on another.
+
+**When to filter:**
+
+- MCP servers with many tools (context-mode has ~15, some tools rarely used)
+- Sessions where token budget is tight (post-compaction floor stays high)
+- Servers with heavy tool schemas (batch tools with nested array params)
+
+**Typical savings:** Filtering 5-8 unused tools from a server saves 2,000-8,000 tokens per LLM call.
+
 ---
 
 ## Configuration
