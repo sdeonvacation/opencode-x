@@ -377,14 +377,8 @@ Active development pushing further ahead:
 
 | Feature               | What it does                                                          |
 | --------------------- | --------------------------------------------------------------------- |
-| **Response Chaining** | OpenAI `previousResponseId` — near-zero input tokens on chained turns |
-| **Goal Judge**        | Independent model validates goal completion with retry logic          |
-| **Budgeted Reading**  | Token-budgeted file injection preserving section structure            |
-| **Max Mode**          | Best-of-N parallel candidates with judge arbitration                  |
-| **Deep Research**     | Adversarial jury-validated multi-source reports                       |
-| **Checkpoint System** | Multi-hour session persistence via structured snapshots               |
-| **Workflow Sandbox**  | Deterministic QuickJS-based multi-agent orchestration                 |
-| **Dream & Distill**   | Self-improving knowledge + automatic skill extraction                 |
+| **/loop**             | Orchestrate loops, similar to claude code                             |
+| **/insights**         | Detailed session insights in HTML rendererable in a browser           |
 
 ---
 
