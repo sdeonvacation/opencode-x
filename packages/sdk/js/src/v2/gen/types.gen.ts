@@ -353,6 +353,70 @@ export type EventMcpBrowserOpenFailed = {
   }
 }
 
+export type EventOrchestrationSpawn = {
+  type: "orchestration.spawn"
+  properties: {
+    sessionID: string
+    parentSessionID: string
+    agent: string
+    depth: number
+  }
+}
+
+export type EventOrchestrationSpawnRejected = {
+  type: "orchestration.spawn-rejected"
+  properties: {
+    sessionID: string
+    agent: string
+    reason: "max_depth" | "max_descendants"
+    limit: number
+    current: number
+  }
+}
+
+export type EventOrchestrationComplete = {
+  type: "orchestration.complete"
+  properties: {
+    sessionID: string
+    parentSessionID: string
+    agent: string
+    durationMs: number
+  }
+}
+
+export type EventOrchestrationAbort = {
+  type: "orchestration.abort"
+  properties: {
+    sessionID: string
+    reason: string
+  }
+}
+
+export type EventOrchestrationLoopDetected = {
+  type: "orchestration.loop-detected"
+  properties: {
+    sessionID: string
+    toolName: string
+    count: number
+  }
+}
+
+export type EventOrchestrationConcurrencyQueued = {
+  type: "orchestration.concurrency-queued"
+  properties: {
+    key: string
+    queueLength: number
+  }
+}
+
+export type EventOrchestrationConcurrencyReleased = {
+  type: "orchestration.concurrency-released"
+  properties: {
+    key: string
+    queueLength: number
+  }
+}
+
 export type EventCommandExecuted = {
   type: "command.executed"
   properties: {
@@ -363,26 +427,88 @@ export type EventCommandExecuted = {
   }
 }
 
-export type EventWorkspaceReady = {
-  type: "workspace.ready"
+export type EventWorkflowStarted = {
+  type: "workflow.started"
   properties: {
+    runID: string
+    name: string
+    sessionID: string
+  }
+}
+
+export type EventWorkflowWaiting = {
+  type: "workflow.waiting"
+  properties: {
+    runID: string
     name: string
   }
 }
 
-export type EventWorkspaceFailed = {
-  type: "workspace.failed"
+export type EventWorkflowFinished = {
+  type: "workflow.finished"
   properties: {
+    runID: string
+    name: string
+    status: "completed" | "failed" | "cancelled"
+    error?: string
+  }
+}
+
+export type EventWorkflowPhase = {
+  type: "workflow.phase"
+  properties: {
+    runID: string
+    phase: string
+  }
+}
+
+export type EventWorkflowLog = {
+  type: "workflow.log"
+  properties: {
+    runID: string
+    level: "info" | "warn" | "error"
     message: string
   }
 }
 
-export type EventWorkspaceStatus = {
-  type: "workspace.status"
+export type EventWorkflowAgentStarted = {
+  type: "workflow.agent-started"
   properties: {
-    workspaceID: string
-    status: "connected" | "connecting" | "disconnected" | "error"
-    error?: string
+    runID: string
+    agent: string
+    prompt: string
+  }
+}
+
+export type EventWorkflowAgentFailed = {
+  type: "workflow.agent-failed"
+  properties: {
+    runID: string
+    agent: string
+    error: string
+  }
+}
+
+export type EventWorkflowChildFailed = {
+  type: "workflow.child-failed"
+  properties: {
+    runID: string
+    child: string
+    error: string
+  }
+}
+
+export type EventHybridCompressionEligible = {
+  type: "hybrid.compression.eligible"
+  properties: {
+    sessionID: string
+    step: number
+    tool?: string
+    modelID: string
+    providerID: string
+    eligible: boolean
+    reason: string
+    lineCount?: number
   }
 }
 
@@ -457,17 +583,10 @@ export type EventQuestionRejected = {
   }
 }
 
-export type EventHybridCompressionEligible = {
-  type: "hybrid.compression.eligible"
+export type EventCheckpointWriterSettled = {
+  type: "checkpoint.writer.settled"
   properties: {
     sessionID: string
-    step: number
-    tool?: string
-    modelID: string
-    providerID: string
-    eligible: boolean
-    reason: string
-    lineCount?: number
   }
 }
 
@@ -488,70 +607,6 @@ export type EventMemoryUpdated = {
       content: string
       position: number
     }>
-  }
-}
-
-export type EventOrchestrationSpawn = {
-  type: "orchestration.spawn"
-  properties: {
-    sessionID: string
-    parentSessionID: string
-    agent: string
-    depth: number
-  }
-}
-
-export type EventOrchestrationSpawnRejected = {
-  type: "orchestration.spawn-rejected"
-  properties: {
-    sessionID: string
-    agent: string
-    reason: "max_depth" | "max_descendants"
-    limit: number
-    current: number
-  }
-}
-
-export type EventOrchestrationComplete = {
-  type: "orchestration.complete"
-  properties: {
-    sessionID: string
-    parentSessionID: string
-    agent: string
-    durationMs: number
-  }
-}
-
-export type EventOrchestrationAbort = {
-  type: "orchestration.abort"
-  properties: {
-    sessionID: string
-    reason: string
-  }
-}
-
-export type EventOrchestrationLoopDetected = {
-  type: "orchestration.loop-detected"
-  properties: {
-    sessionID: string
-    toolName: string
-    count: number
-  }
-}
-
-export type EventOrchestrationConcurrencyQueued = {
-  type: "orchestration.concurrency-queued"
-  properties: {
-    key: string
-    queueLength: number
-  }
-}
-
-export type EventOrchestrationConcurrencyReleased = {
-  type: "orchestration.concurrency-released"
-  properties: {
-    key: string
-    queueLength: number
   }
 }
 
@@ -622,6 +677,48 @@ export type EventSwarmDone = {
     failed: number
     total: number
     durationMs: number
+  }
+}
+
+export type EventResearchPhaseChanged = {
+  type: "research.phase-changed"
+  properties: {
+    sessionID: string
+    runID: string
+    phase: "plan" | "search" | "read" | "extract" | "group" | "crosscheck" | "report"
+    progress?: string
+  }
+}
+
+export type EventResearchCompleted = {
+  type: "research.completed"
+  properties: {
+    sessionID: string
+    runID: string
+    status: "completed" | "failed" | "aborted" | "inconclusive"
+  }
+}
+
+export type EventWorkspaceReady = {
+  type: "workspace.ready"
+  properties: {
+    name: string
+  }
+}
+
+export type EventWorkspaceFailed = {
+  type: "workspace.failed"
+  properties: {
+    message: string
+  }
+}
+
+export type EventWorkspaceStatus = {
+  type: "workspace.status"
+  properties: {
+    workspaceID: string
+    status: "connected" | "connecting" | "disconnected" | "error"
+    error?: string
   }
 }
 
@@ -1159,16 +1256,6 @@ export type Event =
   | EventTuiBackgroundUpdate
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
-  | EventCommandExecuted
-  | EventWorkspaceReady
-  | EventWorkspaceFailed
-  | EventWorkspaceStatus
-  | EventQuestionAsked
-  | EventQuestionReplied
-  | EventQuestionRejected
-  | EventHybridCompressionEligible
-  | EventSessionCompacted
-  | EventMemoryUpdated
   | EventOrchestrationSpawn
   | EventOrchestrationSpawnRejected
   | EventOrchestrationComplete
@@ -1176,12 +1263,33 @@ export type Event =
   | EventOrchestrationLoopDetected
   | EventOrchestrationConcurrencyQueued
   | EventOrchestrationConcurrencyReleased
+  | EventCommandExecuted
+  | EventWorkflowStarted
+  | EventWorkflowWaiting
+  | EventWorkflowFinished
+  | EventWorkflowPhase
+  | EventWorkflowLog
+  | EventWorkflowAgentStarted
+  | EventWorkflowAgentFailed
+  | EventWorkflowChildFailed
+  | EventHybridCompressionEligible
+  | EventQuestionAsked
+  | EventQuestionReplied
+  | EventQuestionRejected
+  | EventCheckpointWriterSettled
+  | EventSessionCompacted
+  | EventMemoryUpdated
   | EventWorktreeReady
   | EventWorktreeFailed
   | EventTodoUpdated
   | EventSwarmStarted
   | EventSwarmItemComplete
   | EventSwarmDone
+  | EventResearchPhaseChanged
+  | EventResearchCompleted
+  | EventWorkspaceReady
+  | EventWorkspaceFailed
+  | EventWorkspaceStatus
   | EventPtyCreated
   | EventPtyUpdated
   | EventPtyExited
@@ -1390,6 +1498,7 @@ export type AgentConfig = {
         [key: string]: boolean
       }
     | Array<string>
+    | string
   disable?: boolean
   /**
    * Description of when to use the agent
@@ -1428,6 +1537,7 @@ export type AgentConfig = {
         [key: string]: boolean
       }
     | Array<string>
+    | string
     | boolean
     | "subagent"
     | "primary"
@@ -1577,6 +1687,10 @@ export type McpLocalConfig = {
    * Command and arguments to run the MCP server
    */
   command: Array<string>
+  /**
+   * Working directory for the MCP server, relative to project root
+   */
+  cwd?: string
   /**
    * Environment variables to set when running the MCP server
    */
@@ -1967,6 +2081,50 @@ export type Config = {
       hysteresis_min_tokens?: number
     }
   }
+  dream?: {
+    /**
+     * Enable automatic dream consolidation
+     */
+    auto?: boolean
+    /**
+     * Days between dream runs (default: 7)
+     */
+    interval_days?: number
+    /**
+     * Max chars of session history to include (default: 100000)
+     */
+    max_context_chars?: number
+    /**
+     * Max sessions to review (default: 20)
+     */
+    max_sessions?: number
+    /**
+     * Max messages per session (default: 100)
+     */
+    max_messages?: number
+  }
+  distill?: {
+    /**
+     * Enable automatic distill skill extraction
+     */
+    auto?: boolean
+    /**
+     * Days between distill runs (default: 30)
+     */
+    interval_days?: number
+    /**
+     * Max chars of session history to include (default: 100000)
+     */
+    max_context_chars?: number
+    /**
+     * Max sessions to review (default: 20)
+     */
+    max_sessions?: number
+    /**
+     * Max messages per session (default: 100)
+     */
+    max_messages?: number
+  }
   hooks?: {
     PreToolUse?: Array<{
       matcher?: string
@@ -2219,6 +2377,20 @@ export type Config = {
      */
     prompt_split_caching?: boolean
     /**
+     * Enable deep research workflow tool and /research command
+     */
+    deep_research?: boolean
+    /**
+     * Override deep research tunables
+     */
+    deep_research_tunables?: {
+      jury_size?: number
+      reject_quorum?: number
+      source_budget?: number
+      fact_cap?: number
+      phase_timeout_ms?: number
+    }
+    /**
      * Enable autonomous goal system with /goal command
      */
     goal_system?: boolean
@@ -2235,6 +2407,10 @@ export type Config = {
      */
     persistent_memory?: boolean
     /**
+     * Enable dream/distill self-improvement
+     */
+    dream_and_distill?: boolean
+    /**
      * Enable swarm mode tool and /swarm command
      */
     swarm?: boolean
@@ -2247,6 +2423,22 @@ export type Config = {
      */
     swarm_concurrency?: number
     /**
+     * Enable QuickJS sandboxed workflow engine
+     */
+    workflow?: boolean
+    /**
+     * Max concurrent agent hooks per workflow (default: 5)
+     */
+    workflow_max_concurrent_agents?: number
+    /**
+     * Per-agent timeout in ms within workflow (default: 300000)
+     */
+    workflow_agent_timeout_ms?: number
+    /**
+     * Max nested workflow depth (default: 3)
+     */
+    workflow_max_depth?: number
+    /**
      * Enable multi-step streamText for safe tool chains (default: true)
      */
     multi_step?: boolean
@@ -2258,6 +2450,10 @@ export type Config = {
      * Write per-turn cache-behavior debug log to ~/.local/share/opencode/cache-debug/ (default: false)
      */
     cache_debug_log?: boolean
+    /**
+     * Enable per-request wire diagnostics JSONL logging to ~/.local/share/opencode/wire-diagnostics/ (default: false)
+     */
+    wire_diagnostics?: boolean
     /**
      * Strip inline <thinking>...</thinking> segments from text parts before sending to LLM. Saves input tokens at the cost of CoT continuity. Default false.
      */
@@ -5040,6 +5236,78 @@ export type SessionUsageResponses = {
 
 export type SessionUsageResponse = SessionUsageResponses[keyof SessionUsageResponses]
 
+export type PostSessionSessionIdWorkflowStartData = {
+  body?: {
+    name: string
+    args?: {
+      [key: string]: unknown
+    }
+    max_concurrent_agents?: number
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/workflow/start"
+}
+
+export type PostSessionSessionIdWorkflowStartResponses = {
+  200: unknown
+}
+
+export type GetSessionSessionIdWorkflowListData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/workflow/list"
+}
+
+export type GetSessionSessionIdWorkflowListResponses = {
+  200: unknown
+}
+
+export type GetSessionSessionIdWorkflowRunIdData = {
+  body?: never
+  path: {
+    sessionID: string
+    runID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/workflow/{runID}"
+}
+
+export type GetSessionSessionIdWorkflowRunIdResponses = {
+  200: unknown
+}
+
+export type PostSessionSessionIdWorkflowRunIdCancelData = {
+  body?: never
+  path: {
+    sessionID: string
+    runID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/workflow/{runID}/cancel"
+}
+
+export type PostSessionSessionIdWorkflowRunIdCancelResponses = {
+  200: unknown
+}
+
 export type SessionMemoryListData = {
   body?: never
   path: {
@@ -6185,6 +6453,23 @@ export type TuiControlResponseResponses = {
 }
 
 export type TuiControlResponseResponse = TuiControlResponseResponses[keyof TuiControlResponseResponses]
+
+export type PostWorkflowCreateData = {
+  body?: {
+    name: string
+    prompt: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/create"
+}
+
+export type PostWorkflowCreateResponses = {
+  200: unknown
+}
 
 export type InstanceDisposeData = {
   body?: never

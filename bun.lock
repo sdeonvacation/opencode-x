@@ -334,7 +334,7 @@
     },
     "packages/opencode": {
       "name": "@sdeonvacation/opencode-x",
-      "version": "1.0.7",
+      "version": "1.0.8",
       "bin": {
         "opencode-x": "./bin/opencode",
       },
