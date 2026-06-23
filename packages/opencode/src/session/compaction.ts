@@ -218,6 +218,7 @@ Rules:
       auto: boolean
       overflow?: boolean
     }) => Effect.Effect<void>
+    readonly run: (input: { sessionID: SessionID }) => Effect.Effect<void>
   }
 
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/SessionCompaction") {}
@@ -651,12 +652,29 @@ Rules:
         })
       })
 
+      const run = Effect.fn("SessionCompaction.run")(function* (input: { sessionID: SessionID }) {
+        const msgs = yield* MessageV2.filterCompactedEffect(input.sessionID)
+        const { user: lastUser, tasks } = MessageV2.latest(msgs)
+        if (!lastUser) return
+        const task = tasks.find((t): t is MessageV2.CompactionPart => t.type === "compaction")
+        if (!task) return
+        SlidingWindow.invalidate(input.sessionID)
+        yield* processCompaction({
+          messages: msgs,
+          parentID: lastUser.id,
+          sessionID: input.sessionID,
+          auto: task.auto ?? false,
+          overflow: task.overflow,
+        })
+      })
+
       return Service.of({
         resolveModel,
         isOverflow,
         prune,
         process: processCompaction,
         create,
+        run,
       })
     }),
   )
@@ -697,6 +715,10 @@ Rules:
     }),
     (input) => runPromise((svc) => svc.create(input)),
   )
+
+  export async function run(input: { sessionID: SessionID }) {
+    return runPromise((svc) => svc.run(input))
+  }
 
   // [fork-perf] Phase 5: async-compaction fork variant — spawns SlidingWindow.compact on a fiber
   // Consumer is responsible for gating on cfg.experimental?.async_compaction === true.

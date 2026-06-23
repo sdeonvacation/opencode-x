@@ -354,7 +354,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         dialog.clear()
       },
     },
-    ...createClearCommands({ sdk, sync, kv, toast, route, local }),
+    ...createClearCommands({ sdk, sync, kv, toast, route }),
     ...Array.from({ length: 9 }, (_, i) => ({
       title: `Switch to session in quick slot ${i + 1}`,
       value: `session.quick_switch.${i + 1}`,

@@ -38,9 +38,6 @@ describe("createClearCommands", () => {
       clearTodo: mock(async (_input: { sessionID: string }) => undefined),
       delete: mock(async (_input: { sessionID: string }) => undefined),
       children: mock(async (_input: { sessionID: string }) => ({ data: [] })),
-      summarize: mock(
-        async (_input: { sessionID: string; providerID: string; modelID: string; auto: boolean }) => undefined,
-      ),
     }
 
     const deps: ClearCommandsDeps = {
@@ -49,7 +46,6 @@ describe("createClearCommands", () => {
       kv: { get, set },
       toast: { show },
       route: { data: { type: "session", sessionID: "ses_1" } },
-      local: { model: { current: () => undefined } },
     }
     const [clear] = createClearCommands(deps)
 
@@ -62,85 +58,53 @@ describe("createClearCommands", () => {
     expect(show).toHaveBeenCalledWith({ variant: "info", message: "Cleared 3 message(s)" })
   })
 
-  test("compact command requires a selected model", async () => {
+  test("clear command shows info toast when no messages", async () => {
     const show = mock((_opts: unknown) => {})
     const api: ClearCommandsDeps["sdk"]["client"]["session"] = {
-      messages: mock(async (_input: { sessionID: string }) => ({
-        data: [{ info: { id: "m1", role: "user", cost: 0 } }],
-      })),
+      messages: mock(async (_input: { sessionID: string }) => ({ data: [] })),
       deleteMessage: mock(async (_input: { sessionID: string; messageID: string }) => undefined),
       clearTodo: mock(async (_input: { sessionID: string }) => undefined),
       delete: mock(async (_input: { sessionID: string }) => undefined),
       children: mock(async (_input: { sessionID: string }) => ({ data: [] })),
-      summarize: mock(
-        async (_input: { sessionID: string; providerID: string; modelID: string; auto: boolean }) => undefined,
-      ),
     }
 
     const deps: ClearCommandsDeps = {
       sdk: { client: { session: api } },
       sync: { session: { async sync() {} } },
-      kv: {
-        get: createGet(0),
-        set<T>(_key: string, _value: T) {},
-      },
+      kv: { get: createGet(0), set<T>(_key: string, _value: T) {} },
       toast: { show },
       route: { data: { type: "session", sessionID: "ses_1" } },
-      local: { model: { current: () => undefined } },
     }
-    const [, compact] = createClearCommands(deps)
+    const [clear] = createClearCommands(deps)
 
-    await compact.onSelect!(dialog)
+    await clear.onSelect!(dialog)
 
-    expect(api.summarize).not.toHaveBeenCalled()
-    expect(show).toHaveBeenCalledWith({
-      variant: "error",
-      message: "No model selected. Please select a model first.",
-    })
+    expect(api.deleteMessage).not.toHaveBeenCalled()
+    expect(show).toHaveBeenCalledWith({ variant: "info", message: "No messages to clear" })
   })
 
-  test("compact command shows failure and does not clear when summarize fails", async () => {
-    const messages = [{ info: { id: "m1", role: "user", cost: 0 } }, { info: { id: "m2", role: "assistant", cost: 3 } }]
+  test("clear command does nothing when not on session route", async () => {
     const show = mock((_opts: unknown) => {})
-    const syncSession = mock(async (_sessionID: string, _opts: { force: boolean }) => {})
+    const deleteMessage = mock(async (_input: { sessionID: string; messageID: string }) => undefined)
     const api: ClearCommandsDeps["sdk"]["client"]["session"] = {
-      messages: mock(async (_input: { sessionID: string }) => ({ data: messages })),
-      deleteMessage: mock(async (_input: { sessionID: string; messageID: string }) => undefined),
+      messages: mock(async (_input: { sessionID: string }) => ({ data: [{ info: { id: "m1", role: "user" } }] })),
+      deleteMessage,
       clearTodo: mock(async (_input: { sessionID: string }) => undefined),
       delete: mock(async (_input: { sessionID: string }) => undefined),
       children: mock(async (_input: { sessionID: string }) => ({ data: [] })),
-      summarize: mock(async () => {
-        throw new Error("model unreachable")
-      }),
     }
 
     const deps: ClearCommandsDeps = {
       sdk: { client: { session: api } },
-      sync: { session: { sync: syncSession } },
-      kv: {
-        get: createGet(0),
-        set<T>(_key: string, _value: T) {},
-      },
+      sync: { session: { async sync() {} } },
+      kv: { get: createGet(0), set<T>(_key: string, _value: T) {} },
       toast: { show },
-      route: { data: { type: "session", sessionID: "ses_1" } },
-      local: { model: { current: () => ({ providerID: "openai", modelID: "gpt-4" }) } },
+      route: { data: { type: "home" } },
     }
-    const [, compact] = createClearCommands(deps)
+    const [clear] = createClearCommands(deps)
 
-    await compact.onSelect!(dialog)
+    await clear.onSelect!(dialog)
 
-    expect(api.summarize).toHaveBeenCalledWith({
-      sessionID: "ses_1",
-      providerID: "openai",
-      modelID: "gpt-4",
-      auto: false,
-    })
-    expect(api.deleteMessage).not.toHaveBeenCalled()
-    expect(api.clearTodo).not.toHaveBeenCalled()
-    expect(syncSession).not.toHaveBeenCalled()
-    expect(show).toHaveBeenCalledWith({
-      variant: "error",
-      message: "Failed to compact: model unreachable",
-    })
+    expect(deleteMessage).not.toHaveBeenCalled()
   })
 })

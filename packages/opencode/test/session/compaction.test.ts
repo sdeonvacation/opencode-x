@@ -2003,3 +2003,104 @@ describe("session.compaction.prune aggressive", () => {
     })
   })
 })
+
+describe("session.compaction.run", () => {
+  test("processes a pending compaction part without entering session loop", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await user(session.id, "hello world")
+        await SessionCompaction.create({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          auto: false,
+        })
+
+        const rt = runtime("continue", Plugin.defaultLayer, wide())
+        try {
+          await rt.runPromise(SessionCompaction.Service.use((svc) => svc.run({ sessionID: session.id })))
+
+          const msgs = await Session.messages({ sessionID: session.id })
+          const summaryMsg = msgs.find((m) => m.info.role === "assistant" && (m.info as any).summary)
+          expect(summaryMsg).toBeDefined()
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
+
+  test("no-ops when no compaction part exists", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await user(session.id, "hello world")
+
+        const rt = runtime("continue", Plugin.defaultLayer, wide())
+        try {
+          await rt.runPromise(SessionCompaction.Service.use((svc) => svc.run({ sessionID: session.id })))
+
+          const msgs = await Session.messages({ sessionID: session.id })
+          expect(msgs).toHaveLength(1)
+          expect(msgs[0].info.role).toBe("user")
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
+
+  test("no-ops when session has no messages", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+
+        const rt = runtime("continue", Plugin.defaultLayer, wide())
+        try {
+          await rt.runPromise(SessionCompaction.Service.use((svc) => svc.run({ sessionID: session.id })))
+
+          const msgs = await Session.messages({ sessionID: session.id })
+          expect(msgs).toHaveLength(0)
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
+
+  test("passes overflow flag from compaction part to processCompaction", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await user(session.id, "hello world")
+        await SessionCompaction.create({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          auto: true,
+          overflow: true,
+        })
+
+        const rt = runtime("continue", Plugin.defaultLayer, wide())
+        try {
+          await rt.runPromise(SessionCompaction.Service.use((svc) => svc.run({ sessionID: session.id })))
+
+          const msgs = await Session.messages({ sessionID: session.id })
+          const summaryMsg = msgs.find((m) => m.info.role === "assistant" && (m.info as any).summary)
+          expect(summaryMsg).toBeDefined()
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
+})

@@ -101,6 +101,8 @@ import { getRevertDiffFiles } from "../../util/revert-diff"
 import { within } from "../../util/selection-boundary"
 import { TuiEvent } from "../../event"
 import { SearchOverlay } from "@tui/component/search"
+import { Checkpoint } from "@/session/checkpoint"
+import { SessionID } from "@/session/schema"
 
 addDefaultParsers(parsers.parsers)
 
@@ -651,9 +653,9 @@ export function Session() {
       category: "Session",
       slash: {
         name: "compact",
-        aliases: ["summarize"],
+        aliases: ["summarize", "clear-compact"],
       },
-      onSelect: (dialog) => {
+      onSelect: async (dialog) => {
         const selectedModel = local.model.current()
         if (!selectedModel) {
           toast.show({
@@ -663,12 +665,74 @@ export function Session() {
           })
           return
         }
-        sdk.client.session.summarize({
-          sessionID: route.sessionID,
-          modelID: selectedModel.modelID,
-          providerID: selectedModel.providerID,
-        })
         dialog.clear()
+
+        try {
+          const response = await sdk.client.session.messages({ sessionID: route.sessionID })
+          const messages = response.data || []
+
+          if (messages.length === 0) {
+            toast.show({ variant: "info", message: "No messages to compact" })
+            return
+          }
+
+          toast.show({ variant: "info", message: "Creating summary...", duration: 8000 })
+
+          await sdk.client.session.summarize({
+            sessionID: route.sessionID,
+            providerID: selectedModel.providerID,
+            modelID: selectedModel.modelID,
+            auto: false,
+          })
+
+          const updatedResponse = await sdk.client.session.messages({ sessionID: route.sessionID })
+          const updatedMessages = updatedResponse.data || []
+          const summaryMessage = updatedMessages.findLast(
+            (m) => m.info.role === "assistant" && Boolean(m.info.summary) && !m.info.error,
+          )
+
+          if (!summaryMessage) {
+            toast.show({ variant: "error", message: "Failed to create summary. Use /clear instead." })
+            return
+          }
+
+          const summaryTime = summaryMessage.info.time?.created ?? Date.now()
+
+          let deletedCount = 0
+          let deletedCost = 0
+          for (const msg of messages) {
+            if (msg.info.id === summaryMessage.info.id) continue
+            if (msg.info.role === "assistant") {
+              deletedCost += msg.info.cost ?? 0
+            }
+            await sdk.client.session.deleteMessage({ sessionID: route.sessionID, messageID: msg.info.id })
+            deletedCount++
+          }
+
+          const existingClearedCost = kv.get<number>(`cleared_cost_${route.sessionID}`, 0)
+          kv.set(`cleared_cost_${route.sessionID}`, existingClearedCost + deletedCost)
+
+          // Wait for checkpoint writer before cleaning children
+          await Checkpoint.waitForWriter({ sessionID: SessionID.make(route.sessionID), timeout: 60_000 })
+
+          // Smart delete: only children created before the summary
+          const kidsResponse = await sdk.client.session.children({ sessionID: route.sessionID })
+          for (const kid of kidsResponse.data ?? []) {
+            if (kid.time.created < summaryTime) {
+              await sdk.client.session.delete({ sessionID: kid.id })
+            }
+          }
+
+          await sdk.client.session.clearTodo({ sessionID: route.sessionID })
+          await sync.session.sync(route.sessionID, { force: true })
+
+          toast.show({ variant: "info", message: `Compacted: created summary and cleared ${deletedCount} message(s)` })
+        } catch (error) {
+          toast.show({
+            variant: "error",
+            message: `Failed to compact: ${error instanceof Error ? error.message : String(error)}`,
+          })
+        }
       },
     },
     {
