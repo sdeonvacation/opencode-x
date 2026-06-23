@@ -760,8 +760,14 @@ export namespace MessageV2 {
           if (part.type !== "reasoning") return false
           return part.metadata?.anthropic?.signature != null || part.metadata?.bedrock?.signature != null
         })
+        let lastPushedWasTool = false
         for (const part of msg.parts) {
           if (part.type === "text") {
+            // Insert step-start boundary when tool is followed by text (retry within same step)
+            if (lastPushedWasTool) {
+              assistantMessage.parts.push({ type: "step-start" })
+              lastPushedWasTool = false
+            }
             const rawText = part.text === "" && hasSignedReasoning ? " " : part.text
             // [fork-perf] strip-thinking: remove inline CoT tags from assistant text before sending to model
             const text = options?.stripThinkingText ? stripThinkingTags(rawText) : rawText
@@ -771,10 +777,12 @@ export namespace MessageV2 {
               ...(differentModel ? {} : { providerMetadata: part.metadata }),
             })
           }
-          if (part.type === "step-start")
+          if (part.type === "step-start") {
+            lastPushedWasTool = false
             assistantMessage.parts.push({
               type: "step-start",
             })
+          }
           if (part.type === "tool") {
             toolNames.add(part.tool)
             if (part.state.status === "completed") {
@@ -846,8 +854,14 @@ export namespace MessageV2 {
                 ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
               })
+            lastPushedWasTool = true
           }
           if (part.type === "reasoning") {
+            // Insert step-start boundary when tool is followed by reasoning (retry within same step)
+            if (lastPushedWasTool) {
+              assistantMessage.parts.push({ type: "step-start" })
+              lastPushedWasTool = false
+            }
             // [fork-perf] thinking-integrity: skip empty-text reasoning parts that carry only a
             // signature (e.g. proxies emitting signature_delta without thinking_delta).
             // Anthropic rejects on replay with `messages.X.content.Y: thinking blocks cannot be
@@ -860,6 +874,11 @@ export namespace MessageV2 {
               ...(differentModel ? {} : { providerMetadata: part.metadata }),
             })
           }
+        }
+        // Ensure assistant message doesn't end with reasoning-only (Anthropic rejects "thinking" as final block)
+        const lastPart = assistantMessage.parts[assistantMessage.parts.length - 1]
+        if (lastPart?.type === "reasoning") {
+          assistantMessage.parts.push({ type: "text", text: " " })
         }
         if (assistantMessage.parts.length > 0) {
           result.push(assistantMessage)
@@ -888,6 +907,17 @@ export namespace MessageV2 {
     }
 
     const tools = Object.fromEntries(Array.from(toolNames).map((toolName) => [toolName, { toModelOutput }]))
+
+    // Ensure conversation starts with a user message (proxy/APIs reject assistant prefill).
+    // Only prepend when result is a real conversation (has user messages) but starts with assistant
+    // because the original first user message was empty/filtered out.
+    if (result.length > 0 && result[0].role === "assistant" && result.some((msg) => msg.role === "user")) {
+      result.unshift({
+        id: MessageID.ascending(),
+        role: "user",
+        parts: [{ type: "text", text: "Continue." }],
+      })
+    }
 
     return yield* Effect.promise(() =>
       convertToModelMessages(

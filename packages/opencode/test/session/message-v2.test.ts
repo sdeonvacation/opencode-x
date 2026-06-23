@@ -1579,4 +1579,282 @@ describe("session.message-v2.stripThinkingTags", () => {
     expect(MessageV2.stripThinkingTags("no tags here")).toBe("no tags here")
     expect(MessageV2.stripThinkingTags("")).toBe("")
   })
+
+  test("bug1: inserts step-start boundary when tool is followed by reasoning (retry within step)", async () => {
+    const userID = "u-retry"
+    const assistantID = "a-retry"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [{ ...basePart(userID, "u1"), type: "text", text: "do it" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          { ...basePart(assistantID, "s1"), type: "step-start" },
+          { ...basePart(assistantID, "r1"), type: "reasoning", text: "thinking1", time: { start: 0 } },
+          { ...basePart(assistantID, "t1"), type: "text", text: "first attempt" },
+          {
+            ...basePart(assistantID, "tool1"),
+            type: "tool",
+            callID: "call-err",
+            tool: "bash",
+            state: {
+              status: "error",
+              input: { cmd: "bad" },
+              error: "failed",
+              title: "Bash",
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+          },
+          // Retry: reasoning after tool = needs step-start boundary
+          { ...basePart(assistantID, "r2"), type: "reasoning", text: "thinking2", time: { start: 0 } },
+          { ...basePart(assistantID, "t2"), type: "text", text: "second attempt" },
+          {
+            ...basePart(assistantID, "tool2"),
+            type: "tool",
+            callID: "call-ok",
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: { cmd: "good" },
+              output: "success",
+              title: "Bash",
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    // The retry should produce two separate assistant blocks (split by step-start)
+    // First block: reasoning1 + text1 + tool_use(err) -> assistant + tool
+    // Second block: reasoning2 + text2 + tool_use(ok) -> assistant + tool
+    const assistantMsgs = result.filter((m) => m.role === "assistant")
+    expect(assistantMsgs.length).toBe(2)
+    // First assistant has tool-call for the error
+    const firstToolCalls = (assistantMsgs[0].content as { type: string; toolName?: string }[]).filter(
+      (c) => c.type === "tool-call",
+    )
+    expect(firstToolCalls.length).toBe(1)
+    expect(firstToolCalls[0].toolName).toBe("bash")
+    // Second assistant has tool-call for the success
+    const secondToolCalls = (assistantMsgs[1].content as { type: string; toolName?: string }[]).filter(
+      (c) => c.type === "tool-call",
+    )
+    expect(secondToolCalls.length).toBe(1)
+    expect(secondToolCalls[0].toolName).toBe("bash")
+  })
+
+  test("bug1: inserts step-start boundary when tool is followed by text (retry within step)", async () => {
+    const userID = "u-retry2"
+    const assistantID = "a-retry2"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [{ ...basePart(userID, "u1"), type: "text", text: "do it" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          { ...basePart(assistantID, "s1"), type: "step-start" },
+          { ...basePart(assistantID, "t1"), type: "text", text: "attempt one" },
+          {
+            ...basePart(assistantID, "tool1"),
+            type: "tool",
+            callID: "call-err",
+            tool: "bash",
+            state: {
+              status: "error",
+              input: { cmd: "bad" },
+              error: "failed",
+              title: "Bash",
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+          },
+          // Text directly after tool = retry boundary
+          { ...basePart(assistantID, "t2"), type: "text", text: "attempt two" },
+          {
+            ...basePart(assistantID, "tool2"),
+            type: "tool",
+            callID: "call-ok",
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: { cmd: "good" },
+              output: "done",
+              title: "Bash",
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    const assistantMsgs = result.filter((m) => m.role === "assistant")
+    expect(assistantMsgs.length).toBe(2)
+  })
+
+  test("bug1: no spurious boundary when tool is followed by another tool (no retry)", async () => {
+    const userID = "u-multi-tool"
+    const assistantID = "a-multi-tool"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [{ ...basePart(userID, "u1"), type: "text", text: "do it" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          { ...basePart(assistantID, "s1"), type: "step-start" },
+          { ...basePart(assistantID, "t1"), type: "text", text: "running tools" },
+          {
+            ...basePart(assistantID, "tool1"),
+            type: "tool",
+            callID: "call-1",
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: { cmd: "ls" },
+              output: "ok",
+              title: "Bash",
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+          },
+          {
+            ...basePart(assistantID, "tool2"),
+            type: "tool",
+            callID: "call-2",
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: { cmd: "pwd" },
+              output: "/home",
+              title: "Bash",
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    // Both tool calls should be in the same assistant message (no split)
+    const assistantMsgs = result.filter((m) => m.role === "assistant")
+    expect(assistantMsgs.length).toBe(1)
+    const toolCalls = (assistantMsgs[0].content as { type: string }[]).filter((c) => c.type === "tool-call")
+    expect(toolCalls.length).toBe(2)
+  })
+
+  test("bug2: appends text when assistant ends with reasoning-only", async () => {
+    const userID = "u-reasoning-end"
+    const assistantID = "a-reasoning-end"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [{ ...basePart(userID, "u1"), type: "text", text: "think" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          { ...basePart(assistantID, "s1"), type: "step-start" },
+          { ...basePart(assistantID, "r1"), type: "reasoning", text: "deep thought", time: { start: 0 } },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    const assistantMsg = result.find((m) => m.role === "assistant")
+    expect(assistantMsg).toBeDefined()
+    // Last content part should be text (not reasoning)
+    const content = assistantMsg!.content as { type: string; text?: string }[]
+    const lastPart = content[content.length - 1]
+    expect(lastPart.type).toBe("text")
+    expect(lastPart.text).toBe(" ")
+  })
+
+  test("bug2: does not append text when assistant ends with text normally", async () => {
+    const userID = "u-normal-end"
+    const assistantID = "a-normal-end"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [{ ...basePart(userID, "u1"), type: "text", text: "hi" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          { ...basePart(assistantID, "s1"), type: "step-start" },
+          { ...basePart(assistantID, "r1"), type: "reasoning", text: "hmm", time: { start: 0 } },
+          { ...basePart(assistantID, "t1"), type: "text", text: "hello" },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    const assistantMsg = result.find((m) => m.role === "assistant")
+    expect(assistantMsg).toBeDefined()
+    const content = assistantMsg!.content as { type: string; text?: string }[]
+    const lastPart = content[content.length - 1]
+    expect(lastPart.type).toBe("text")
+    expect(lastPart.text).toBe("hello")
+  })
+
+  test("bug3: prepends synthetic user message when result starts with assistant", async () => {
+    const assistantID = "a-prefill"
+    // User message has 0 meaningful parts -> gets skipped -> assistant becomes first.
+    // A later user message exists so it's a real conversation (not a single assistant msg).
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("u-empty"),
+        parts: [] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, "u-empty"),
+        parts: [
+          { ...basePart(assistantID, "s1"), type: "step-start" },
+          { ...basePart(assistantID, "t1"), type: "text", text: "response" },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: userInfo("u-later"),
+        parts: [{ ...basePart("u-later", "u2"), type: "text", text: "continue" }] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    expect(result[0].role).toBe("user")
+    expect((result[0].content as { type: string; text?: string }[])[0].text).toBe("Continue.")
+    expect(result[1].role).toBe("assistant")
+  })
+
+  test("bug3: does not prepend user message when result already starts with user", async () => {
+    const userID = "u-normal"
+    const assistantID = "a-normal"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [{ ...basePart(userID, "u1"), type: "text", text: "hello" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          { ...basePart(assistantID, "s1"), type: "step-start" },
+          { ...basePart(assistantID, "t1"), type: "text", text: "hi" },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    expect(result[0].role).toBe("user")
+    expect((result[0].content as { type: string; text?: string }[])[0].text).toBe("hello")
+  })
 })
