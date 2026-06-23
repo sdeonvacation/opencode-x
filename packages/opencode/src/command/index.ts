@@ -127,7 +127,12 @@ export namespace Command {
             agent: "dream",
             source: "command",
             get template() {
-              const context = buildContext(cfg.dream?.interval_days ?? AutoDream.DEFAULT_DREAM_INTERVAL_DAYS, cfg.dream)
+              const context = buildContext(cfg.dream?.interval_days ?? AutoDream.DEFAULT_DREAM_INTERVAL_DAYS, {
+                max_sessions: AutoDream.DEFAULT_DREAM_MAX_SESSIONS,
+                max_messages: AutoDream.DEFAULT_DREAM_MAX_MESSAGES,
+                ...cfg.dream,
+                global: true,
+              })
               return context ? `${AutoDream.DREAM_TASK}\n\n${context}` : AutoDream.DREAM_TASK
             },
             hints: [],

@@ -32,7 +32,7 @@ function extractText(msg: MessageV2.WithParts): string {
 
 export function buildContext(
   days: number,
-  opts?: { max_context_chars?: number; max_sessions?: number; max_messages?: number },
+  opts?: { max_context_chars?: number; max_sessions?: number; max_messages?: number; global?: boolean },
 ): string {
   const maxChars = opts?.max_context_chars ?? DEFAULT_MAX_CONTEXT_CHARS
   const maxSessions = opts?.max_sessions ?? DEFAULT_MAX_SESSIONS
@@ -41,7 +41,11 @@ export function buildContext(
   const cutoff = Date.now() - days * AutoDream.DAY_MS
   const sessions: Array<{ title: string; time: number; id: SessionID }> = []
 
-  for (const s of Session.list({ roots: true, start: cutoff, limit: maxSessions })) {
+  const source = opts?.global
+    ? Session.listGlobal({ roots: true, start: cutoff, limit: maxSessions })
+    : Session.list({ roots: true, start: cutoff, limit: maxSessions })
+
+  for (const s of source) {
     if (s.title.startsWith(AutoDream.AUTO_DREAM_TITLE)) continue
     if (s.title.startsWith(AutoDream.AUTO_DISTILL_TITLE)) continue
     sessions.push({ title: s.title, time: s.time.created, id: s.id })
@@ -87,7 +91,12 @@ async function kick(sessionID: SessionID, agent: string, task: string) {
 export namespace DreamSpawn {
   export async function dream(parentID: SessionID, agent: Agent.Info, cfg: Config.Info) {
     try {
-      const context = buildContext(cfg.dream?.interval_days ?? AutoDream.DEFAULT_DREAM_INTERVAL_DAYS, cfg.dream)
+      const context = buildContext(cfg.dream?.interval_days ?? AutoDream.DEFAULT_DREAM_INTERVAL_DAYS, {
+        max_sessions: AutoDream.DEFAULT_DREAM_MAX_SESSIONS,
+        max_messages: AutoDream.DEFAULT_DREAM_MAX_MESSAGES,
+        ...cfg.dream,
+        global: true,
+      })
       const result = await spawnSubagent(undefined, {
         parentSessionID: parentID,
         agent,
