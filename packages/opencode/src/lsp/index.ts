@@ -11,6 +11,7 @@ import { Instance } from "../project/instance"
 import { Flag } from "@/flag/flag"
 import { Process } from "../util/process"
 import { spawn as lspspawn } from "./launch"
+import { withTimeout, TimeoutError } from "../util/timeout"
 import { Effect, Layer, ScopedCache, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
@@ -212,6 +213,8 @@ export namespace LSP {
     broken: Set<string>
     spawning: Map<string, Promise<LSPClient.Info | undefined>>
     disposing: boolean
+    evicting: Map<string, Promise<void>>
+    respawnAttempts: Map<string, { count: number; nextAllowedAt: number }>
   }
 
   export interface Interface {
@@ -288,6 +291,8 @@ export namespace LSP {
             broken: new Set(),
             spawning: new Map(),
             disposing: false,
+            evicting: new Map(),
+            respawnAttempts: new Map(),
           }
 
           yield* Effect.addFinalizer(() =>
@@ -395,6 +400,34 @@ export namespace LSP {
         }),
       )
 
+      function doEvict(s: State, key: string, client: LSPClient.Info) {
+        if (s.disposing) return
+        if (s.evicting.has(key)) return
+        const idx = s.clients.indexOf(client)
+        if (idx !== -1) s.clients.splice(idx, 1)
+        // Track failures for backoff; after 3 evictions mark permanently broken
+        const prev = s.respawnAttempts.get(key) ?? { count: 0, nextAllowedAt: 0 }
+        const count = prev.count + 1
+        const BACKOFFS = [0, 10_000, 60_000] as const
+        const backoffMs: number | undefined = BACKOFFS[count - 1]
+        if (backoffMs === undefined) {
+          log.warn("lsp client evicted too many times, marking broken", {
+            serverID: client.serverID,
+            root: client.root,
+          })
+          s.broken.add(key)
+          s.respawnAttempts.delete(key)
+        } else {
+          s.respawnAttempts.set(key, { count, nextAllowedAt: Date.now() + backoffMs })
+        }
+        log.warn("evicting hung lsp client", { serverID: client.serverID, root: client.root, evictions: count })
+        const done = client
+          .shutdown()
+          .catch((err) => log.warn("error during eviction shutdown", { error: err, serverID: client.serverID }))
+          .finally(() => s.evicting.delete(key))
+        s.evicting.set(key, done)
+      }
+
       const getClients = Effect.fnUntraced(function* (file: string) {
         const internal = Instance.containsPath(file)
         const s = yield* InstanceState.get(state)
@@ -410,6 +443,27 @@ export namespace LSP {
           const lookup = isolated ? file.replace(ctx.directory, ctx.parent!) : file
 
           async function schedule(server: LSPServer.Info, root: string, key: string) {
+            // Phase 4: backoff — skip spawn if previous evictions haven't cooled down
+            const attempts = s.respawnAttempts.get(key)
+            if (attempts && Date.now() < attempts.nextAllowedAt) {
+              log.info("lsp respawn backoff active", {
+                serverID: server.id,
+                root,
+                count: attempts.count,
+                retryAt: new Date(attempts.nextAllowedAt).toISOString(),
+              })
+              return undefined
+            }
+
+            // If a concurrent eviction fired between the getClients loop check and here,
+            // wait for the old server to fully terminate before spawning a replacement.
+            const evictPending = s.evicting.get(key)
+            if (evictPending) {
+              log.info("waiting for previous server to terminate before respawning", { serverID: server.id, root })
+              await evictPending
+              return undefined
+            }
+
             const handle = await server
               .spawn(root)
               .then((value) => {
@@ -455,6 +509,20 @@ export namespace LSP {
             }
 
             s.clients.push(client)
+
+            // Phase 2: remove dead client on unexpected exit (crash recovery)
+            if (handle.process.pid) {
+              handle.process.once("exit", () => {
+                if (s.disposing) return
+                const idx = s.clients.indexOf(client)
+                if (idx !== -1) s.clients.splice(idx, 1)
+                log.info("lsp process exited, removed from active clients", { serverID: server.id, root })
+              })
+            }
+
+            // Phase 4: reset backoff on successful init
+            s.respawnAttempts.delete(key)
+
             return client
           }
 
@@ -470,6 +538,7 @@ export namespace LSP {
             }
             if (!root) continue
             if (s.broken.has(root + server.id)) continue
+            if (s.evicting.has(root + server.id)) continue
 
             // Check if any existing client already has this root in its folders
             const folderMatch = s.clients.find((x) => x.serverID === server.id && x.folders.has(root!))
@@ -613,81 +682,123 @@ export namespace LSP {
       })
 
       const hover = Effect.fn("LSP.hover")(function* (input: LocInput) {
-        return yield* run(input.file, (client) =>
-          client.connection
-            .sendRequest("textDocument/hover", {
+        const s = yield* InstanceState.get(state)
+        return yield* run(input.file, (client) => {
+          const key = client.root + client.serverID
+          return withTimeout(
+            client.connection.sendRequest("textDocument/hover", {
               textDocument: { uri: pathToFileURL(input.file).href },
               position: { line: input.line, character: input.character },
-            })
-            .catch(() => null),
-        )
+            }),
+            10_000,
+          ).catch((err) => {
+            if (err instanceof TimeoutError) doEvict(s, key, client)
+            return null
+          })
+        })
       })
 
       const definition = Effect.fn("LSP.definition")(function* (input: LocInput) {
-        const results = yield* run(input.file, (client) =>
-          client.connection
-            .sendRequest("textDocument/definition", {
+        const s = yield* InstanceState.get(state)
+        const results = yield* run(input.file, (client) => {
+          const key = client.root + client.serverID
+          return withTimeout(
+            client.connection.sendRequest("textDocument/definition", {
               textDocument: { uri: pathToFileURL(input.file).href },
               position: { line: input.line, character: input.character },
-            })
-            .catch(() => null),
-        )
+            }),
+            15_000,
+          ).catch((err) => {
+            if (err instanceof TimeoutError) doEvict(s, key, client)
+            return null
+          })
+        })
         return results.flat().filter(Boolean)
       })
 
       const references = Effect.fn("LSP.references")(function* (input: LocInput) {
-        const results = yield* run(input.file, (client) =>
-          client.connection
-            .sendRequest("textDocument/references", {
+        const s = yield* InstanceState.get(state)
+        const results = yield* run(input.file, (client) => {
+          const key = client.root + client.serverID
+          return withTimeout(
+            client.connection.sendRequest("textDocument/references", {
               textDocument: { uri: pathToFileURL(input.file).href },
               position: { line: input.line, character: input.character },
               context: { includeDeclaration: true },
-            })
-            .catch(() => []),
-        )
+            }),
+            15_000,
+          ).catch((err) => {
+            if (err instanceof TimeoutError) doEvict(s, key, client)
+            return []
+          })
+        })
         return results.flat().filter(Boolean)
       })
 
       const implementation = Effect.fn("LSP.implementation")(function* (input: LocInput) {
-        const results = yield* run(input.file, (client) =>
-          client.connection
-            .sendRequest("textDocument/implementation", {
+        const s = yield* InstanceState.get(state)
+        const results = yield* run(input.file, (client) => {
+          const key = client.root + client.serverID
+          return withTimeout(
+            client.connection.sendRequest("textDocument/implementation", {
               textDocument: { uri: pathToFileURL(input.file).href },
               position: { line: input.line, character: input.character },
-            })
-            .catch(() => null),
-        )
+            }),
+            15_000,
+          ).catch((err) => {
+            if (err instanceof TimeoutError) doEvict(s, key, client)
+            return null
+          })
+        })
         return results.flat().filter(Boolean)
       })
 
       const documentSymbol = Effect.fn("LSP.documentSymbol")(function* (uri: string) {
         const file = fileURLToPath(uri)
-        const results = yield* run(file, (client) =>
-          client.connection.sendRequest("textDocument/documentSymbol", { textDocument: { uri } }).catch(() => []),
-        )
+        const s = yield* InstanceState.get(state)
+        const results = yield* run(file, (client) => {
+          const key = client.root + client.serverID
+          return withTimeout(
+            client.connection.sendRequest("textDocument/documentSymbol", { textDocument: { uri } }),
+            20_000,
+          ).catch((err) => {
+            if (err instanceof TimeoutError) doEvict(s, key, client)
+            return []
+          })
+        })
         return (results.flat() as (LSP.DocumentSymbol | LSP.Symbol)[]).filter(Boolean)
       })
 
       const workspaceSymbol = Effect.fn("LSP.workspaceSymbol")(function* (query: string) {
-        const results = yield* runAll((client) =>
-          client.connection
-            .sendRequest("workspace/symbol", { query })
+        const s = yield* InstanceState.get(state)
+        const results = yield* runAll((client) => {
+          const key = client.root + client.serverID
+          return withTimeout(client.connection.sendRequest("workspace/symbol", { query }), 60_000)
             .then((result: any) => result.filter((x: LSP.Symbol) => kinds.includes(x.kind)))
             .then((result: any) => result.slice(0, 10))
-            .catch(() => []),
-        )
+            .catch((err) => {
+              if (err instanceof TimeoutError) doEvict(s, key, client)
+              return []
+            })
+        })
         return results.flat() as LSP.Symbol[]
       })
 
       const prepareCallHierarchy = Effect.fn("LSP.prepareCallHierarchy")(function* (input: LocInput) {
-        const results = yield* run(input.file, (client) =>
-          client.connection
-            .sendRequest("textDocument/prepareCallHierarchy", {
+        const s = yield* InstanceState.get(state)
+        const results = yield* run(input.file, (client) => {
+          const key = client.root + client.serverID
+          return withTimeout(
+            client.connection.sendRequest("textDocument/prepareCallHierarchy", {
               textDocument: { uri: pathToFileURL(input.file).href },
               position: { line: input.line, character: input.character },
-            })
-            .catch(() => []),
-        )
+            }),
+            20_000,
+          ).catch((err) => {
+            if (err instanceof TimeoutError) doEvict(s, key, client)
+            return []
+          })
+        })
         return results.flat().filter(Boolean)
       })
 
@@ -695,15 +806,24 @@ export namespace LSP {
         input: LocInput,
         direction: "callHierarchy/incomingCalls" | "callHierarchy/outgoingCalls",
       ) {
+        const s = yield* InstanceState.get(state)
         const results = yield* run(input.file, async (client) => {
-          const items = (await client.connection
-            .sendRequest("textDocument/prepareCallHierarchy", {
+          const key = client.root + client.serverID
+          const items = (await withTimeout(
+            client.connection.sendRequest("textDocument/prepareCallHierarchy", {
               textDocument: { uri: pathToFileURL(input.file).href },
               position: { line: input.line, character: input.character },
-            })
-            .catch(() => [])) as any[]
+            }),
+            20_000,
+          ).catch((err) => {
+            if (err instanceof TimeoutError) doEvict(s, key, client)
+            return []
+          })) as any[]
           if (!items?.length) return []
-          return client.connection.sendRequest(direction, { item: items[0] }).catch(() => [])
+          return withTimeout(client.connection.sendRequest(direction, { item: items[0] }), 30_000).catch((err) => {
+            if (err instanceof TimeoutError) doEvict(s, key, client)
+            return []
+          })
         })
         return results.flat().filter(Boolean)
       })
