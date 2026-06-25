@@ -216,6 +216,7 @@ function runtime(
       Layer.provide(plugin),
       Layer.provide(bus),
       Layer.provide(config),
+      Layer.provide(SessionStatus.defaultLayer),
     ),
   )
 }

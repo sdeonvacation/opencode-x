@@ -9,6 +9,7 @@ import z from "zod"
 import { Token } from "../util/token"
 import { Log } from "../util/log"
 import { SessionProcessor } from "./processor"
+import { SessionStatus } from "./status"
 import { fn } from "@/util/fn"
 import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
@@ -233,6 +234,7 @@ Rules:
     | Plugin.Service
     | SessionProcessor.Service
     | Provider.Service
+    | SessionStatus.Service
   > = Layer.effect(
     Service,
     Effect.gen(function* () {
@@ -243,6 +245,7 @@ Rules:
       const plugin = yield* Plugin.Service
       const processors = yield* SessionProcessor.Service
       const provider = yield* Provider.Service
+      const status = yield* SessionStatus.Service
 
       const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
         tokens: MessageV2.Assistant["tokens"]
@@ -665,7 +668,7 @@ Rules:
           sessionID: input.sessionID,
           auto: task.auto ?? false,
           overflow: task.overflow,
-        })
+        }).pipe(Effect.ensuring(status.set(input.sessionID, { type: "idle" })))
       })
 
       return Service.of({
@@ -688,6 +691,7 @@ Rules:
       Layer.provide(Plugin.defaultLayer),
       Layer.provide(Bus.layer),
       Layer.provide(Config.defaultLayer),
+      Layer.provide(SessionStatus.defaultLayer),
     ),
   )
 
