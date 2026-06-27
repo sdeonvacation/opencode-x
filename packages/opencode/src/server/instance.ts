@@ -18,6 +18,11 @@ import { Global } from "../global"
 import { LSP } from "../lsp"
 import { Command } from "../command"
 import { Flag } from "../flag/flag"
+import { Config } from "../config/config"
+import { Provider } from "../provider/provider"
+import { parseModel } from "../plugin/insights/config"
+import { runInsights } from "../plugin/insights/orchestrator"
+import { Database as StorageDb } from "../storage/db"
 import { QuestionRoutes } from "./routes/question"
 import { PermissionRoutes } from "./routes/permission"
 import { Snapshot } from "@/snapshot"
@@ -63,6 +68,62 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
     .route("/", EventRoutes())
     .route("/mcp", McpRoutes())
     .route("/tui", TuiRoutes())
+    .post("/insights", async (c) => {
+      // Args validated by TUI command; raw API callers get defaults on invalid input
+      const args = (await c.req.json().catch(() => ({}))) as {
+        days?: number
+        force?: boolean
+        model?: string
+        all?: boolean
+      }
+      const config = await Config.get()
+      const insightsCfg = (config.experimental as any)?.insights as
+        | { model?: string; days?: number; concurrency?: number; max_sessions?: number }
+        | undefined
+
+      const modelStr = args.model ?? insightsCfg?.model
+      const modelSpec = parseModel(modelStr)
+      const defaultModel = await Provider.defaultModel()
+      const providerID = modelSpec.providerID || defaultModel.providerID
+
+      const smallModel = await Provider.getSmallModel(providerID as any)
+      if (!smallModel) return c.json({ error: "No model available for insights analysis" }, 400)
+
+      const languageModel = await Provider.getLanguage(smallModel)
+      const result = await runInsights(
+        {
+          model: languageModel,
+          stateDir: Global.Path.data,
+          dbPath: StorageDb.Path,
+          projectDir: Instance.directory,
+        },
+        {
+          days: args.days ?? insightsCfg?.days,
+          force: args.force,
+          projectOnly: !args.all,
+          concurrency: insightsCfg?.concurrency,
+          maxSessions: insightsCfg?.max_sessions,
+        },
+      )
+
+      // Open report in browser
+      try {
+        if (result.reportPath) {
+          const { execFile } = await import("node:child_process")
+          const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open"
+          execFile(cmd, [result.reportPath])
+        }
+      } catch {
+        // Non-fatal
+      }
+
+      return c.json({
+        reportPath: result.reportPath,
+        sessionCount: result.sessionCount,
+        analyzedCount: result.analyzedCount,
+        totalCost: result.totalCost,
+      })
+    })
     .post("/workflow/create", validator("json", z.object({ name: z.string(), prompt: z.string() })), async (c) => {
       const { name, prompt } = c.req.valid("json")
       if (!/^[a-zA-Z0-9_-]+$/.test(name)) return c.json({ error: "Invalid name" }, 400)

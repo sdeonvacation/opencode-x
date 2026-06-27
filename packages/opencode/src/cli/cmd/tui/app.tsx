@@ -9,6 +9,7 @@ import { createLoopCommand } from "@tui/command/loop-command"
 import { createWorktreeCommand } from "@tui/command/worktree-command"
 import { createConfigCommand } from "@tui/command/config-command"
 import { createUsageCommand } from "@tui/command/usage-command"
+import { createInsightsCommand } from "@tui/command/insights-command"
 import { createWorkflowCommand } from "@tui/command/workflow-command"
 import { createResearchCommand } from "@tui/command/research-command"
 import { useTerminalTitle } from "@tui/component/terminal-title"
@@ -583,6 +584,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     createWorktreeCommand({ dialog, sdk, toast }),
     createConfigCommand({ sdk: { url: sdk.url, fetch: sdk.fetch }, toast, dialog }),
     createUsageCommand({ sdk: { url: sdk.url, fetch: sdk.fetch }, toast, dialog, route }),
+    createInsightsCommand({ sdk: { url: sdk.url, fetch: sdk.fetch }, toast, dialog }),
     createWorkflowCommand({ dialog, toast, sdk: { url: sdk.url, fetch: sdk.fetch }, route }),
     ...((sync.data.config.experimental as any)?.deep_research === true
       ? [createResearchCommand({ dialog, toast, sdk, route })]

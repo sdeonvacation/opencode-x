@@ -1742,6 +1742,24 @@ export namespace Config {
             .max(20)
             .optional()
             .describe("Default per-swarm parallelism cap (default: 5)"),
+          insights: z
+            .object({
+              model: z
+                .string()
+                .optional()
+                .describe("Model for insights analysis (format: provider/model). Falls back to small_model"),
+              days: z.number().int().min(1).max(365).optional().describe("Days of history to analyze"),
+              concurrency: z
+                .number()
+                .int()
+                .min(1)
+                .max(16)
+                .optional()
+                .describe("Max parallel LLM calls during extraction"),
+              max_sessions: z.number().int().min(1).max(500).optional().describe("Max sessions to extract per run"),
+            })
+            .optional()
+            .describe("Configuration for /insights session analytics"),
           workflow: z.boolean().optional().describe("Enable QuickJS sandboxed workflow engine"),
           workflow_max_concurrent_agents: z
             .number()
