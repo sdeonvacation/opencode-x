@@ -93,23 +93,24 @@ Disable external skills only: `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`
 
 ## Slash Commands
 
-| Command          | Description                                     |
-| ---------------- | ----------------------------------------------- |
-| `/init`          | Create/update AGENTS.md                         |
-| `/review`        | Review changes (commit, branch, or PR)          |
-| `/status`        | Session status, ID, compaction savings          |
-| `/btw`           | Inject context without starting a new turn      |
-| `/clear`         | Clear messages in current session               |
-| `/clear-compact` | Clear messages and summarize history            |
-| `/goal`          | Set autonomous goal (agent works without input) |
-| `/dream`         | Trigger knowledge consolidation                 |
-| `/distill`       | Trigger workflow extraction into skills         |
-| `/memory_add`    | Add session memory entry                        |
-| `/memory_edit`   | Edit existing session memory                    |
-| `/memory_delete` | Remove session memory entry                     |
-| `/worktree`      | Manage git worktrees (list, remove)             |
-| `/swarm`         | Batch-parallel subagent dispatch                |
-| `/workflow`      | Run a QuickJS sandboxed workflow script         |
+| Command          | Description                                          |
+| ---------------- | ---------------------------------------------------- |
+| `/init`          | Create/update AGENTS.md                              |
+| `/review`        | Review changes (commit, branch, or PR)               |
+| `/status`        | Session status, ID, compaction savings               |
+| `/btw`           | Inject context without starting a new turn           |
+| `/clear`         | Clear messages in current session                    |
+| `/clear-compact` | Clear messages and summarize history                 |
+| `/goal`          | Set autonomous goal (agent works without input)      |
+| `/insights`      | Generate session analytics report (opens in browser) |
+| `/dream`         | Trigger knowledge consolidation                      |
+| `/distill`       | Trigger workflow extraction into skills              |
+| `/memory_add`    | Add session memory entry                             |
+| `/memory_edit`   | Edit existing session memory                         |
+| `/memory_delete` | Remove session memory entry                          |
+| `/worktree`      | Manage git worktrees (list, remove)                  |
+| `/swarm`         | Batch-parallel subagent dispatch                     |
+| `/workflow`      | Run a QuickJS sandboxed workflow script              |
 
 ### Custom Commands
 
@@ -419,21 +420,23 @@ Enable individually in config, or enable all with `OPENCODE_EXPERIMENTAL=1`:
     "tool_result_budget": 50000,
     "wire_diagnostics": true,
     "ultrawork_model": { "providerID": "anthropic", "modelID": "claude-sonnet-4-6" },
-    "task_categories": { "review": { "providerID": "anthropic", "modelID": "claude-sonnet-4-6" } }
+    "task_categories": { "review": { "providerID": "anthropic", "modelID": "claude-sonnet-4-6" } },
+    "insights": { "days": 7, "concurrency": 4, "max_sessions": 200, "model": "anthropic/claude-haiku-4-5" }
   }
 }
 ```
 
-| Feature                 | Description                                                    |
-| ----------------------- | -------------------------------------------------------------- |
-| `parallel_tool_calls`   | Allow safe parallel tool execution                             |
-| `continue_loop_on_deny` | Agent continues after permission denial (Tab to give feedback) |
-| `deep_research`         | Enable `/research` command and deep research workflow          |
-| `tool_result_budget`    | Character budget for tool results in history                   |
-| `wire_diagnostics`      | Per-request LLM profiling (JSONL logs)                         |
-| `ultrawork_model`       | High-reasoning model for complex delegated tasks               |
-| `task_categories`       | Route task categories to specific provider/model combos        |
-| `model_concurrency`     | Per-model concurrency limits (default: 5)                      |
+| Feature                 | Description                                                              |
+| ----------------------- | ------------------------------------------------------------------------ |
+| `parallel_tool_calls`   | Allow safe parallel tool execution                                       |
+| `continue_loop_on_deny` | Agent continues after permission denial (Tab to give feedback)           |
+| `deep_research`         | Enable `/research` command and deep research workflow                    |
+| `tool_result_budget`    | Character budget for tool results in history                             |
+| `wire_diagnostics`      | Per-request LLM profiling (JSONL logs)                                   |
+| `ultrawork_model`       | High-reasoning model for complex delegated tasks                         |
+| `task_categories`       | Route task categories to specific provider/model combos                  |
+| `model_concurrency`     | Per-model concurrency limits (default: 5)                                |
+| `insights`              | Configure `/insights` analytics (days, concurrency, max_sessions, model) |
 
 ---
 
