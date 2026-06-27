@@ -11,7 +11,7 @@ import { MCP } from "../mcp"
 import { Skill } from "../skill"
 import { Log } from "../util/log"
 import { AutoDream } from "../session/auto-dream"
-import { buildContext } from "../session/dream-spawn"
+import { buildContext, buildSessionContext } from "../session/dream-spawn"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
 import PROMPT_SWARM from "./template/swarm.txt"
@@ -53,7 +53,10 @@ export namespace Command {
     })
 
   // for some reason zod is inferring `string` for z.promise(z.string()).or(z.string()) so we have to manually override it
-  export type Info = Omit<z.infer<typeof Info>, "template"> & { template: Promise<string> | string }
+  export type Info = Omit<z.infer<typeof Info>, "template"> & {
+    template: Promise<string> | string
+    dynamicTemplate?: (input: { sessionID: SessionID; arguments: string }) => string | Promise<string>
+  }
 
   export function hints(template: string) {
     const result: string[] = []
@@ -143,6 +146,18 @@ export namespace Command {
             agent: "distill",
             source: "command",
             get template() {
+              const context = buildContext(
+                cfg.distill?.interval_days ?? AutoDream.DEFAULT_DISTILL_INTERVAL_DAYS,
+                cfg.distill,
+              )
+              return context ? `${AutoDream.DISTILL_TASK}\n\n${context}` : AutoDream.DISTILL_TASK
+            },
+            dynamicTemplate(input) {
+              const arg = input.arguments.trim().toLowerCase()
+              if (arg === "this") {
+                const context = buildSessionContext(input.sessionID, cfg.distill)
+                return context ? `${AutoDream.DISTILL_SESSION_TASK}\n\n${context}` : AutoDream.DISTILL_SESSION_TASK
+              }
               const context = buildContext(
                 cfg.distill?.interval_days ?? AutoDream.DEFAULT_DISTILL_INTERVAL_DAYS,
                 cfg.distill,

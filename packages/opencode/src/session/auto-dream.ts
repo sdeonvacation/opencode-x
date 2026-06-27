@@ -52,6 +52,20 @@ Do NOT create skills for simple patterns already in memory (git flows, basic fla
 
 If nothing qualifies, output "No skills worth creating" and explain why candidates were rejected.`
 
+  export const DISTILL_SESSION_TASK = `Review this session for complex workflows worth extracting into reusable skills.
+
+Key criteria — only create a skill if ALL are true:
+- Non-obvious: agent would get it wrong without explicit guidance
+- Complex: 5+ steps with specific commands, file paths, or code templates
+- Demonstrated: clearly performed in this session with enough detail to reproduce
+- Not covered: persistent memories alone are insufficient
+
+Generality preference: prefer skills that apply across projects using the same tech stack. Abstract away project-specific paths into generic patterns (e.g. "src/<module>/" not "src/session/"). Only create a project-local skill when the workflow is inherently tied to this codebase's unique structure and cannot be generalized.
+
+Do NOT create skills for simple patterns already in memory (git flows, basic flag removal, etc). A good skill has exact code templates, ordering constraints, and gotcha warnings — written so they're useful in ANY project with the same technology.
+
+If nothing qualifies, output "No skills worth creating" and explain why candidates were rejected.`
+
   let lastDreamSpawn = 0
   let lastDistillSpawn = 0
 

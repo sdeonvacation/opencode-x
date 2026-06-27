@@ -30,6 +30,34 @@ function extractText(msg: MessageV2.WithParts): string {
     .join("\n")
 }
 
+export function buildSessionContext(
+  sessionID: SessionID,
+  opts?: { max_context_chars?: number; max_messages?: number },
+): string {
+  const maxChars = opts?.max_context_chars ?? DEFAULT_MAX_CONTEXT_CHARS
+  const maxMessages = opts?.max_messages ?? DEFAULT_MAX_MESSAGES
+
+  const { items } = MessageV2.page({ sessionID, limit: maxMessages })
+  if (items.length < 3) return ""
+
+  let out = "## Current Session Context\n\n"
+  let chars = out.length
+
+  for (const msg of items) {
+    const role = msg.info.role === "user" ? "User" : "Assistant"
+    const text = extractText(msg)
+    if (!text) continue
+
+    const truncated = text.length > 4000 ? text.slice(0, 4000) + "..." : text
+    const entry = `**${role}**: ${truncated}\n\n`
+    if (chars + entry.length > maxChars) break
+    out += entry
+    chars += entry.length
+  }
+
+  return out
+}
+
 export function buildContext(
   days: number,
   opts?: { max_context_chars?: number; max_sessions?: number; max_messages?: number; global?: boolean },

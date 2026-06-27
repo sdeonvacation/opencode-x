@@ -2203,7 +2203,11 @@ export namespace SessionPrompt {
 
         const raw = input.arguments.match(argsRegex) ?? []
         const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
-        const templateCommand = yield* Effect.promise(async () => cmd.template)
+        const templateCommand = cmd.dynamicTemplate
+          ? yield* Effect.promise(async () =>
+              cmd.dynamicTemplate!({ sessionID: input.sessionID, arguments: input.arguments }),
+            )
+          : yield* Effect.promise(async () => cmd.template)
 
         const placeholders = templateCommand.match(placeholderRegex) ?? []
         let last = 0
@@ -2222,7 +2226,7 @@ export namespace SessionPrompt {
         const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
         let template = withArgs.replaceAll("$ARGUMENTS", input.arguments)
 
-        if (placeholders.length === 0 && !usesArgumentsPlaceholder && input.arguments.trim()) {
+        if (!cmd.dynamicTemplate && placeholders.length === 0 && !usesArgumentsPlaceholder && input.arguments.trim()) {
           template = template + "\n\n" + input.arguments
         }
 
