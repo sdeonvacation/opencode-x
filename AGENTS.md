@@ -107,3 +107,11 @@ See `specs/effect-migration.md` for full reference.
 - Prefer Effect services: `FileSystem`, `HttpClient`, `Path`, `Clock`, `DateTime`, `ChildProcess.make`
 - `Effect.cached` for shared single-flight computation (not manual Fiber/Promise caching)
 - `Instance.bind(fn)` for native addon callbacks needing ALS context (`@parcel/watcher`, `node-pty`)
+
+## Implementation Discipline
+
+- **Architecture confirmation**: Before implementing any new feature, confirm the execution model (direct TUI command, agent tool, plugin hook, server route) with the user. Never assume.
+- **No hardcoded values**: Never hardcode values that exist in config/schema. Trace the config resolution chain and use the canonical source (e.g. `StorageDb.Path` not manual path joins, `Config.get()` not inline defaults).
+- **Verify imports after parallel work**: After swarm/parallel implementation, verify all generated files are actually imported by production code. Dead modules that duplicate logic are tech debt.
+- **Read before edit**: Always read the exact file immediately before editing. Never rely on stale context from handoff packets or earlier reads — files change during multi-agent work.
+- **Validate against reality**: When computing aggregates (costs, tokens, counts), verify against a direct DB query before declaring correct. Off-by-2x errors from double-counting parent/child data are common.
