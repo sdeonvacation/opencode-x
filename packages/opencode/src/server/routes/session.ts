@@ -25,6 +25,9 @@ import { lazy } from "../../util/lazy"
 import { Bus } from "../../bus"
 import { NamedError } from "@opencode-ai/util/error"
 import { Goal } from "../../goal/goal"
+import { Loop } from "../../loop/loop"
+import { LoopID } from "../../loop/schema"
+import { LoopScheduler } from "../../loop/scheduler"
 import { Usage } from "../../session/usage"
 import { WorkflowRuntime } from "@/workflow/runtime"
 import { WorkflowRuntimeRef } from "@/workflow/runtime-ref"
@@ -285,6 +288,7 @@ export const SessionRoutes = lazy(() =>
       ),
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
+        LoopScheduler.stop(sessionID)
         await Session.remove(sessionID)
         return c.json(true)
       },
@@ -1413,6 +1417,259 @@ export const SessionRoutes = lazy(() =>
       async (c) => {
         WorkflowRuntime.cancel(c.req.valid("param").runID)
         return c.json({ ok: true })
+      },
+    )
+    .post(
+      "/:sessionID/loop",
+      describeRoute({
+        summary: "Create loop",
+        description: "Create a recurring loop that spawns subagent iterations on a schedule.",
+        operationId: "session.loop.create",
+        responses: {
+          200: {
+            description: "Loop created",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    id: z.string(),
+                    session_id: z.string(),
+                    prompt: z.string(),
+                    interval_ms: z.number(),
+                    status: z.string(),
+                    model: z.string().nullable(),
+                    token_budget: z.number().nullable(),
+                    tokens_used: z.number(),
+                    iteration_count: z.number(),
+                    next_run_at: z.number(),
+                    last_run_at: z.number().nullable(),
+                    last_subagent_session_id: z.string().nullable(),
+                    expires_at: z.number(),
+                    created_at: z.number(),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      validator(
+        "json",
+        z.object({
+          prompt: z.string().min(1),
+          interval_ms: z.number().int().min(60000),
+          model: z.string().optional(),
+          token_budget: z.number().int().positive().optional(),
+        }),
+      ),
+      async (c) => {
+        const cfg = await Config.get()
+        if (cfg.experimental?.loop === false) return c.json({ error: "Loop feature disabled" }, 400)
+        const sessionID = c.req.valid("param").sessionID
+        const body = c.req.valid("json")
+        const minInterval = cfg.loop?.min_interval_ms ?? 60000
+        if (body.interval_ms < minInterval) {
+          return c.json({ error: `Minimum interval is ${minInterval}ms` }, 400)
+        }
+        const loop = Loop.create({
+          sessionID,
+          prompt: body.prompt,
+          intervalMs: body.interval_ms,
+          model: body.model,
+          tokenBudget: body.token_budget ?? cfg.loop?.token_budget,
+          maxLoops: cfg.loop?.max_concurrent,
+          expiryMs: cfg.loop?.max_expiry_days ? cfg.loop.max_expiry_days * 86_400_000 : undefined,
+        })
+        LoopScheduler.start(sessionID)
+        return c.json(loop)
+      },
+    )
+    .get(
+      "/:sessionID/loops",
+      describeRoute({
+        summary: "List loops",
+        description: "List all loops for a session.",
+        operationId: "session.loop.list",
+        responses: {
+          200: {
+            description: "List of loops",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.array(
+                    z.object({
+                      id: z.string(),
+                      session_id: z.string(),
+                      prompt: z.string(),
+                      interval_ms: z.number(),
+                      status: z.string(),
+                      model: z.string().nullable(),
+                      token_budget: z.number().nullable(),
+                      tokens_used: z.number(),
+                      iteration_count: z.number(),
+                      next_run_at: z.number(),
+                      last_run_at: z.number().nullable(),
+                      last_subagent_session_id: z.string().nullable(),
+                      expires_at: z.number(),
+                      created_at: z.number(),
+                    }),
+                  ),
+                ),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      async (c) => {
+        const sessionID = c.req.valid("param").sessionID
+        const loops = Loop.list(sessionID)
+        return c.json(loops)
+      },
+    )
+    .delete(
+      "/:sessionID/loop/:loopID",
+      describeRoute({
+        summary: "Cancel loop",
+        description: "Cancel an active loop by ID.",
+        operationId: "session.loop.cancel",
+        responses: {
+          200: {
+            description: "Loop cancelled",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    id: z.string(),
+                    session_id: z.string(),
+                    prompt: z.string(),
+                    interval_ms: z.number(),
+                    status: z.string(),
+                    model: z.string().nullable(),
+                    token_budget: z.number().nullable(),
+                    tokens_used: z.number(),
+                    iteration_count: z.number(),
+                    next_run_at: z.number(),
+                    last_run_at: z.number().nullable(),
+                    last_subagent_session_id: z.string().nullable(),
+                    expires_at: z.number(),
+                    created_at: z.number(),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+          loopID: LoopID.zod,
+        }),
+      ),
+      async (c) => {
+        const { loopID } = c.req.valid("param")
+        const loop = Loop.get(loopID)
+        if (!loop) return c.json({ error: "Loop not found" }, 404)
+        const cancelled = Loop.cancel({ id: loopID })
+        return c.json(cancelled)
+      },
+    )
+    .get(
+      "/:sessionID/loop/:loopID/iterations",
+      describeRoute({
+        summary: "Get loop iterations",
+        description: "Get iteration info for a loop, including last subagent session.",
+        operationId: "session.loop.iterations",
+        responses: {
+          200: {
+            description: "Loop iteration info",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    id: z.string(),
+                    iteration_count: z.number(),
+                    last_subagent_session_id: z.string().nullable(),
+                    status: z.string(),
+                    tokens_used: z.number(),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+          loopID: LoopID.zod,
+        }),
+      ),
+      async (c) => {
+        const { loopID } = c.req.valid("param")
+        const loop = Loop.get(loopID)
+        if (!loop) return c.json({ error: "Loop not found" }, 404)
+        return c.json({
+          id: loop.id,
+          iteration_count: loop.iteration_count,
+          last_subagent_session_id: loop.last_subagent_session_id,
+          status: loop.status,
+          tokens_used: loop.tokens_used,
+        })
+      },
+    )
+    .post(
+      "/:sessionID/loop/:loopID/pause",
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+          loopID: LoopID.zod,
+        }),
+      ),
+      async (c) => {
+        const { loopID } = c.req.valid("param")
+        const loop = Loop.get(loopID)
+        if (!loop) return c.json({ error: "Loop not found" }, 404)
+        if (loop.status !== "active") return c.json({ error: "Loop is not active" }, 400)
+        const paused = Loop.pause({ id: loopID })
+        return c.json(paused)
+      },
+    )
+    .post(
+      "/:sessionID/loop/:loopID/resume",
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+          loopID: LoopID.zod,
+        }),
+      ),
+      async (c) => {
+        const { loopID } = c.req.valid("param")
+        const loop = Loop.get(loopID)
+        if (!loop) return c.json({ error: "Loop not found" }, 404)
+        if (loop.status !== "paused") return c.json({ error: "Loop is not paused" }, 400)
+        const resumed = Loop.resume({ id: loopID })
+        return c.json(resumed)
       },
     ),
 )

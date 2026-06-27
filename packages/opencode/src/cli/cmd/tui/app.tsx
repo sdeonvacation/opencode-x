@@ -5,6 +5,7 @@ import { createBtwCommand } from "@tui/command/btw-command"
 import { createMemoryCommands } from "@tui/command/memory-commands"
 import { createClearCommands } from "@tui/command/clear-commands"
 import { createGoalCommand } from "@tui/command/goal-command"
+import { createLoopCommand } from "@tui/command/loop-command"
 import { createWorktreeCommand } from "@tui/command/worktree-command"
 import { createConfigCommand } from "@tui/command/config-command"
 import { createUsageCommand } from "@tui/command/usage-command"
@@ -578,6 +579,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       category: "System",
     },
     createGoalCommand({ dialog, sdk, toast, route }),
+    createLoopCommand({ dialog, toast, sdk: { url: sdk.url, fetch: sdk.fetch }, route }),
     createWorktreeCommand({ dialog, sdk, toast }),
     createConfigCommand({ sdk: { url: sdk.url, fetch: sdk.fetch }, toast, dialog }),
     createUsageCommand({ sdk: { url: sdk.url, fetch: sdk.fetch }, toast, dialog, route }),

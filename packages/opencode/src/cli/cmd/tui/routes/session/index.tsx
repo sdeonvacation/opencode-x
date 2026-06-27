@@ -65,6 +65,7 @@ import { DialogSessionRename } from "../../component/dialog-session-rename"
 import { Sidebar } from "./sidebar"
 import { SubagentFooter } from "./subagent-footer.tsx"
 import { WorkflowStatus } from "@tui/component/workflow-status"
+import { LoopStatus } from "@tui/component/loop-status"
 import { Flag } from "@/flag/flag"
 import { LANGUAGE_EXTENSIONS } from "@/lsp/language"
 import parsers from "../../../../../../parsers-config.ts"
@@ -1447,6 +1448,7 @@ export function Session() {
                 <SubagentFooter />
               </Show>
               <WorkflowStatus />
+              <LoopStatus />
               <Show when={visible()}>
                 <Prompt
                   visible={visible()}

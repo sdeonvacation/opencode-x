@@ -466,10 +466,11 @@ When no loops exist:
 
 ### Footer Status
 
-When loops are active, show in prompt footer area:
+When loops are active, show in the **footer bar's right-side `<box>`** (alongside LSP/MCP counts), NOT in the prompt/spinner area. The spinner verb occupies the prompt input line above; the footer is a separate row below with `justifyContent="space-between"` (directory left, status indicators right).
 
 ```
-🔄 2 loops │ next: 2m 31s
+Footer row:  [directory]                    [🔄 2 loops │ next: 2m 31s] [• 1 LSP] [⊙ 2 MCP] [/status]
+Prompt row:  [spinner verb] ...   ← separate line, no conflict
 ```
 
 ## Server Routes

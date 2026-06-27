@@ -1,6 +1,8 @@
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
-import { createMemo, Match, Show, Switch } from "solid-js"
+import { createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from "solid-js"
 import { Global } from "@/global"
+import { Loop } from "@/loop/loop"
+import type { SessionID } from "@/session/schema"
 
 const id = "internal:home-footer"
 
@@ -44,6 +46,39 @@ function Mcp(props: { api: TuiPluginApi }) {
   )
 }
 
+function LoopIndicator(props: { api: TuiPluginApi }) {
+  const theme = () => props.api.theme.current
+  const [count, setCount] = createSignal(0)
+
+  onMount(() => {
+    const poll = () => {
+      const route = props.api.route.current
+      if (route.name !== "session" || !("params" in route) || !route.params?.sessionID) {
+        setCount(0)
+        return
+      }
+      try {
+        const loops = Loop.list(route.params.sessionID as SessionID)
+        setCount(loops.filter((l) => l.status === "active" || l.status === "paused").length)
+      } catch {
+        setCount(0)
+      }
+    }
+    poll()
+    const interval = setInterval(poll, 5000)
+    onCleanup(() => clearInterval(interval))
+  })
+
+  return (
+    <Show when={count() > 0}>
+      <text fg={theme().textMuted}>
+        {"◎ "}
+        {count()} loop{count() > 1 ? "s" : ""}
+      </text>
+    </Show>
+  )
+}
+
 function Version(props: { api: TuiPluginApi }) {
   const theme = () => props.api.theme.current
 
@@ -68,6 +103,7 @@ function View(props: { api: TuiPluginApi }) {
     >
       <Directory api={props.api} />
       <Mcp api={props.api} />
+      <LoopIndicator api={props.api} />
       <box flexGrow={1} />
       <Version api={props.api} />
     </box>

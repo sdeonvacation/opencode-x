@@ -832,6 +832,7 @@ export namespace Config {
       session_quick_switch_7: z.string().optional().default("<leader>7").describe("Switch to session in quick slot 7"),
       session_quick_switch_8: z.string().optional().default("<leader>8").describe("Switch to session in quick slot 8"),
       session_quick_switch_9: z.string().optional().default("<leader>9").describe("Switch to session in quick slot 9"),
+      loop_panel: z.string().optional().default("<leader>p").describe("Open loop management panel"),
       // fork: background-detach (#FORK) — begin
       session_background: z.string().optional().default("<leader>d").describe("Push running session to background"),
       // fork: background-detach (#FORK) — end
@@ -1378,6 +1379,20 @@ export namespace Config {
           max_messages: z.number().int().positive().optional().describe("Max messages per session (default: 100)"),
         })
         .optional(),
+      loop: z
+        .object({
+          max_concurrent: z.number().int().positive().optional().describe("Maximum concurrent loops per session"),
+          max_expiry_days: z.number().positive().optional().describe("Days until loop auto-expires"),
+          min_interval_ms: z.number().int().positive().optional().describe("Minimum interval between iterations in ms"),
+          model: ModelId.optional().describe("Default model for loop iterations, falls back to small_model"),
+          token_budget: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Default token budget per loop, unlimited if unset"),
+        })
+        .optional(),
       hooks: z
         .object({
           PreToolUse: z
@@ -1708,6 +1723,7 @@ export namespace Config {
             .optional()
             .describe("Override deep research tunables"),
           goal_system: z.boolean().optional().describe("Enable autonomous goal system with /goal command"),
+          loop: z.boolean().optional().describe("Enable /loop recurring prompt scheduler"),
           worktree_isolation: z.boolean().optional().describe("Enable worktree isolation for subagent tasks"),
           hooks: z.boolean().optional().describe("Enable plugin hooks system (Claude Code compatible)"),
           persistent_memory: z.boolean().optional().describe("Enable cross-session persistent memory"),
