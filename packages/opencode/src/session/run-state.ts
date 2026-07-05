@@ -1,7 +1,7 @@
 import { InstanceState } from "@/effect/instance-state"
 import { Runner } from "@/effect/runner"
 import { makeRuntime } from "@/effect/run-service"
-import { Effect, Layer, Scope, ServiceMap } from "effect"
+import { Deferred, Effect, Fiber, Layer, Scope, ServiceMap } from "effect"
 import { Session } from "."
 import { MessageV2 } from "./message-v2"
 import { SessionID } from "./schema"
@@ -16,6 +16,7 @@ export namespace SessionRunState {
 
   export interface Interface {
     readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void>
+    readonly awaitIdle: (sessionID: SessionID) => Effect.Effect<void>
     readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
     readonly ensureRunning: (
       sessionID: SessionID,
@@ -117,7 +118,19 @@ export namespace SessionRunState {
       })
       // fork: background-detach (#FORK) — end
 
-      return Service.of({ assertNotBusy, cancel, ensureRunning, startShell, peek })
+      const awaitIdle = Effect.fn("SessionRunState.awaitIdle")(function* (sessionID: SessionID) {
+        const data = yield* InstanceState.get(state)
+        const existing = data.runners.get(sessionID)
+        if (!existing) return
+        const st = existing.state
+        if (st._tag === "Running" || st._tag === "ShellThenRun") {
+          yield* Deferred.await(st.run.done).pipe(Effect.exit, Effect.asVoid)
+        } else if (st._tag === "Shell") {
+          yield* Fiber.await(st.shell.fiber).pipe(Effect.asVoid)
+        }
+      })
+
+      return Service.of({ assertNotBusy, awaitIdle, cancel, ensureRunning, startShell, peek })
     }),
   )
 

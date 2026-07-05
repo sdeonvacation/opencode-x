@@ -1171,6 +1171,7 @@ export namespace SessionPrompt {
         function* (input: PromptInput) {
           const session = yield* sessions.get(input.sessionID)
           yield* revert.cleanup(session)
+
           const message = yield* createUserMessage(input)
           yield* sessions.touch(input.sessionID)
 
@@ -1678,12 +1679,29 @@ export namespace SessionPrompt {
                 })
               }
               if (result === "stop") break
+
+              // After compaction, check if a foreign user message arrived during processing.
+              // If so, break the loop so it gets handled in a fresh runLoop with proper context.
+              // Compaction-created messages (autocontinue/replay) are synthetic and OK to process.
+              const postCompactionMsgs = yield* MessageV2.filterCompactedEffect(sessionID)
+              const postLatest = MessageV2.latest(postCompactionMsgs)
+              if (postLatest.user && postLatest.user.id !== lastUser.id) {
+                const latestMsg = postCompactionMsgs.find((m) => m.info.id === postLatest.user!.id)
+                const isSynthetic = latestMsg?.parts.some(
+                  (p) => (p.type === "text" && (p as { synthetic?: boolean }).synthetic) || p.type === "compaction",
+                )
+                if (!isSynthetic) {
+                  log.info("breaking after compaction: foreign user message detected", { sessionID })
+                  break
+                }
+              }
               continue
             }
 
             if (
               lastFinished &&
               lastFinished.summary !== true &&
+              lastFinished.finish !== "tool-calls" &&
               (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
             ) {
               yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
@@ -2131,7 +2149,7 @@ export namespace SessionPrompt {
               }
 
               if (result === "stop") return "break" as const
-              if (result === "compact") {
+              if (result === "compact" && handle.message.finish !== "tool-calls") {
                 yield* compaction.create({
                   sessionID,
                   agent: lastUser.agent,
@@ -2180,7 +2198,20 @@ export namespace SessionPrompt {
       const loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts> = Effect.fn(
         "SessionPrompt.loop",
       )(function* (input: z.infer<typeof LoopInput>) {
-        return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
+        // Retry once if the runLoop broke early (e.g. compaction detected a foreign
+        // user message and broke to avoid processing it with degraded context).
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const result = yield* state.ensureRunning(
+            input.sessionID,
+            lastAssistant(input.sessionID),
+            runLoop(input.sessionID),
+          )
+          const msgs = yield* MessageV2.filterCompactedEffect(input.sessionID)
+          const { user, assistant } = MessageV2.latest(msgs)
+          // If latest user message has a completed response, all queued work is done
+          if (!user || (assistant && assistant.id > user.id && assistant.finish)) return result
+        }
+        return yield* lastAssistant(input.sessionID)
       })
 
       const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.shell")(
