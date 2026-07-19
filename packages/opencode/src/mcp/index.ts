@@ -185,7 +185,12 @@ export namespace MCP {
               .filter((text: string | undefined) => text?.trim())
               .join("\n\n") || "MCP tool returned an error",
           )
-        if (result.structuredContent === undefined || result.structuredContent === null) return result
+        if (
+          (result.content as any[]).length > 0 ||
+          result.structuredContent === undefined ||
+          result.structuredContent === null
+        )
+          return result
         return {
           ...result,
           content: [{ type: "text" as const, text: JSON.stringify(result.structuredContent) }],

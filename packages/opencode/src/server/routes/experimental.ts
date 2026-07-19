@@ -337,7 +337,7 @@ export const ExperimentalRoutes = lazy(() =>
         const limit = query.limit ?? 100
         const sessions: Session.GlobalInfo[] = []
         for await (const session of Session.listGlobal({
-          directory: query.directory,
+          directory: query.directory ? Instance.directory : undefined,
           roots: query.roots,
           start: query.start,
           cursor: query.cursor,

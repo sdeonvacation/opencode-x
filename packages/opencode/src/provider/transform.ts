@@ -989,9 +989,10 @@ export namespace ProviderTransform {
       }
     }
 
-    // Copilot and openai-compatible: store: false (no chaining)
+    // Copilot, xAI, and openai-compatible: store: false (no chaining)
     if (
       input.model.api.npm === "@ai-sdk/github-copilot" ||
+      input.model.api.npm === "@ai-sdk/xai" ||
       (input.model.api.npm === "@ai-sdk/openai" && input.model.providerID !== "openai")
     ) {
       result["store"] = false
@@ -1021,7 +1022,12 @@ export namespace ProviderTransform {
       }
     }
 
-    if (input.model.providerID === "openai" || input.providerOptions?.setCacheKey) {
+    if (
+      input.providerOptions?.setCacheKey !== false &&
+      (input.model.providerID === "openai" ||
+        input.model.api.npm === "@ai-sdk/xai" ||
+        input.providerOptions?.setCacheKey)
+    ) {
       result["promptCacheKey"] = input.sessionID
       const openaiNative =
         input.model.providerID === "openai" && isOpenaiNativeUrl(input.providerOptions?.baseURL || "")
@@ -1123,7 +1129,8 @@ export namespace ProviderTransform {
     if (
       model.providerID === "openai" ||
       model.api.npm === "@ai-sdk/openai" ||
-      model.api.npm === "@ai-sdk/github-copilot"
+      model.api.npm === "@ai-sdk/github-copilot" ||
+      model.api.npm === "@ai-sdk/xai"
     ) {
       if (model.api.id.includes("gpt-5")) {
         if (model.api.id.includes("5.") || model.api.id.includes("5-mini")) {
