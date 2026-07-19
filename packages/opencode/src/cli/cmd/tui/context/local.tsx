@@ -153,6 +153,24 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         })
 
       const args = useArgs()
+      const route = useRoute()
+
+      function warnCacheInvalidation(
+        prev: { providerID: string; modelID: string } | undefined,
+        next: { providerID: string; modelID: string },
+      ) {
+        if (prev?.providerID !== "anthropic") return
+        if (prev.providerID === next.providerID && prev.modelID === next.modelID) return
+        if (route.data.type !== "session") return
+        const messages = sync.data.message[route.data.sessionID]
+        if (!messages?.length) return
+        toast.show({
+          message: "Switching model invalidates prompt cache \u2014 cached tokens will be re-billed",
+          variant: "warning",
+          duration: 5000,
+        })
+      }
+
       const fallbackModel = createMemo(() => {
         if (args.model) {
           const { providerID, modelID } = Provider.parseModel(args.model)
@@ -242,7 +260,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (next >= recent.length) next = 0
           const val = recent[next]
           if (!val) return
+          const prev = currentModel()
+          const snapshot = prev ? { providerID: prev.providerID, modelID: prev.modelID } : undefined
           setModelStore("model", agent.current().name, { ...val })
+          warnCacheInvalidation(snapshot, val)
         },
         cycleFavorite(direction: 1 | -1) {
           const favorites = modelStore.favorite.filter((item) => isModelValid(item))
@@ -268,6 +289,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           }
           const next = favorites[index]
           if (!next) return
+          const prev = currentModel()
+          const snapshot = prev ? { providerID: prev.providerID, modelID: prev.modelID } : undefined
           setModelStore("model", agent.current().name, { ...next })
           const uniq = uniqueBy([next, ...modelStore.recent], (x) => `${x.providerID}/${x.modelID}`)
           if (uniq.length > 10) uniq.pop()
@@ -275,6 +298,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             "recent",
             uniq.map((x) => ({ providerID: x.providerID, modelID: x.modelID })),
           )
+          warnCacheInvalidation(snapshot, next)
           save()
         },
         set(model: { providerID: string; modelID: string }, options?: { recent?: boolean }) {
@@ -287,7 +311,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               })
               return
             }
+            const prev = currentModel()
+            const snapshot = prev ? { providerID: prev.providerID, modelID: prev.modelID } : undefined
             setModelStore("model", agent.current().name, model)
+            if (options?.recent) warnCacheInvalidation(snapshot, model)
             if (options?.recent) {
               const uniq = uniqueBy([model, ...modelStore.recent], (x) => `${x.providerID}/${x.modelID}`)
               if (uniq.length > 10) uniq.pop()

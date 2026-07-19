@@ -31,7 +31,8 @@ import { Glob } from "../util/glob"
 import path from "path"
 import { pathToFileURL } from "url"
 import { Effect, Layer, ServiceMap } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { HttpClient } from "effect/unstable/http"
+import { ssrfSafeLayer } from "./ssrf-http"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { Question } from "../question"
@@ -306,7 +307,7 @@ export namespace ToolRegistry {
       Layer.provide(FileTime.defaultLayer),
       Layer.provide(Instruction.defaultLayer),
       Layer.provide(AppFileSystem.defaultLayer),
-      Layer.provide(FetchHttpClient.layer),
+      Layer.provide(ssrfSafeLayer()),
       Layer.provide(BackgroundJob.defaultLayer),
     ),
   )

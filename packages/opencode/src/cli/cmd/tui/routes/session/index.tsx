@@ -1054,6 +1054,9 @@ export function Session() {
       value: "messages.copy",
       keybind: "messages_copy",
       category: "Session",
+      slash: {
+        name: "copy",
+      },
       onSelect: (dialog) => {
         const revertID = session()?.revert?.messageID
         const lastAssistantMessage = messages().findLast(
@@ -1097,7 +1100,7 @@ export function Session() {
       value: "session.copy",
       category: "Session",
       slash: {
-        name: "copy",
+        name: "transcript",
       },
       onSelect: async (dialog) => {
         try {

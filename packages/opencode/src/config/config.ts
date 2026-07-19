@@ -1805,6 +1805,10 @@ export namespace Config {
             .describe(
               "Strip inline <thinking>...</thinking> segments from text parts before sending to LLM. Saves input tokens at the cost of CoT continuity. Default false.",
             ),
+          allow_private_fetch: z
+            .boolean()
+            .optional()
+            .describe("Allow webfetch to access private/internal network addresses (disables SSRF protection)"),
         })
         .optional(),
     })
