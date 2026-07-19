@@ -790,7 +790,12 @@ export namespace ProviderTransform {
         // https://v5.ai-sdk.dev/providers/ai-sdk-providers/google-vertex#anthropic-provider
 
         if (values) {
-          return Object.fromEntries(values.map((v) => [v, { thinking: { type: "adaptive" }, effort: v }]))
+          // Actual Claude models → use adaptive thinking with effort
+          if (model.api.id.includes("claude") || model.api.id.includes("anthropic")) {
+            return Object.fromEntries(values.map((v) => [v, { thinking: { type: "adaptive" }, effort: v }]))
+          }
+          // Non-Claude models using Anthropic SDK (e.g. Kimi K3) → generic effort
+          return Object.fromEntries(values.map((v) => [v, { effort: v }]))
         }
 
         if (isAnthropicAdaptive) {

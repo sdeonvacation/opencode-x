@@ -272,7 +272,7 @@ export namespace Provider {
           },
         })
       },
-      "azure-cognitive-services": () => {
+      "azure-cognitive-services": (provider) => {
         const resourceName = Env.get("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME")
         return Effect.succeed({
           autoload: false,
@@ -285,7 +285,9 @@ export namespace Provider {
             }
           },
           options: {
-            baseURL: resourceName ? `https://${resourceName}.cognitiveservices.azure.com/openai` : undefined,
+            baseURL: resourceName
+              ? `https://${resourceName}.cognitiveservices.azure.com/openai${provider.options?.useDeploymentBasedUrls ? "" : "/v1"}`
+              : undefined,
           },
         })
       },
