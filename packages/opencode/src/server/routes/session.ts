@@ -29,6 +29,7 @@ import { Loop } from "../../loop/loop"
 import { LoopID } from "../../loop/schema"
 import { LoopScheduler } from "../../loop/scheduler"
 import { Usage } from "../../session/usage"
+import { ContextUsage } from "../../session/context-usage"
 import { WorkflowRuntime } from "@/workflow/runtime"
 import { WorkflowRuntimeRef } from "@/workflow/runtime-ref"
 import { spawnSubagent } from "@/orchestration/task-spawn"
@@ -1251,6 +1252,36 @@ export const SessionRoutes = lazy(() =>
         const id = c.req.valid("param").sessionID
         const usage = await Usage.forSession(id)
         return c.json(usage)
+      },
+    )
+    .get(
+      "/:sessionID/context",
+      describeRoute({
+        summary: "Get context usage",
+        description: "Get estimated context window usage breakdown for a session.",
+        operationId: "session.context",
+        responses: {
+          200: {
+            description: "Context usage breakdown",
+            content: {
+              "application/json": {
+                schema: resolver(ContextUsage.Info),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      async (c) => {
+        const id = c.req.valid("param").sessionID
+        const info = await ContextUsage.forSession(id)
+        return c.json(info)
       },
     )
     .post(
