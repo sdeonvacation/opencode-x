@@ -21,7 +21,9 @@ export function useEvent() {
         return
       }
 
-      if (event.directory === project.instance.directory()) {
+      const dir = project.instance.directory()
+      const wt = project.instance.path().worktree
+      if (event.directory === dir || (wt && event.directory === wt)) {
         handler(event.payload)
       }
     })
