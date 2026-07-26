@@ -103,6 +103,7 @@ Disable external skills only: `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`
 | `/clear-compact` | Clear messages and summarize history                 |
 | `/goal`          | Set autonomous goal (agent works without input)      |
 | `/insights`      | Generate session analytics report (opens in browser) |
+| `/context`       | Context window usage breakdown by category           |
 | `/dream`         | Trigger knowledge consolidation                      |
 | `/distill`       | Trigger workflow extraction into skills              |
 | `/memory_add`    | Add session memory entry                             |

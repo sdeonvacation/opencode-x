@@ -314,6 +314,7 @@ Safe concurrent execution of read-only tools within a single LLM round-trip. Per
 | `/swarm`         | Swarm concurrent agents to solve a task quickly.         |
 | `/config`        | Show all merged config in toast                          |
 | `/usage`         | Per-model cost/tokens/duration + subagent costs          |
+| `/context`       | Context window usage breakdown by category               |
 | `/status`        | Session info with copyable ID, model, cost, tokens       |
 | `/memory_add`    | Add session memory entry                                 |
 | `/memory_edit`   | Edit existing memory entry                               |
@@ -375,10 +376,10 @@ Key experimental features:
 
 Active development pushing further ahead:
 
-| Feature               | What it does                                                          |
-| --------------------- | --------------------------------------------------------------------- |
-| **/loop**             | Orchestrate loops, similar to claude code                             |
-| **/insights**         | Detailed session insights in HTML rendererable in a browser           |
+| Feature       | What it does                                                |
+| ------------- | ----------------------------------------------------------- |
+| **/loop**     | Orchestrate loops, similar to claude code                   |
+| **/insights** | Detailed session insights in HTML rendererable in a browser |
 
 ---
 
