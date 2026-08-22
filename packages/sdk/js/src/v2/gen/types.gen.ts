@@ -722,6 +722,79 @@ export type EventWorkspaceStatus = {
   }
 }
 
+export type EventLoopCreated = {
+  type: "loop.created"
+  properties: {
+    sessionID: string
+    loopID: string
+    prompt: string
+    intervalMs: number
+  }
+}
+
+export type EventLoopIterationStarted = {
+  type: "loop.iteration.started"
+  properties: {
+    sessionID: string
+    loopID: string
+    iterationCount: number
+    subagentSessionID: string
+  }
+}
+
+export type EventLoopIterationComplete = {
+  type: "loop.iteration.complete"
+  properties: {
+    sessionID: string
+    loopID: string
+    iterationCount: number
+    tokensUsed: number
+  }
+}
+
+export type EventLoopPaused = {
+  type: "loop.paused"
+  properties: {
+    sessionID: string
+    loopID: string
+  }
+}
+
+export type EventLoopResumed = {
+  type: "loop.resumed"
+  properties: {
+    sessionID: string
+    loopID: string
+    nextRunAt: number
+  }
+}
+
+export type EventLoopCancelled = {
+  type: "loop.cancelled"
+  properties: {
+    sessionID: string
+    loopID: string
+  }
+}
+
+export type EventLoopExpired = {
+  type: "loop.expired"
+  properties: {
+    sessionID: string
+    loopID: string
+  }
+}
+
+export type EventLoopBudgetExhausted = {
+  type: "loop.budget_exhausted"
+  properties: {
+    sessionID: string
+    loopID: string
+    tokensUsed: number
+    tokenBudget: number
+  }
+}
+
 export type Pty = {
   id: string
   title: string
@@ -1290,6 +1363,14 @@ export type Event =
   | EventWorkspaceReady
   | EventWorkspaceFailed
   | EventWorkspaceStatus
+  | EventLoopCreated
+  | EventLoopIterationStarted
+  | EventLoopIterationComplete
+  | EventLoopPaused
+  | EventLoopResumed
+  | EventLoopCancelled
+  | EventLoopExpired
+  | EventLoopBudgetExhausted
   | EventPtyCreated
   | EventPtyUpdated
   | EventPtyExited
@@ -1625,8 +1706,9 @@ export type ProviderConfig = {
       tool_call?: boolean
       interleaved?:
         | true
+        | string
         | {
-            field: "reasoning_content" | "reasoning_details"
+            field: "reasoning" | "reasoning_content" | "reasoning_details" | "reasoning_text"
           }
       cost?: {
         input: number
@@ -2125,6 +2207,28 @@ export type Config = {
      */
     max_messages?: number
   }
+  loop?: {
+    /**
+     * Maximum concurrent loops per session
+     */
+    max_concurrent?: number
+    /**
+     * Days until loop auto-expires
+     */
+    max_expiry_days?: number
+    /**
+     * Minimum interval between iterations in ms
+     */
+    min_interval_ms?: number
+    /**
+     * Default model for loop iterations, falls back to small_model
+     */
+    model?: string
+    /**
+     * Default token budget per loop, unlimited if unset
+     */
+    token_budget?: number
+  }
   hooks?: {
     PreToolUse?: Array<{
       matcher?: string
@@ -2395,6 +2499,14 @@ export type Config = {
      */
     goal_system?: boolean
     /**
+     * Nudge the model once when it ends a mid-task turn without tool calls
+     */
+    turn_end_nudge?: boolean
+    /**
+     * Enable /loop recurring prompt scheduler
+     */
+    loop?: boolean
+    /**
      * Enable worktree isolation for subagent tasks
      */
     worktree_isolation?: boolean
@@ -2422,6 +2534,27 @@ export type Config = {
      * Default per-swarm parallelism cap (default: 5)
      */
     swarm_concurrency?: number
+    /**
+     * Configuration for /insights session analytics
+     */
+    insights?: {
+      /**
+       * Model for insights analysis (format: provider/model). Falls back to small_model
+       */
+      model?: string
+      /**
+       * Days of history to analyze
+       */
+      days?: number
+      /**
+       * Max parallel LLM calls during extraction
+       */
+      concurrency?: number
+      /**
+       * Max sessions to extract per run
+       */
+      max_sessions?: number
+    }
     /**
      * Enable QuickJS sandboxed workflow engine
      */
@@ -2458,6 +2591,10 @@ export type Config = {
      * Strip inline <thinking>...</thinking> segments from text parts before sending to LLM. Saves input tokens at the cost of CoT continuity. Default false.
      */
     strip_thinking_text?: boolean
+    /**
+     * Allow webfetch to access private/internal network addresses (disables SSRF protection)
+     */
+    allow_private_fetch?: boolean
   }
 }
 
@@ -2532,8 +2669,9 @@ export type Model = {
     }
     interleaved:
       | boolean
+      | string
       | {
-          field: "reasoning_content" | "reasoning_details"
+          field: string
         }
     reasoning_options?: Array<
       | {
@@ -5236,6 +5374,58 @@ export type SessionUsageResponses = {
 
 export type SessionUsageResponse = SessionUsageResponses[keyof SessionUsageResponses]
 
+export type SessionContextData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/context"
+}
+
+export type SessionContextErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionContextError = SessionContextErrors[keyof SessionContextErrors]
+
+export type SessionContextResponses = {
+  /**
+   * Context usage breakdown
+   */
+  200: {
+    model: {
+      providerID: string
+      modelID: string
+      name: string
+      contextLimit: number
+    }
+    total: number
+    free: number
+    categories: Array<{
+      name: string
+      tokens: number
+      items?: Array<{
+        name: string
+        tokens: number
+        source?: string
+      }>
+    }>
+  }
+}
+
+export type SessionContextResponse = SessionContextResponses[keyof SessionContextResponses]
+
 export type PostSessionSessionIdWorkflowStartData = {
   body?: {
     name: string
@@ -5305,6 +5495,226 @@ export type PostSessionSessionIdWorkflowRunIdCancelData = {
 }
 
 export type PostSessionSessionIdWorkflowRunIdCancelResponses = {
+  200: unknown
+}
+
+export type SessionLoopCreateData = {
+  body?: {
+    prompt: string
+    interval_ms: number
+    model?: string
+    token_budget?: number
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/loop"
+}
+
+export type SessionLoopCreateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SessionLoopCreateError = SessionLoopCreateErrors[keyof SessionLoopCreateErrors]
+
+export type SessionLoopCreateResponses = {
+  /**
+   * Loop created
+   */
+  200: {
+    id: string
+    session_id: string
+    prompt: string
+    interval_ms: number
+    status: string
+    model: string | null
+    token_budget: number | null
+    tokens_used: number
+    iteration_count: number
+    next_run_at: number
+    last_run_at: number | null
+    last_subagent_session_id: string | null
+    expires_at: number
+    created_at: number
+  }
+}
+
+export type SessionLoopCreateResponse = SessionLoopCreateResponses[keyof SessionLoopCreateResponses]
+
+export type SessionLoopListData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/loops"
+}
+
+export type SessionLoopListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SessionLoopListError = SessionLoopListErrors[keyof SessionLoopListErrors]
+
+export type SessionLoopListResponses = {
+  /**
+   * List of loops
+   */
+  200: Array<{
+    id: string
+    session_id: string
+    prompt: string
+    interval_ms: number
+    status: string
+    model: string | null
+    token_budget: number | null
+    tokens_used: number
+    iteration_count: number
+    next_run_at: number
+    last_run_at: number | null
+    last_subagent_session_id: string | null
+    expires_at: number
+    created_at: number
+  }>
+}
+
+export type SessionLoopListResponse = SessionLoopListResponses[keyof SessionLoopListResponses]
+
+export type SessionLoopCancelData = {
+  body?: never
+  path: {
+    sessionID: string
+    loopID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/loop/{loopID}"
+}
+
+export type SessionLoopCancelErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionLoopCancelError = SessionLoopCancelErrors[keyof SessionLoopCancelErrors]
+
+export type SessionLoopCancelResponses = {
+  /**
+   * Loop cancelled
+   */
+  200: {
+    id: string
+    session_id: string
+    prompt: string
+    interval_ms: number
+    status: string
+    model: string | null
+    token_budget: number | null
+    tokens_used: number
+    iteration_count: number
+    next_run_at: number
+    last_run_at: number | null
+    last_subagent_session_id: string | null
+    expires_at: number
+    created_at: number
+  }
+}
+
+export type SessionLoopCancelResponse = SessionLoopCancelResponses[keyof SessionLoopCancelResponses]
+
+export type SessionLoopIterationsData = {
+  body?: never
+  path: {
+    sessionID: string
+    loopID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/loop/{loopID}/iterations"
+}
+
+export type SessionLoopIterationsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionLoopIterationsError = SessionLoopIterationsErrors[keyof SessionLoopIterationsErrors]
+
+export type SessionLoopIterationsResponses = {
+  /**
+   * Loop iteration info
+   */
+  200: {
+    id: string
+    iteration_count: number
+    last_subagent_session_id: string | null
+    status: string
+    tokens_used: number
+  }
+}
+
+export type SessionLoopIterationsResponse = SessionLoopIterationsResponses[keyof SessionLoopIterationsResponses]
+
+export type PostSessionSessionIdLoopLoopIdPauseData = {
+  body?: never
+  path: {
+    sessionID: string
+    loopID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/loop/{loopID}/pause"
+}
+
+export type PostSessionSessionIdLoopLoopIdPauseResponses = {
+  200: unknown
+}
+
+export type PostSessionSessionIdLoopLoopIdResumeData = {
+  body?: never
+  path: {
+    sessionID: string
+    loopID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/loop/{loopID}/resume"
+}
+
+export type PostSessionSessionIdLoopLoopIdResumeResponses = {
   200: unknown
 }
 

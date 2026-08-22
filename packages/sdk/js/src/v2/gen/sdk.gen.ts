@@ -87,6 +87,8 @@ import type {
   PermissionRespondErrors,
   PermissionRespondResponses,
   PermissionRuleset,
+  PostSessionSessionIdLoopLoopIdPauseResponses,
+  PostSessionSessionIdLoopLoopIdResumeResponses,
   PostSessionSessionIdWorkflowRunIdCancelResponses,
   PostSessionSessionIdWorkflowStartResponses,
   PostWorkflowCreateResponses,
@@ -130,6 +132,8 @@ import type {
   SessionCommandResponses,
   SessionCompleteErrors,
   SessionCompleteResponses,
+  SessionContextErrors,
+  SessionContextResponses,
   SessionCreateErrors,
   SessionCreateResponses,
   SessionDeleteErrors,
@@ -145,6 +149,14 @@ import type {
   SessionInitErrors,
   SessionInitResponses,
   SessionListResponses,
+  SessionLoopCancelErrors,
+  SessionLoopCancelResponses,
+  SessionLoopCreateErrors,
+  SessionLoopCreateResponses,
+  SessionLoopIterationsErrors,
+  SessionLoopIterationsResponses,
+  SessionLoopListErrors,
+  SessionLoopListResponses,
   SessionMemoryCreateErrors,
   SessionMemoryCreateResponses,
   SessionMemoryDeleteErrors,
@@ -1593,6 +1605,157 @@ export class Worktree extends HeyApiClient {
   }
 }
 
+export class Loop extends HeyApiClient {
+  /**
+   * Create loop
+   *
+   * Create a recurring loop that spawns subagent iterations on a schedule.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      prompt?: string
+      interval_ms?: number
+      model?: string
+      token_budget?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "prompt" },
+            { in: "body", key: "interval_ms" },
+            { in: "body", key: "model" },
+            { in: "body", key: "token_budget" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionLoopCreateResponses, SessionLoopCreateErrors, ThrowOnError>({
+      url: "/session/{sessionID}/loop",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List loops
+   *
+   * List all loops for a session.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionLoopListResponses, SessionLoopListErrors, ThrowOnError>({
+      url: "/session/{sessionID}/loops",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Cancel loop
+   *
+   * Cancel an active loop by ID.
+   */
+  public cancel<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      loopID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "loopID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<SessionLoopCancelResponses, SessionLoopCancelErrors, ThrowOnError>({
+      url: "/session/{sessionID}/loop/{loopID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get loop iterations
+   *
+   * Get iteration info for a loop, including last subagent session.
+   */
+  public iterations<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      loopID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "loopID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      SessionLoopIterationsResponses,
+      SessionLoopIterationsErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/loop/{loopID}/iterations",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Memory extends HeyApiClient {
   /**
    * List memory entries
@@ -2873,6 +3036,43 @@ export class Session2 extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  /**
+   * Get context usage
+   *
+   * Get estimated context window usage breakdown for a session.
+   */
+  public context<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionContextResponses, SessionContextErrors, ThrowOnError>({
+      url: "/session/{sessionID}/context",
+      ...options,
+      ...params,
+    })
+  }
+
+  private _loop?: Loop
+  get loop(): Loop {
+    return (this._loop ??= new Loop({ client: this.client }))
   }
 
   private _memory?: Memory
@@ -4653,6 +4853,64 @@ export class OpencodeClient extends HeyApiClient {
       ThrowOnError
     >({
       url: "/session/{sessionID}/workflow/{runID}/cancel",
+      ...options,
+      ...params,
+    })
+  }
+
+  public postSessionSessionIdLoopLoopIdPause<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      loopID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "loopID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<PostSessionSessionIdLoopLoopIdPauseResponses, unknown, ThrowOnError>({
+      url: "/session/{sessionID}/loop/{loopID}/pause",
+      ...options,
+      ...params,
+    })
+  }
+
+  public postSessionSessionIdLoopLoopIdResume<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      loopID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "loopID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<PostSessionSessionIdLoopLoopIdResumeResponses, unknown, ThrowOnError>({
+      url: "/session/{sessionID}/loop/{loopID}/resume",
       ...options,
       ...params,
     })
