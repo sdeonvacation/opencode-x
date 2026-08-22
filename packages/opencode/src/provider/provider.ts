@@ -875,8 +875,9 @@ export namespace Provider {
         }),
         interleaved: z.union([
           z.boolean(),
+          z.string(),
           z.object({
-            field: z.enum(["reasoning_content", "reasoning_details"]),
+            field: z.string(),
           }),
         ]),
         reasoning_options: z
@@ -1056,7 +1057,8 @@ export namespace Provider {
           video: model.modalities?.output?.includes("video") ?? false,
           pdf: model.modalities?.output?.includes("pdf") ?? false,
         },
-        interleaved: model.interleaved ?? false,
+        interleaved:
+          typeof model.interleaved === "string" ? { field: model.interleaved } : (model.interleaved ?? false),
         reasoning_options: model.reasoning_options,
         schema_compat: deriveSchemaCompat(provider.id),
       },

@@ -76,9 +76,10 @@ export namespace ModelsDev {
     interleaved: z
       .union([
         z.literal(true),
+        z.string(),
         z
           .object({
-            field: z.enum(["reasoning_content", "reasoning_details"]),
+            field: z.enum(["reasoning", "reasoning_content", "reasoning_details", "reasoning_text"]),
           })
           .strict(),
       ])

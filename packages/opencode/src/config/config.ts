@@ -882,9 +882,10 @@ export namespace Config {
       interleaved: z
         .union([
           z.literal(true),
+          z.string(),
           z
             .object({
-              field: z.enum(["reasoning_content", "reasoning_details"]),
+              field: z.enum(["reasoning", "reasoning_content", "reasoning_details", "reasoning_text"]),
             })
             .strict(),
         ])
@@ -1723,6 +1724,10 @@ export namespace Config {
             .optional()
             .describe("Override deep research tunables"),
           goal_system: z.boolean().optional().describe("Enable autonomous goal system with /goal command"),
+          turn_end_nudge: z
+            .boolean()
+            .optional()
+            .describe("Nudge the model once when it ends a mid-task turn without tool calls"),
           loop: z.boolean().optional().describe("Enable /loop recurring prompt scheduler"),
           worktree_isolation: z.boolean().optional().describe("Enable worktree isolation for subagent tasks"),
           hooks: z.boolean().optional().describe("Enable plugin hooks system (Claude Code compatible)"),
