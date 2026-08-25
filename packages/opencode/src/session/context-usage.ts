@@ -12,6 +12,7 @@ import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
 import { ToolRegistry } from "../tool/registry"
 import { CacheDebugLog } from "./cache-debug-log"
+import { Instance } from "@/project/instance"
 import { makeRuntime } from "@/effect/run-service"
 import type { SessionID } from "./schema"
 
@@ -66,6 +67,9 @@ export namespace ContextUsage {
   }
 
   export async function forSession(sessionID: SessionID): Promise<Info> {
+    // Mirror prompt injection scoping so estimates match what injection emits
+    const worktree = Instance.project.worktree
+    const project = worktree === "/" ? undefined : worktree
     const ref = await resolveModel(sessionID)
     const model = await Provider.getModel(ref.providerID, ref.modelID)
     const agent = await Agent.get("build")
@@ -78,7 +82,7 @@ export namespace ContextUsage {
       Agent.list(),
       SystemPrompt.skills(agent),
       Promise.resolve(MessageV2.filterCompacted(MessageV2.stream(sessionID))),
-      Promise.resolve(PersistentMemory.inject()),
+      Promise.resolve(PersistentMemory.inject({ project })),
       Promise.resolve(Goal.get(sessionID)),
     ])
 

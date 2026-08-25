@@ -1988,7 +1988,9 @@ export namespace SessionPrompt {
 
               // Persistent memory (Phase 6)
               if (cfg.experimental?.persistent_memory !== false) {
-                const mem = PersistentMemory.inject()
+                // Non-git projects report worktree "/" - treat as unscoped so every memory injects
+                const worktree = Instance.project.worktree
+                const mem = PersistentMemory.inject({ project: worktree === "/" ? undefined : worktree })
                 if (mem) system.push(mem)
               }
 

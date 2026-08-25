@@ -24,8 +24,8 @@ export namespace PersistentMemory {
     return path.join(Global.Path.data, "memory")
   }
 
-  export function list(opts?: { type?: MemoryType; limit?: number }): Entry[] {
-    const root = dir()
+  export function list(opts?: { type?: MemoryType; limit?: number; root?: string }): Entry[] {
+    const root = opts?.root ?? dir()
     if (!fs.existsSync(root)) return []
 
     const files = fs
@@ -75,8 +75,14 @@ export namespace PersistentMemory {
     return match?.[1]?.trim()
   }
 
-  export function write(input: { name: string; type: MemoryType; content: string; project?: string }): void {
-    const root = dir()
+  export function write(input: {
+    name: string
+    type: MemoryType
+    content: string
+    project?: string
+    root?: string
+  }): void {
+    const root = input.root ?? dir()
     fs.mkdirSync(root, { recursive: true })
 
     const slug = input.name.replace(/[^a-z0-9-]/gi, "-").toLowerCase()
@@ -98,8 +104,8 @@ export namespace PersistentMemory {
     log.info("written", { name: input.name, type: input.type, path: filepath })
   }
 
-  export function inject(opts?: { project?: string }): string {
-    const entries = list()
+  export function inject(opts?: { project?: string; root?: string }): string {
+    const entries = list({ root: opts?.root })
     if (entries.length === 0) return ""
 
     const filtered = opts?.project ? entries.filter((e) => !e.project || e.project === opts.project) : entries
