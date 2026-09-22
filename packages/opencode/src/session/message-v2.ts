@@ -30,7 +30,7 @@ export namespace MessageV2 {
     return mime.startsWith("image/") || mime === "application/pdf"
   }
 
-  export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
+  export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({ message: z.string() }))
   export const AbortedError = NamedError.create("MessageAbortedError", z.object({ message: z.string() }))
   export const StructuredOutputError = NamedError.create(
     "StructuredOutputError",

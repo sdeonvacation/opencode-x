@@ -4,7 +4,7 @@ import { ProviderTransform } from "../../src/provider/transform"
 import { LLMRequestPrep } from "../../src/session/llm/request"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 
-const OUTPUT_TOKEN_MAX = 32000
+const OUTPUT_TOKEN_MAX = 64000
 
 describe("ProviderTransform.options - setCacheKey", () => {
   const sessionID = "test-session-123"
@@ -4411,5 +4411,24 @@ describe("ProviderTransform sampling defaults - Gemini", () => {
     expect(ProviderTransform.temperature(supported)).toBe(1)
     expect(ProviderTransform.topP(supported)).toBe(0.95)
     expect(ProviderTransform.topK(supported)).toBe(64)
+  })
+})
+
+describe("ProviderTransform.maxOutputTokens - default cap", () => {
+  const model = (output: number) =>
+    ({
+      id: "opencode-go/deepseek-v4-flash",
+      limit: { context: 1_000_000, output },
+    }) as any
+
+  test("uses the raised 64000 default when the model allows more", () => {
+    expect(OUTPUT_TOKEN_MAX).toBe(64_000)
+    expect(ProviderTransform.OUTPUT_TOKEN_MAX).toBe(OUTPUT_TOKEN_MAX)
+    expect(ProviderTransform.maxOutputTokens(model(384_000))).toBe(64_000)
+  })
+
+  test("preserves the Math.min clamp when the model output limit is lower", () => {
+    expect(ProviderTransform.maxOutputTokens(model(32_000))).toBe(32_000)
+    expect(ProviderTransform.maxOutputTokens(model(8_192))).toBe(8_192)
   })
 })

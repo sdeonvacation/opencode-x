@@ -2140,6 +2140,18 @@ export namespace SessionPrompt {
                   yield* bus.publish(Session.Event.Error, { sessionID, error: handle.message.error })
                   return "break" as const
                 }
+                // Surface an empty response caused by hitting the output-token cap: a
+                // reasoning model can spend its entire output budget thinking and emit
+                // no text, which previously left the session idle with a blank message.
+                if (handle.message.finish === "length" && handle.message.tokens.output === 0) {
+                  handle.message.error = new MessageV2.OutputLengthError({
+                    message:
+                      "Model reached the output token limit before producing a response (the output budget was consumed by reasoning). Increase the output token limit or lower the reasoning effort, then retry.",
+                  }).toObject()
+                  yield* sessions.updateMessage(handle.message)
+                  yield* bus.publish(Session.Event.Error, { sessionID, error: handle.message.error })
+                  return "break" as const
+                }
                 if (format.type === "json_schema") {
                   handle.message.error = new MessageV2.StructuredOutputError({
                     message: "Model did not produce structured output",

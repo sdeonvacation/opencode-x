@@ -19,7 +19,7 @@ function mimeToModality(mime: string): Modality | undefined {
 }
 
 export namespace ProviderTransform {
-  export const OUTPUT_TOKEN_MAX = Flag.OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
+  export const OUTPUT_TOKEN_MAX = Flag.OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 64_000
 
   // Whether the effective URL points to a native Anthropic endpoint (supports scope: "global" beta)
   // When baseURL override is provided (e.g. from provider.options.baseURL), check it instead of model.api.url.
