@@ -38,6 +38,7 @@ import { SlidingWindow } from "./sliding-window"
 import * as HistoryCache from "./history-cache"
 import { NamedError } from "@opencode-ai/util/error"
 import { SessionProcessor } from "./processor"
+import * as DoomLoopDetector from "./doom-loop" // [fork-perf] Phase 1B
 import { Tool } from "@/tool/tool"
 import { Permission } from "@/permission"
 import { Wildcard } from "@/util/wildcard"
@@ -1504,6 +1505,13 @@ export namespace SessionPrompt {
           // incrementally as new messages arrive, invalidated explicitly on compaction.
           const _cfgPerf = yield* config.get()
           const historyCache = _cfgPerf.experimental?.history_cache !== false ? HistoryCache.create() : undefined
+          // [fork-perf] Phase 1B: ring-buffer doom-loop detector scoped to the whole runLoop
+          // (spans all steps). Per-step detectors (created inside processor.create) never see
+          // 3 identical calls when the model repeats one tool call per assistant message.
+          const doomLoop =
+            _cfgPerf.experimental?.doom_loop_ring !== false
+              ? DoomLoopDetector.create({ threshold: SessionProcessor.DOOM_LOOP_THRESHOLD })
+              : undefined
 
           // [cache-debug] open one debug-log handle for this runLoop invocation
           const _cacheDebugLog = CacheDebugLog.open(sessionID, _cfgPerf)
@@ -1745,6 +1753,7 @@ export namespace SessionPrompt {
               assistantMessage: msg,
               sessionID,
               model,
+              doomLoop,
             })
 
             const outcome: "break" | "continue" = yield* Effect.gen(function* () {

@@ -1558,8 +1558,8 @@ export namespace Config {
             .positive()
             .optional()
             .describe("Coalescer flush window in ms (default: 300)"),
-          // [fork-perf] Phase 1: doom-loop ring buffer detector
-          doom_loop_ring: z.boolean().optional().describe("Use ring-buffer doom-loop detector"),
+          // [fork-perf] Phase 1: doom-loop ring buffer detector (default: true)
+          doom_loop_ring: z.boolean().optional().describe("Use ring-buffer doom-loop detector (default: true)"),
           // [fork-perf] Phase 1: tool registry init() result cache
           registry_cache: z.boolean().optional().describe("Cache Tool.init() results across runs"),
           // [fork-perf] Phase 1: server-side SSE event filter (already wired by buddy commit)

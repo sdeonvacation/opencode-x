@@ -36,7 +36,7 @@ import { Global } from "@/global"
 import path from "path"
 
 export namespace SessionProcessor {
-  const DOOM_LOOP_THRESHOLD = 3
+  export const DOOM_LOOP_THRESHOLD = 3
   const DOOM_LOOP_HARD_CAP = 3
   const log = Log.create({ service: "session.processor" })
 
@@ -73,6 +73,10 @@ export namespace SessionProcessor {
     assistantMessage: MessageV2.Assistant
     sessionID: SessionID
     model: Provider.Model
+    // [fork-perf] Phase 1B: caller-provided ring-buffer detector scoped to the whole
+    // runLoop (spans all steps). Without it, each assistant message gets a fresh
+    // detector and loops that repeat one tool call per message are never caught.
+    doomLoop?: DoomLoopDetector.DoomLoopDetector
   }
 
   export interface Interface {
@@ -159,11 +163,14 @@ export namespace SessionProcessor {
           cfg.experimental?.part_coalescer !== false
             ? PartCoalescer.create({ flush: (part) => session.updatePart(part).pipe(Effect.asVoid) })
             : undefined
-        // [fork-perf] Phase 1B: ring-buffer doom-loop detector (alongside existing SELECT-based check)
+        // [fork-perf] Phase 1B: ring-buffer doom-loop detector (alongside existing SELECT-based check).
+        // Default-on (opt-out like part_coalescer); a runLoop-scoped detector passed via
+        // input.doomLoop takes precedence so loops spanning assistant messages are caught.
         const doomLoopDetector: DoomLoopDetector.DoomLoopDetector | undefined =
-          cfg.experimental?.doom_loop_ring === true
+          input.doomLoop ??
+          (cfg.experimental?.doom_loop_ring !== false
             ? DoomLoopDetector.create({ threshold: DOOM_LOOP_THRESHOLD })
-            : undefined
+            : undefined)
         const ctx: ProcessorContext = {
           assistantMessage: input.assistantMessage,
           sessionID: input.sessionID,

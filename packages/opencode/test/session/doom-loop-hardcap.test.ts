@@ -16,6 +16,7 @@ import { Session } from "../../src/session"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionProcessor } from "../../src/session/processor"
+import * as DoomLoopDetector from "../../src/session/doom-loop"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { Snapshot } from "../../src/snapshot"
@@ -297,7 +298,9 @@ describe("doom loop hard cap", () => {
             // Process returns "continue" after final text+stop (caller decides to stop)
             expect(result).toBe("continue")
           }),
-        { git: true, config: (url) => providerCfg(url) },
+        // Legacy SELECT-based path: disable the default-on ring detector so the
+        // permission-ask + hard-cap counting semantics are exercised.
+        { git: true, config: (url) => ({ ...providerCfg(url), experimental: { doom_loop_ring: false } }) },
       ),
     30000,
   )
@@ -367,6 +370,136 @@ describe("doom loop hard cap", () => {
             // No hard-fail — each key only reaches count 2
             expect(doom.length).toBe(0)
             expect(result).toBe("continue")
+          }),
+        // Legacy SELECT-based path: disable the default-on ring detector so the
+        // per-key counting semantics are exercised.
+        { git: true, config: (url) => ({ ...providerCfg(url), experimental: { doom_loop_ring: false } }) },
+      ),
+    30000,
+  )
+
+  it.live(
+    "ring detector fires by default on 3 identical tool calls",
+    () =>
+      provideTmpdirServer(
+        ({ dir, llm }) =>
+          Effect.gen(function* () {
+            const { processors, session, provider } = yield* boot()
+
+            // 3 identical tool calls → default-on ring detector hard-fails on the 3rd
+            for (let i = 0; i < 3; i++) {
+              yield* llm.push(reply().tool("bash", { cmd: "echo ring" }))
+            }
+            yield* llm.push(reply().text("final").stop())
+
+            const chat = yield* session.create({})
+            const parent = yield* user(chat.id, "ring default on")
+            const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+            const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+            const handle = yield* processors.create({
+              assistantMessage: msg,
+              sessionID: chat.id,
+              model: mdl,
+            })
+
+            const input = {
+              user: {
+                id: parent.id,
+                sessionID: chat.id,
+                role: "user",
+                time: parent.time,
+                agent: parent.agent,
+                model: { providerID: ref.providerID, modelID: ref.modelID },
+              } satisfies MessageV2.User,
+              sessionID: chat.id,
+              model: mdl,
+              agent: agent(),
+              system: [],
+              messages: [{ role: "user" as const, content: "ring default on" }],
+              tools: { bash: loopTool },
+            }
+
+            let result: SessionProcessor.Result = "continue"
+            for (let i = 0; i < 4 && result === "continue"; i++) {
+              result = yield* handle.process(input)
+            }
+
+            const parts = MessageV2.parts(msg.id)
+            const tools = parts.filter((p): p is MessageV2.ToolPart => p.type === "tool")
+            const ring = tools.filter(
+              (t) => t.state.status === "error" && t.state.error.includes("Doom loop detected (ring)"),
+            )
+
+            // Ring detector fired on the 3rd identical call, no permission ask needed
+            expect(ring.length).toBe(1)
+            expect(result).toBe("stop")
+          }),
+        { git: true, config: (url) => providerCfg(url) },
+      ),
+    30000,
+  )
+
+  it.live(
+    "shared runLoop-scoped detector catches loops spanning assistant messages",
+    () =>
+      provideTmpdirServer(
+        ({ dir, llm }) =>
+          Effect.gen(function* () {
+            const { processors, session, provider } = yield* boot()
+
+            // One identical tool call per assistant message — the exact pattern that
+            // evaded detection in production (60 calls across 60 messages).
+            for (let i = 0; i < 3; i++) {
+              yield* llm.push(reply().tool("bash", { cmd: "echo cross" }))
+            }
+            yield* llm.push(reply().text("final").stop())
+
+            const chat = yield* session.create({})
+            const parent = yield* user(chat.id, "cross message loop")
+            const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+
+            // One detector shared across all steps, like prompt.ts runLoop does
+            const doomLoop = DoomLoopDetector.create({ threshold: SessionProcessor.DOOM_LOOP_THRESHOLD })
+
+            let result: SessionProcessor.Result = "continue"
+            let lastMsg: MessageV2.Assistant | undefined
+            for (let i = 0; i < 3 && result === "continue"; i++) {
+              const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+              lastMsg = msg
+              const handle = yield* processors.create({
+                assistantMessage: msg,
+                sessionID: chat.id,
+                model: mdl,
+                doomLoop,
+              })
+              const input = {
+                user: {
+                  id: parent.id,
+                  sessionID: chat.id,
+                  role: "user",
+                  time: parent.time,
+                  agent: parent.agent,
+                  model: { providerID: ref.providerID, modelID: ref.modelID },
+                } satisfies MessageV2.User,
+                sessionID: chat.id,
+                model: mdl,
+                agent: agent(),
+                system: [],
+                messages: [{ role: "user" as const, content: "cross message loop" }],
+                tools: { bash: loopTool },
+              }
+              result = yield* handle.process(input)
+            }
+
+            const parts = MessageV2.parts(lastMsg!.id)
+            const tools = parts.filter((p): p is MessageV2.ToolPart => p.type === "tool")
+            const ring = tools.filter(
+              (t) => t.state.status === "error" && t.state.error.includes("Doom loop detected (ring)"),
+            )
+
+            // 3rd message's tool call hard-failed via the shared detector
+            expect(ring.length).toBe(1)
+            expect(result).toBe("stop")
           }),
         { git: true, config: (url) => providerCfg(url) },
       ),
