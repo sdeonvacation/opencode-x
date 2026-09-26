@@ -79,6 +79,8 @@ export const SkillTool = Tool.define("skill", async () => {
         metadata: {
           name: skill.name,
           dir,
+          // opt out of generic tool-output truncation (tool.ts) so the full SKILL.md is injected
+          truncated: false,
         },
       }
     },

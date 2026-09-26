@@ -175,4 +175,52 @@ Use this skill.
       process.env.OPENCODE_TEST_HOME = home
     }
   })
+
+  test("execute opts out of tool-output truncation for large skills", async () => {
+    const body = Array.from({ length: 4000 }, (_, i) => `Line ${i} of the skill body.`).join("\n")
+    expect(Buffer.byteLength(body, "utf-8")).toBeGreaterThan(50 * 1024)
+
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        const skillDir = path.join(dir, ".opencode", "skill", "large-skill")
+        await Bun.write(
+          path.join(skillDir, "SKILL.md"),
+          `---
+name: large-skill
+description: A skill larger than the default tool output cap.
+---
+
+# Large Skill
+
+${body}
+`,
+        )
+      },
+    })
+
+    const home = process.env.OPENCODE_TEST_HOME
+    process.env.OPENCODE_TEST_HOME = tmp.path
+
+    try {
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const tool = await SkillTool.init()
+          const ctx: Tool.Context = {
+            ...baseCtx,
+            ask: async () => {},
+          }
+
+          const result = await tool.execute({ name: "large-skill" }, ctx)
+          expect(result.metadata.truncated).toBe(false)
+          expect(result.output).not.toContain("truncated")
+          expect(result.output).toContain("Line 3999 of the skill body.")
+          expect(result.output).toContain("</skill_content>")
+        },
+      })
+    } finally {
+      process.env.OPENCODE_TEST_HOME = home
+    }
+  })
 })
